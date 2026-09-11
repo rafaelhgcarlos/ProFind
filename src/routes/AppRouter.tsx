@@ -5,6 +5,7 @@ import { HomePage } from '../features/home/pages/HomePage'
 import { NotFoundPage } from '../features/not-found/pages/NotFoundPage'
 import { Skeleton } from '../components/ui/skeleton'
 import { RegistrationDraftProvider } from '../features/registration/registration-draft-provider'
+import { ProtectedRoute } from '../features/auth/components/ProtectedRoute'
 
 const DesignSystemPage = lazy(() =>
   import('../features/design-system/pages/DesignSystemPage').then((module) => ({
@@ -33,6 +34,24 @@ const TermsOfUsePage = lazy(() =>
 const PrivacyPolicyPage = lazy(() =>
   import('../features/legal/pages/PrivacyPolicyPage').then((module) => ({
     default: module.PrivacyPolicyPage,
+  })),
+)
+
+const LoginPage = lazy(() =>
+  import('../features/auth/pages/LoginPage').then((module) => ({
+    default: module.LoginPage,
+  })),
+)
+
+const PasswordRecoveryPage = lazy(() =>
+  import('../features/auth/pages/PasswordRecoveryPage').then((module) => ({
+    default: module.PasswordRecoveryPage,
+  })),
+)
+
+const AccountPage = lazy(() =>
+  import('../features/auth/pages/AccountPage').then((module) => ({
+    default: module.AccountPage,
   })),
 )
 
@@ -69,6 +88,32 @@ export function AppRouter() {
   return (
     <RegistrationDraftProvider>
       <Routes>
+      <Route
+        path="/entrar"
+        element={
+          <Suspense fallback={<RouteFallback />}>
+            <LoginPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/recuperar-senha"
+        element={
+          <Suspense fallback={<RouteFallback />}>
+            <PasswordRecoveryPage />
+          </Suspense>
+        }
+      />
+      <Route element={<ProtectedRoute />}>
+        <Route
+          path="/conta"
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <AccountPage />
+            </Suspense>
+          }
+        />
+      </Route>
       <Route path="/" element={<HomePage />} />
       <Route
         path="/cadastro"

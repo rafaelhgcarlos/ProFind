@@ -41,6 +41,9 @@ export function HomePage() {
                 <ArrowRight aria-hidden="true" />
               </Link>
             </Button>
+            <Button size="lg" variant="outline" className="w-full sm:w-auto" asChild>
+              <Link to="/entrar">Entrar</Link>
+            </Button>
             <Button variant="link" asChild>
               <a href="#como-funciona">Entender como funciona</a>
             </Button>

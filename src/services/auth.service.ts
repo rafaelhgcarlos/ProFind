@@ -2,6 +2,8 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   onAuthStateChanged,
+  reload,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   type NextOrObserver,
@@ -31,11 +33,26 @@ export const authService = {
     return signOut(getFirebaseAuth())
   },
 
+  sendPasswordReset(email: string) {
+    return sendPasswordResetEmail(getFirebaseAuth(), email.trim())
+  },
+
+  reloadUser(user: User) {
+    return reload(user)
+  },
+
+  getCurrentUser() {
+    return getFirebaseAuth().currentUser
+  },
+
   deleteAccount(user: User) {
     return deleteUser(user)
   },
 
-  observeSession(observer: NextOrObserver<User>) {
-    return onAuthStateChanged(getFirebaseAuth(), observer)
+  observeSession(
+    observer: NextOrObserver<User>,
+    onError?: (error: Error) => void,
+  ) {
+    return onAuthStateChanged(getFirebaseAuth(), observer, onError)
   },
 }

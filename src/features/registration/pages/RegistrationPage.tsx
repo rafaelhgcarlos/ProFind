@@ -120,7 +120,7 @@ export function RegistrationPage() {
             </Alert>
             <div className="mt-8">
               <Button size="lg" asChild>
-                <Link to="/">Voltar para a página inicial</Link>
+                <Link to="/conta">Acessar minha conta</Link>
               </Button>
             </div>
           </div>
@@ -312,6 +312,15 @@ export function RegistrationPage() {
                 >
                   Criar minha conta
                 </Button>
+                <p className="text-center text-sm text-muted-foreground">
+                  Já tem uma conta?{' '}
+                  <Link
+                    to="/entrar"
+                    className="font-semibold text-primary underline underline-offset-4"
+                  >
+                    Entrar
+                  </Link>
+                </p>
               </form>
             </CardContent>
           </Card>
