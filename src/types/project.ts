@@ -1,5 +1,7 @@
+export type BenefitIcon = 'location' | 'conversation' | 'trust'
+
 export interface Benefit {
-  icon: string
+  icon: BenefitIcon
   title: string
   description: string
 }

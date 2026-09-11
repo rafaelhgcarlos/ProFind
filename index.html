@@ -9,6 +9,31 @@
       content="ProFind conecta pessoas a profissionais de confiança perto delas."
     />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      ;(() => {
+        const storageKey = 'profind-theme'
+        const media = window.matchMedia('(prefers-color-scheme: dark)')
+        let preference = 'system'
+
+        try {
+          const stored = window.localStorage.getItem(storageKey)
+          if (stored === 'light' || stored === 'dark' || stored === 'system') {
+            preference = stored
+          }
+        } catch {
+          // O tema do sistema continua sendo aplicado sem acesso ao storage.
+        }
+
+        const resolved =
+          preference === 'dark' || (preference === 'system' && media.matches)
+            ? 'dark'
+            : 'light'
+
+        document.documentElement.classList.toggle('dark', resolved === 'dark')
+        document.documentElement.dataset.theme = resolved
+        document.documentElement.style.colorScheme = resolved
+      })()
+    </script>
     <title>ProFind</title>
   </head>
   <body>

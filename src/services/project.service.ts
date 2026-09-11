@@ -2,17 +2,17 @@ import type { Benefit } from '../types/project'
 
 const benefits: Benefit[] = [
   {
-    icon: '📍',
+    icon: 'location',
     title: 'Perto de você',
     description: 'Descubra profissionais que atendem na sua região.',
   },
   {
-    icon: '💬',
+    icon: 'conversation',
     title: 'Contato direto',
     description: 'Converse e alinhe os detalhes do serviço com facilidade.',
   },
   {
-    icon: '✓',
+    icon: 'trust',
     title: 'Mais confiança',
     description: 'Tenha informações claras para escolher melhor.',
   },

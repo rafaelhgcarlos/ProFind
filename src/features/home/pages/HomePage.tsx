@@ -1,5 +1,9 @@
+import { ArrowRight, Search, ShieldCheck } from 'lucide-react'
+
 import { AppShell } from '../../../components/layout/AppShell'
 import { FeatureCard } from '../../../components/ui/FeatureCard'
+import { Badge } from '../../../components/ui/badge'
+import { Button } from '../../../components/ui/button'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { projectService } from '../../../services/project.service'
 
@@ -9,51 +13,51 @@ export function HomePage() {
 
   return (
     <AppShell>
-      <section className="mx-auto grid max-w-6xl gap-10 px-5 py-14 sm:px-8 sm:py-20 lg:grid-cols-[1.15fr_0.85fr] lg:items-center lg:py-28">
+      <section className="mx-auto grid max-w-7xl gap-12 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[1.15fr_0.85fr] lg:items-center lg:px-8 lg:py-28">
         <div>
-          <p className="text-sm font-bold uppercase tracking-[0.18em] text-teal-700">
+          <Badge variant="secondary">
+            <ShieldCheck aria-hidden="true" className="size-3.5" />
             Serviços perto de você
-          </p>
-          <h1 className="mt-4 max-w-2xl text-4xl font-black tracking-tight text-balance sm:text-5xl lg:text-6xl">
+          </Badge>
+          <h1 className="mt-6 max-w-2xl text-4xl font-black tracking-[-0.035em] text-balance sm:text-5xl lg:text-6xl">
             Encontre o profissional certo para cada necessidade.
           </h1>
-          <p className="mt-6 max-w-xl text-lg leading-8 text-slate-600">
+          <p className="mt-6 max-w-xl text-lg leading-8 text-muted-foreground">
             Compare opções, converse com profissionais e contrate com mais
             confiança — tudo em um só lugar.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <a
-              className="rounded-xl bg-teal-700 px-5 py-3 text-center font-bold text-white shadow-sm transition hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
-              href="#beneficios"
-            >
-              Conhecer o ProFind
-            </a>
-            <span className="self-center text-sm text-slate-500">
+            <Button size="lg" asChild>
+              <a href="#beneficios">
+                Conhecer o ProFind
+                <ArrowRight aria-hidden="true" />
+              </a>
+            </Button>
+            <span className="self-center text-sm text-muted-foreground">
               Experiência otimizada para celular
             </span>
           </div>
         </div>
 
-        <div
-          className="rounded-3xl bg-gradient-to-br from-teal-700 to-cyan-700 p-7 text-white shadow-xl shadow-teal-900/10 sm:p-9"
-          aria-label="Exemplo de busca"
-        >
-          <p className="text-sm font-semibold text-teal-100">O que você precisa?</p>
-          <div className="mt-3 rounded-xl bg-white px-4 py-3 font-medium text-slate-500 shadow-inner">
-            Eletricista, diarista, encanador…
+        <div className="relative rounded-xl border bg-card p-6 shadow-soft sm:p-8" aria-label="Exemplo de busca">
+          <p className="text-sm font-semibold text-muted-foreground">O que você precisa?</p>
+          <div className="mt-3 flex min-h-12 items-center gap-3 rounded-md border border-input bg-background px-4 text-muted-foreground">
+            <Search className="size-5 shrink-0" aria-hidden="true" />
+            <span>Eletricista, diarista, encanador…</span>
           </div>
-          <p className="mt-6 text-3xl font-black">Simples. Local. Confiável.</p>
-          <p className="mt-2 text-sm leading-6 text-teal-50">
+          <p className="mt-7 text-2xl font-black tracking-tight">Simples. Local. Confiável.</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
             A base está pronta para receber os próximos fluxos do produto.
           </p>
+          <div className="mt-7 h-1.5 w-24 rounded-full bg-primary" aria-hidden="true" />
         </div>
       </section>
 
       <section
         id="beneficios"
-        className="mx-auto max-w-6xl px-5 pb-16 sm:px-8 sm:pb-24"
+        className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 sm:pb-24 lg:px-8"
       >
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-8 sm:grid-cols-3">
           {benefits.map((benefit) => (
             <FeatureCard key={benefit.title} {...benefit} />
           ))}

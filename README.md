@@ -48,3 +48,19 @@ componentes e páginas não devem executar queries complexas diretamente.
 O SDK do Firebase é inicializado em `src/lib/firebase`. Auth e Firestore são
 expostos por módulos próprios, enquanto operações de autenticação por
 e-mail/senha ficam em `src/services/auth.service.ts`.
+
+## Design system
+
+O design system usa Tailwind CSS com tokens semânticos definidos em
+`src/styles/global.css`. Componentes de interação complexa usam primitives do
+Radix UI seguindo a composição do shadcn/ui, e toda a iconografia vem do Lucide.
+
+A preferência de aparência aceita `light`, `dark` e `system`, fica persistida no
+dispositivo e é aplicada antes do carregamento do React para evitar flash do
+tema incorreto. O catálogo interno está disponível em `/design-system`; os
+previews de layout ficam sob `/design-system/layouts/*`.
+
+Os layouts reutilizáveis estão separados em público, Cliente, Profissional e
+Admin. Cliente e Profissional compartilham os mesmos tokens e primitives, mas
+possuem navegação orientada às respectivas tarefas. A estrutura Admin permanece
+separada para não acoplar sua experiência ao marketplace.
