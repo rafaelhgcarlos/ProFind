@@ -1,4 +1,11 @@
-import { ArrowRight, Search, ShieldCheck } from 'lucide-react'
+import {
+  ArrowRight,
+  BadgeCheck,
+  LockKeyhole,
+  MapPin,
+  MessagesSquare,
+  ShieldCheck,
+} from 'lucide-react'
 
 import { AppShell } from '../../../components/layout/AppShell'
 import { FeatureCard } from '../../../components/ui/FeatureCard'
@@ -26,38 +33,85 @@ export function HomePage() {
             Compare opções, converse com profissionais e contrate com mais
             confiança — tudo em um só lugar.
           </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Button size="lg" asChild>
-              <a href="#beneficios">
-                Conhecer o ProFind
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Button size="lg" className="w-full sm:w-auto" asChild>
+              <a href="#como-funciona">
+                Entender como funciona
                 <ArrowRight aria-hidden="true" />
               </a>
             </Button>
-            <span className="self-center text-sm text-muted-foreground">
-              Experiência otimizada para celular
+            <span className="text-center text-sm text-muted-foreground sm:text-left">
+              Informações claras antes de decidir
             </span>
           </div>
         </div>
 
-        <div className="relative rounded-xl border bg-card p-6 shadow-soft sm:p-8" aria-label="Exemplo de busca">
-          <p className="text-sm font-semibold text-muted-foreground">O que você precisa?</p>
-          <div className="mt-3 flex min-h-12 items-center gap-3 rounded-md border border-input bg-background px-4 text-muted-foreground">
-            <Search className="size-5 shrink-0" aria-hidden="true" />
-            <span>Eletricista, diarista, encanador…</span>
+        <aside
+          className="relative overflow-hidden rounded-xl border bg-card p-6 shadow-soft sm:p-8"
+          aria-labelledby="home-trust-title"
+        >
+          <div className="absolute inset-x-0 top-0 h-1 bg-primary" aria-hidden="true" />
+          <p className="text-sm font-semibold text-primary">Uma escolha com mais contexto</p>
+          <h2 id="home-trust-title" className="mt-2 text-2xl font-black tracking-tight">
+            O essencial para contratar com confiança.
+          </h2>
+          <ul className="mt-7 grid gap-5">
+            <li className="grid grid-cols-[auto_1fr] gap-3">
+              <span className="flex size-10 items-center justify-center rounded-md bg-accent text-accent-foreground">
+                <MapPin className="size-5" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="font-semibold">Atendimento na sua região</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Veja primeiro quem atende perto de você.
+                </p>
+              </div>
+            </li>
+            <li className="grid grid-cols-[auto_1fr] gap-3">
+              <span className="flex size-10 items-center justify-center rounded-md bg-accent text-accent-foreground">
+                <BadgeCheck className="size-5" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="font-semibold">Reputação em evidência</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Compare experiência e avaliações antes de escolher.
+                </p>
+              </div>
+            </li>
+            <li className="grid grid-cols-[auto_1fr] gap-3">
+              <span className="flex size-10 items-center justify-center rounded-md bg-accent text-accent-foreground">
+                <MessagesSquare className="size-5" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="font-semibold">Conversa antes da decisão</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Alinhe os detalhes sem perder o contexto do serviço.
+                </p>
+              </div>
+            </li>
+          </ul>
+          <div className="mt-7 flex gap-2 border-t pt-5 text-sm leading-6 text-muted-foreground">
+            <LockKeyhole className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+            <p>Endereço e contato permanecem privados até serem necessários.</p>
           </div>
-          <p className="mt-7 text-2xl font-black tracking-tight">Simples. Local. Confiável.</p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            A base está pronta para receber os próximos fluxos do produto.
-          </p>
-          <div className="mt-7 h-1.5 w-24 rounded-full bg-primary" aria-hidden="true" />
-        </div>
+        </aside>
       </section>
 
       <section
-        id="beneficios"
+        id="como-funciona"
         className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 sm:pb-24 lg:px-8"
       >
-        <div className="grid gap-8 sm:grid-cols-3">
+        <div className="max-w-2xl">
+          <p className="text-sm font-semibold text-primary">Como o ProFind ajuda</p>
+          <h2 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">
+            Menos dúvida entre a necessidade e a escolha.
+          </h2>
+          <p className="mt-3 leading-7 text-muted-foreground">
+            A experiência prioriza proximidade, conversa e informações úteis,
+            sem expor seus dados antes da hora.
+          </p>
+        </div>
+        <div className="mt-8 grid gap-8 sm:grid-cols-3">
           {benefits.map((benefit) => (
             <FeatureCard key={benefit.title} {...benefit} />
           ))}

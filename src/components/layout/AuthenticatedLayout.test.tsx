@@ -50,4 +50,19 @@ describe('layouts autenticados', () => {
     expect(screen.getByRole('navigation', { name: 'Administração' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Oportunidades' })).not.toBeInTheDocument()
   })
+
+  it('mantém a tarefa atual destacada em rotas aninhadas', () => {
+    renderLayout(
+      '/cliente/buscar/filtros',
+      <ClientLayout pageTitle="Buscar">Conteúdo da busca</ClientLayout>,
+    )
+
+    for (const link of screen.getAllByRole('link', { name: 'Buscar' })) {
+      expect(link).toHaveAttribute('aria-current', 'page')
+    }
+
+    for (const link of screen.getAllByRole('link', { name: 'Início' })) {
+      expect(link).not.toHaveAttribute('aria-current')
+    }
+  })
 })

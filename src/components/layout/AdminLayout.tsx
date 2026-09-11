@@ -5,6 +5,7 @@ import { AuthenticatedLayout } from './AuthenticatedLayout'
 interface AdminLayoutProps extends PropsWithChildren {
   pageTitle: string
   userName?: string
+  activeNavigationHref?: string
 }
 
 export function AdminLayout({ children, ...props }: AdminLayoutProps) {

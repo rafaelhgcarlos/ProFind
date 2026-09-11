@@ -29,6 +29,8 @@
   --ring: #096b5a;
   --overlay: rgb(9 22 19 / 58%);
   --shadow-color: rgb(20 53 46 / 10%);
+  --app-header-height: 4rem;
+  --anchor-scroll-offset: calc(var(--app-header-height) + 1rem);
   color-scheme: light;
 }
 
@@ -104,7 +106,12 @@
 
   html {
     scroll-behavior: smooth;
+    scroll-padding-block-start: var(--anchor-scroll-offset);
     background: var(--background);
+  }
+
+  main [id] {
+    scroll-margin-block-start: var(--anchor-scroll-offset);
   }
 
   body {
@@ -143,6 +150,12 @@
   [aria-disabled='true'],
   [data-disabled]:not([data-disabled='false']) {
     cursor: not-allowed;
+  }
+}
+
+@media (min-width: 64rem) {
+  :root {
+    --app-header-height: 4.5rem;
   }
 }
 

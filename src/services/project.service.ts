@@ -3,18 +3,18 @@ import type { Benefit } from '../types/project'
 const benefits: Benefit[] = [
   {
     icon: 'location',
-    title: 'Perto de você',
-    description: 'Descubra profissionais que atendem na sua região.',
+    title: 'Comece pela sua região',
+    description: 'Encontre profissionais pela área aproximada de atendimento.',
   },
   {
     icon: 'conversation',
-    title: 'Contato direto',
-    description: 'Converse e alinhe os detalhes do serviço com facilidade.',
+    title: 'Converse com contexto',
+    description: 'Alinhe necessidades e expectativas antes de tomar uma decisão.',
   },
   {
     icon: 'trust',
-    title: 'Mais confiança',
-    description: 'Tenha informações claras para escolher melhor.',
+    title: 'Compare o que importa',
+    description: 'Use reputação e experiência para fazer uma escolha informada.',
   },
 ]
 

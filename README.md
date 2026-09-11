@@ -64,3 +64,8 @@ Os layouts reutilizáveis estão separados em público, Cliente, Profissional e
 Admin. Cliente e Profissional compartilham os mesmos tokens e primitives, mas
 possuem navegação orientada às respectivas tarefas. A estrutura Admin permanece
 separada para não acoplar sua experiência ao marketplace.
+
+As [diretrizes globais de UX/UI](docs/ux-ui-guidelines.md) são requisito
+transversal para toda nova interface. Elas definem hierarquia, padrões por
+contexto, privacidade visível, estados de feedback e o checklist de entrega de
+frontend estabelecidos pela Issue #41.

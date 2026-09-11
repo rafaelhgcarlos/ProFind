@@ -26,6 +26,13 @@ describe('AppRouter', () => {
         name: /encontre o profissional certo para cada necessidade/i,
       }),
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: /entender como funciona/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/permanecem privados/i)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: /design system/i }),
+    ).not.toBeInTheDocument()
   })
 
   it('renderiza a página de rota inexistente', () => {

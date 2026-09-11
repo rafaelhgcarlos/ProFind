@@ -17,6 +17,7 @@ interface LayoutPreviewPageProps {
 const content = {
   client: {
     title: 'Início',
+    activeNavigationHref: '/cliente',
     userName: 'Cliente ProFind',
     icon: Compass,
     emptyTitle: 'Layout do Cliente',
@@ -24,6 +25,7 @@ const content = {
   },
   professional: {
     title: 'Oportunidades',
+    activeNavigationHref: '/profissional/oportunidades',
     userName: 'Profissional ProFind',
     icon: BriefcaseBusiness,
     emptyTitle: 'Layout do Profissional',
@@ -31,6 +33,7 @@ const content = {
   },
   admin: {
     title: 'Visão geral',
+    activeNavigationHref: '/admin',
     userName: 'Admin ProFind',
     icon: ShieldCheck,
     emptyTitle: 'Estrutura administrativa',
@@ -44,7 +47,7 @@ export function LayoutPreviewPage({ mode }: LayoutPreviewPageProps) {
   useDocumentTitle(`${preview.emptyTitle} — ProFind`)
 
   const body = (
-    <div className="rounded-lg border bg-card">
+    <section className="flex min-h-[calc(100dvh-12rem)] items-center justify-center border-y">
       <EmptyState
         icon={<Icon />}
         title={preview.emptyTitle}
@@ -55,16 +58,40 @@ export function LayoutPreviewPage({ mode }: LayoutPreviewPageProps) {
           </Button>
         }
       />
-    </div>
+    </section>
   )
 
   if (mode === 'client') {
-    return <ClientLayout pageTitle={preview.title} userName={preview.userName}>{body}</ClientLayout>
+    return (
+      <ClientLayout
+        pageTitle={preview.title}
+        userName={preview.userName}
+        activeNavigationHref={preview.activeNavigationHref}
+      >
+        {body}
+      </ClientLayout>
+    )
   }
 
   if (mode === 'professional') {
-    return <ProfessionalLayout pageTitle={preview.title} userName={preview.userName}>{body}</ProfessionalLayout>
+    return (
+      <ProfessionalLayout
+        pageTitle={preview.title}
+        userName={preview.userName}
+        activeNavigationHref={preview.activeNavigationHref}
+      >
+        {body}
+      </ProfessionalLayout>
+    )
   }
 
-  return <AdminLayout pageTitle={preview.title} userName={preview.userName}>{body}</AdminLayout>
+  return (
+    <AdminLayout
+      pageTitle={preview.title}
+      userName={preview.userName}
+      activeNavigationHref={preview.activeNavigationHref}
+    >
+      {body}
+    </AdminLayout>
+  )
 }

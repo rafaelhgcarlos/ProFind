@@ -1,8 +1,10 @@
 import {
   Bell,
+  CalendarClock,
   CircleCheck,
   Inbox,
   Info,
+  MapPin,
   MoreHorizontal,
   PanelRightOpen,
   Settings,
@@ -60,6 +62,7 @@ import { EmptyState } from '../../../components/ui/empty-state'
 import { Input } from '../../../components/ui/input'
 import { Label } from '../../../components/ui/label'
 import { Pagination } from '../../../components/ui/pagination'
+import { PrivacyNotice } from '../../../components/ui/privacy-notice'
 import { RadioGroup, RadioGroupItem } from '../../../components/ui/radio-group'
 import {
   Select,
@@ -236,11 +239,11 @@ export function DesignSystemPage() {
             title="Conteúdo e navegação"
             description="Agrupamentos usados apenas quando ajudam a comparar ou entender uma entidade."
           >
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.7fr)]">
+            <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
                   <div className="flex items-start gap-4">
-                    <Avatar className="size-12">
+                    <Avatar className="size-14">
                       <AvatarFallback>MS</AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
@@ -256,13 +259,56 @@ export function DesignSystemPage() {
                     <strong className="text-foreground">4,9</strong>
                     <span>• 38 avaliações</span>
                   </div>
+                  <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                    <MapPin className="size-4" aria-hidden="true" />
+                    Atende na região central e bairros próximos
+                  </div>
+                  <p className="mt-4 text-sm leading-6 text-muted-foreground">
+                    Oito anos de experiência em reparos, instalações e manutenção
+                    residencial.
+                  </p>
                 </CardContent>
-                <CardFooter>
-                  <Button>Ver perfil</Button>
-                  <Button variant="outline">Salvar</Button>
+                <CardFooter className="flex-wrap">
+                  <Button>Solicitar orçamento</Button>
+                  <Button variant="outline">Ver perfil</Button>
                 </CardFooter>
               </Card>
 
+              <Card>
+                <CardHeader>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <Badge variant="secondary">Elétrica</Badge>
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Publicado hoje
+                    </span>
+                  </div>
+                  <CardTitle className="pt-2">Instalação de luminárias</CardTitle>
+                  <CardDescription>
+                    Serviço residencial com escopo e prazo apresentados antes da
+                    proposta.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="size-4" aria-hidden="true" />
+                    Região central • localização aproximada
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CalendarClock className="size-4" aria-hidden="true" />
+                    Prazo flexível nesta semana
+                  </div>
+                  <p>
+                    <span className="font-semibold text-foreground">Orçamento:</span>{' '}
+                    a combinar
+                  </p>
+                </CardContent>
+                <CardFooter>
+                  <Button>Ver serviço</Button>
+                </CardFooter>
+              </Card>
+            </div>
+
+            <div className="mt-6 border-t pt-6">
               <Tabs defaultValue="recentes">
                 <TabsList aria-label="Filtrar atividades">
                   <TabsTrigger value="recentes">Recentes</TabsTrigger>
@@ -294,6 +340,10 @@ export function DesignSystemPage() {
             title="Feedback"
             description="Mensagens combinam ícone, título e texto para não depender somente de cor."
           >
+            <PrivacyNotice className="mb-5 max-w-2xl">
+              Endereço completo e contato só devem ser compartilhados quando o
+              fluxo realmente precisar desses dados.
+            </PrivacyNotice>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Alert variant="success">
                 <CircleCheck aria-hidden="true" />

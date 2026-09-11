@@ -55,11 +55,16 @@ const modeLabels: Record<AuthenticatedMode, string> = {
   admin: 'Administração',
 }
 
+function isNavigationItemActive(pathname: string, href: string) {
+  return pathname === href || (href.split('/').length > 2 && pathname.startsWith(`${href}/`))
+}
+
 interface AuthenticatedLayoutProps extends PropsWithChildren {
   mode: AuthenticatedMode
   pageTitle: string
   userName?: string
   navigation?: LayoutNavigationItem[]
+  activeNavigationHref?: string
 }
 
 export function AuthenticatedLayout({
@@ -67,9 +72,11 @@ export function AuthenticatedLayout({
   pageTitle,
   userName = 'Usuário ProFind',
   navigation = navigationByMode[mode],
+  activeNavigationHref,
   children,
 }: AuthenticatedLayoutProps) {
   const location = useLocation()
+  const activePathname = activeNavigationHref ?? location.pathname
   const initials = userName
     .split(' ')
     .slice(0, 2)
@@ -78,7 +85,7 @@ export function AuthenticatedLayout({
     .toUpperCase()
 
   return (
-    <div className="min-h-dvh bg-background text-foreground lg:grid lg:grid-cols-[17rem_1fr]">
+    <div className="min-h-dvh bg-background text-foreground lg:grid lg:grid-cols-[16rem_1fr]">
       <a
         href="#conteudo-principal"
         className="sr-only z-[100] rounded-md bg-primary px-4 py-3 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -88,7 +95,7 @@ export function AuthenticatedLayout({
 
       <aside
         className={cn(
-          'hidden border-r bg-card lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col',
+          'hidden border-r bg-background lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col',
           mode === 'admin' && 'bg-muted/45',
         )}
       >
@@ -100,7 +107,7 @@ export function AuthenticatedLayout({
         </div>
         <nav aria-label={modeLabels[mode]} className="grid gap-1 p-3">
           {navigation.map((item) => {
-            const active = location.pathname === item.href
+            const active = isNavigationItemActive(activePathname, item.href)
             const Icon = item.icon
             return (
               <Link
@@ -109,7 +116,7 @@ export function AuthenticatedLayout({
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   'flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
-                  active && 'bg-accent text-accent-foreground',
+                  active && 'bg-accent text-accent-foreground shadow-sm',
                 )}
               >
                 <Icon className="size-5" aria-hidden="true" />
@@ -131,6 +138,10 @@ export function AuthenticatedLayout({
           </div>
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
+            <div className="hidden text-right sm:block">
+              <p className="max-w-48 truncate text-sm font-semibold">{userName}</p>
+              <p className="text-xs text-muted-foreground">Conta ativa</p>
+            </div>
             <Avatar>
               <AvatarFallback aria-label={userName}>{initials}</AvatarFallback>
             </Avatar>
@@ -149,7 +160,7 @@ export function AuthenticatedLayout({
         style={{ gridTemplateColumns: `repeat(${navigation.length}, minmax(0, 1fr))` }}
       >
         {navigation.map((item) => {
-          const active = location.pathname === item.href
+          const active = isNavigationItemActive(activePathname, item.href)
           const Icon = item.icon
           return (
             <Link
@@ -158,7 +169,7 @@ export function AuthenticatedLayout({
               aria-current={active ? 'page' : undefined}
               className={cn(
                 'flex min-h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
-                active && 'text-primary',
+                active && 'bg-accent text-accent-foreground',
               )}
             >
               <Icon className="size-5" aria-hidden="true" />
