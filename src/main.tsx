@@ -10,8 +10,17 @@ if (!rootElement) {
   throw new Error('Elemento raiz da aplicação não encontrado.')
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+const appRoot = rootElement
+
+async function bootstrap() {
+  const { initializeFirebase } = await import('./lib/firebase')
+  initializeFirebase()
+
+  createRoot(appRoot).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+}
+
+void bootstrap()
