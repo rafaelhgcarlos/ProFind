@@ -1,0 +1,47 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isDocumentOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function hasValidLegalAcceptances() {
+      let acceptances = request.resource.data.legalAcceptances;
+
+      return acceptances is map
+        && acceptances.keys().hasOnly(['termsOfUse', 'privacyPolicy'])
+        && acceptances.termsOfUse is map
+        && acceptances.termsOfUse.keys().hasOnly(['version', 'acceptedAt'])
+        && acceptances.termsOfUse.version == '1.0.0'
+        && acceptances.termsOfUse.acceptedAt == request.time
+        && acceptances.privacyPolicy is map
+        && acceptances.privacyPolicy.keys().hasOnly(['version', 'acceptedAt'])
+        && acceptances.privacyPolicy.version == '1.0.0'
+        && acceptances.privacyPolicy.acceptedAt == request.time;
+    }
+
+    match /users/{userId} {
+      allow create: if isDocumentOwner(userId)
+        && request.resource.data.keys().hasOnly([
+          'name',
+          'email',
+          'createdAt',
+          'updatedAt',
+          'legalAcceptances'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.email is string
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.email.size() <= 320
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && hasValidLegalAcceptances();
+
+      allow read: if isDocumentOwner(userId);
+      allow update, delete: if false;
+    }
+  }
+}

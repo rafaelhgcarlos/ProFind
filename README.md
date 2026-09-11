@@ -49,6 +49,28 @@ O SDK do Firebase é inicializado em `src/lib/firebase`. Auth e Firestore são
 expostos por módulos próprios, enquanto operações de autenticação por
 e-mail/senha ficam em `src/services/auth.service.ts`.
 
+O cadastro público está disponível em `/cadastro`. A criação da identidade no
+Firebase Auth é coordenada com o documento base `users/{userId}` pelo serviço de
+registro; se a gravação do perfil falhar, a identidade recém-criada é removida
+como compensação. O documento registra nome, e-mail e timestamps de criação,
+atualização e aceite dos Termos de Uso e da Política de Privacidade, incluindo
+as versões vigentes de ambos os documentos. Os textos do MVP ficam disponíveis
+em `/termos-de-uso` e `/politica-de-privacidade`.
+
+As regras mínimas para criação e leitura do próprio documento de usuário estão
+versionadas em `firestore.rules`. Depois de criar o banco Cloud Firestore,
+publique-as no mesmo projeto configurado no `.env`:
+
+```bash
+npx firebase-tools deploy --only firestore:rules --project SEU_PROJECT_ID
+```
+
+Sem esse deploy, projetos criados no modo bloqueado retornam
+`permission-denied` após o Firebase Auth criar a identidade; o fluxo remove a
+identidade automaticamente, mas o cadastro não pode ser concluído. Ao atualizar
+as versões dos documentos jurídicos, atualize também as versões permitidas nas
+regras antes de publicar a nova interface.
+
 ## Design system
 
 O design system usa Tailwind CSS com tokens semânticos definidos em

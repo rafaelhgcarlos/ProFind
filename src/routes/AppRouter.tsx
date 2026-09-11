@@ -4,6 +4,7 @@ import { Route, Routes } from 'react-router-dom'
 import { HomePage } from '../features/home/pages/HomePage'
 import { NotFoundPage } from '../features/not-found/pages/NotFoundPage'
 import { Skeleton } from '../components/ui/skeleton'
+import { RegistrationDraftProvider } from '../features/registration/registration-draft-provider'
 
 const DesignSystemPage = lazy(() =>
   import('../features/design-system/pages/DesignSystemPage').then((module) => ({
@@ -14,6 +15,24 @@ const DesignSystemPage = lazy(() =>
 const LayoutPreviewPage = lazy(() =>
   import('../features/design-system/pages/LayoutPreviewPage').then((module) => ({
     default: module.LayoutPreviewPage,
+  })),
+)
+
+const RegistrationPage = lazy(() =>
+  import('../features/registration/pages/RegistrationPage').then((module) => ({
+    default: module.RegistrationPage,
+  })),
+)
+
+const TermsOfUsePage = lazy(() =>
+  import('../features/legal/pages/TermsOfUsePage').then((module) => ({
+    default: module.TermsOfUsePage,
+  })),
+)
+
+const PrivacyPolicyPage = lazy(() =>
+  import('../features/legal/pages/PrivacyPolicyPage').then((module) => ({
+    default: module.PrivacyPolicyPage,
   })),
 )
 
@@ -48,13 +67,38 @@ function RouteFallback() {
 
 export function AppRouter() {
   return (
-    <Routes>
+    <RegistrationDraftProvider>
+      <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route
+        path="/cadastro"
+        element={
+          <Suspense fallback={<RouteFallback />}>
+            <RegistrationPage />
+          </Suspense>
+        }
+      />
       <Route
         path="/design-system"
         element={
           <Suspense fallback={<RouteFallback />}>
             <DesignSystemPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/termos-de-uso"
+        element={
+          <Suspense fallback={<RouteFallback />}>
+            <TermsOfUsePage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/politica-de-privacidade"
+        element={
+          <Suspense fallback={<RouteFallback />}>
+            <PrivacyPolicyPage />
           </Suspense>
         }
       />
@@ -83,6 +127,7 @@ export function AppRouter() {
         }
       />
       <Route path="*" element={<NotFoundPage />} />
-    </Routes>
+      </Routes>
+    </RegistrationDraftProvider>
   )
 }

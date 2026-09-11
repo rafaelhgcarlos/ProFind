@@ -6,6 +6,7 @@ import {
   MessagesSquare,
   ShieldCheck,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import { AppShell } from '../../../components/layout/AppShell'
 import { FeatureCard } from '../../../components/ui/FeatureCard'
@@ -35,14 +36,14 @@ export function HomePage() {
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
             <Button size="lg" className="w-full sm:w-auto" asChild>
-              <a href="#como-funciona">
-                Entender como funciona
+              <Link to="/cadastro">
+                Criar minha conta
                 <ArrowRight aria-hidden="true" />
-              </a>
+              </Link>
             </Button>
-            <span className="text-center text-sm text-muted-foreground sm:text-left">
-              Informações claras antes de decidir
-            </span>
+            <Button variant="link" asChild>
+              <a href="#como-funciona">Entender como funciona</a>
+            </Button>
           </div>
         </div>
 

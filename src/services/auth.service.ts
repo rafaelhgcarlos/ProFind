@@ -1,5 +1,6 @@
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
@@ -28,6 +29,10 @@ export const authService = {
 
   signOut() {
     return signOut(getFirebaseAuth())
+  },
+
+  deleteAccount(user: User) {
+    return deleteUser(user)
   },
 
   observeSession(observer: NextOrObserver<User>) {
