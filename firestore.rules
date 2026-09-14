@@ -21,11 +21,57 @@ service cloud.firestore {
         && acceptances.privacyPolicy.acceptedAt == request.time;
     }
 
+    function hasValidRoleConfiguration() {
+      return request.resource.data.roles is list
+        && request.resource.data.roles.size() >= 1
+        && request.resource.data.roles.size() <= 2
+        && request.resource.data.roles.hasOnly(['client', 'professional'])
+        && (request.resource.data.roles.size() == 1
+          || ('client' in request.resource.data.roles
+            && 'professional' in request.resource.data.roles))
+        && request.resource.data.activeMode is string
+        && request.resource.data.activeMode in request.resource.data.roles;
+    }
+
+    function hasNoConfiguredRoles() {
+      let roles = resource.data.get('roles', []);
+      let activeMode = resource.data.get('activeMode', null);
+
+      return roles is list
+        && roles.size() == 0
+        && activeMode == null;
+    }
+
+    function hasRoleEnablementGrant(userId, role) {
+      return exists(
+        /databases/$(database)/documents/roleEnablementGrants/$(userId)/roles/$(role)
+      );
+    }
+
+    function isGrantedRoleExpansion(userId) {
+      let currentRoles = resource.data.get('roles', []);
+      let nextRoles = request.resource.data.roles;
+
+      return currentRoles is list
+        && currentRoles.size() >= 1
+        && nextRoles.size() == currentRoles.size() + 1
+        && nextRoles.hasAll(currentRoles)
+        && (('client' in currentRoles)
+          || !('client' in nextRoles)
+          || hasRoleEnablementGrant(userId, 'client'))
+        && (('professional' in currentRoles)
+          || !('professional' in nextRoles)
+          || hasRoleEnablementGrant(userId, 'professional'));
+    }
+
     match /users/{userId} {
       allow create: if isDocumentOwner(userId)
         && request.resource.data.keys().hasOnly([
           'name',
           'email',
+          'roles',
+          'activeMode',
+          'professionalProfileStatus',
           'createdAt',
           'updatedAt',
           'legalAcceptances'
@@ -36,12 +82,34 @@ service cloud.firestore {
         && request.resource.data.email is string
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.email.size() <= 320
+        && request.resource.data.roles is list
+        && request.resource.data.roles.size() == 0
+        && request.resource.data.activeMode == null
+        && request.resource.data.professionalProfileStatus == 'not-started'
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && hasValidLegalAcceptances();
 
       allow read: if isDocumentOwner(userId);
-      allow update, delete: if false;
+      allow update: if isDocumentOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'roles',
+          'activeMode',
+          'updatedAt'
+        ])
+        && request.resource.data.updatedAt == request.time
+        && hasValidRoleConfiguration()
+        && (hasNoConfiguredRoles()
+          || request.resource.data.roles == resource.data.get('roles', [])
+          || isGrantedRoleExpansion(userId));
+
+      allow delete: if false;
+    }
+
+    // Grants são emitidos exclusivamente por um backend confiável usando o
+    // Admin SDK. Clientes não podem criá-los, alterá-los ou consultá-los.
+    match /roleEnablementGrants/{userId}/roles/{role} {
+      allow read, write: if false;
     }
   }
 }

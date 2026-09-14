@@ -11,7 +11,7 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react'
-import type { PropsWithChildren } from 'react'
+import type { PropsWithChildren, ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 import { cn } from '../../utils/cn'
@@ -65,6 +65,7 @@ interface AuthenticatedLayoutProps extends PropsWithChildren {
   userName?: string
   navigation?: LayoutNavigationItem[]
   activeNavigationHref?: string
+  contextSwitcher?: ReactNode
 }
 
 export function AuthenticatedLayout({
@@ -73,6 +74,7 @@ export function AuthenticatedLayout({
   userName = 'Usuário ProFind',
   navigation = navigationByMode[mode],
   activeNavigationHref,
+  contextSwitcher,
   children,
 }: AuthenticatedLayoutProps) {
   const location = useLocation()
@@ -137,6 +139,7 @@ export function AuthenticatedLayout({
             <h1 className="font-bold">{pageTitle}</h1>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {contextSwitcher}
             <ThemeToggle />
             <div className="hidden text-right sm:block">
               <p className="max-w-48 truncate text-sm font-semibold">{userName}</p>

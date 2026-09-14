@@ -54,12 +54,29 @@ Firebase Auth é coordenada com o documento base `users/{userId}` pelo serviço 
 registro; se a gravação do perfil falhar, a identidade recém-criada é removida
 como compensação. O documento registra nome, e-mail e timestamps de criação,
 atualização e aceite dos Termos de Uso e da Política de Privacidade, incluindo
-as versões vigentes de ambos os documentos. Os textos do MVP ficam disponíveis
-em `/termos-de-uso` e `/politica-de-privacidade`.
+as versões vigentes de ambos os documentos. Também inicia `roles` vazio,
+`activeMode` nulo e `professionalProfileStatus` como `not-started` para que a
+escolha de contexto aconteça no onboarding sem confundir um papel habilitado
+com um perfil profissional completo. Os textos do MVP ficam disponíveis em
+`/termos-de-uso` e `/politica-de-privacidade`.
 
-As regras mínimas para criação e leitura do próprio documento de usuário estão
-versionadas em `firestore.rules`. Depois de criar o banco Cloud Firestore,
-publique-as no mesmo projeto configurado no `.env`:
+Depois do cadastro ou do primeiro login de uma conta ainda sem papéis, a rota
+`/onboarding` permite escolher Cliente, Profissional ou Ambos. A configuração é
+persistida no próprio documento `users/{userId}`; contas com os dois papéis
+alternam somente o `activeMode`, preservando a mesma identidade. O serviço e as
+regras do Firestore rejeitam modos que não estejam em `roles`. No MVP, o papel
+Profissional representa exclusivamente pessoa física.
+
+As regras para criação, leitura do próprio documento e atualização controlada
+de `roles`/`activeMode` estão versionadas em `firestore.rules`. Depois do
+onboarding, papéis nunca podem ser removidos e só podem ser adicionados de forma
+monotônica quando existir um grant em
+`roleEnablementGrants/{userId}/roles/{role}`, emitido exclusivamente por um
+backend confiável. O cliente não possui acesso a esses grants. A alternância de
+`activeMode` continua limitada aos papéis presentes em `roles`, enquanto
+`professionalProfileStatus` não pode ser alterado diretamente pelo cliente.
+Depois de criar o banco Cloud Firestore, publique as regras no mesmo projeto
+configurado no `.env`:
 
 ```bash
 npx firebase-tools deploy --only firestore:rules --project SEU_PROJECT_ID

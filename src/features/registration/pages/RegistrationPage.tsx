@@ -120,7 +120,7 @@ export function RegistrationPage() {
             </Alert>
             <div className="mt-8">
               <Button size="lg" asChild>
-                <Link to="/conta">Acessar minha conta</Link>
+                <Link to="/onboarding">Escolher como usar o ProFind</Link>
               </Button>
             </div>
           </div>

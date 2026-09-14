@@ -105,6 +105,9 @@ describe('RegistrationPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Conta criada com sucesso' }),
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'Escolher como usar o ProFind' }),
+    ).toHaveAttribute('href', '/onboarding')
   })
 
   it('preserva os dados e orienta após erro de e-mail duplicado', async () => {

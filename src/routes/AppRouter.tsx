@@ -6,6 +6,10 @@ import { NotFoundPage } from '../features/not-found/pages/NotFoundPage'
 import { Skeleton } from '../components/ui/skeleton'
 import { RegistrationDraftProvider } from '../features/registration/registration-draft-provider'
 import { ProtectedRoute } from '../features/auth/components/ProtectedRoute'
+import { ModeRoute } from '../features/onboarding/components/ModeRoute'
+import { OnboardingRoute } from '../features/onboarding/components/OnboardingRoute'
+import { ProfileHomeRedirect } from '../features/onboarding/components/ProfileHomeRedirect'
+import { ProfileRoute } from '../features/onboarding/components/ProfileRoute'
 
 const DesignSystemPage = lazy(() =>
   import('../features/design-system/pages/DesignSystemPage').then((module) => ({
@@ -49,9 +53,15 @@ const PasswordRecoveryPage = lazy(() =>
   })),
 )
 
-const AccountPage = lazy(() =>
-  import('../features/auth/pages/AccountPage').then((module) => ({
-    default: module.AccountPage,
+const OnboardingPage = lazy(() =>
+  import('../features/onboarding/pages/OnboardingPage').then((module) => ({
+    default: module.OnboardingPage,
+  })),
+)
+
+const ModeHomePage = lazy(() =>
+  import('../features/onboarding/pages/ModeHomePage').then((module) => ({
+    default: module.ModeHomePage,
   })),
 )
 
@@ -105,14 +115,39 @@ export function AppRouter() {
         }
       />
       <Route element={<ProtectedRoute />}>
-        <Route
-          path="/conta"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AccountPage />
-            </Suspense>
-          }
-        />
+        <Route element={<ProfileRoute />}>
+          <Route path="/conta" element={<ProfileHomeRedirect />} />
+          <Route element={<OnboardingRoute />}>
+            <Route
+              path="/onboarding"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <OnboardingPage />
+                </Suspense>
+              }
+            />
+          </Route>
+          <Route element={<ModeRoute mode="client" />}>
+            <Route
+              path="/cliente"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ModeHomePage mode="client" />
+                </Suspense>
+              }
+            />
+          </Route>
+          <Route element={<ModeRoute mode="professional" />}>
+            <Route
+              path="/profissional"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ModeHomePage mode="professional" />
+                </Suspense>
+              }
+            />
+          </Route>
+        </Route>
       </Route>
       <Route path="/" element={<HomePage />} />
       <Route
