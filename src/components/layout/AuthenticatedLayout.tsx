@@ -18,6 +18,7 @@ import { cn } from '../../utils/cn'
 import { Brand } from '../brand/Brand'
 import { ThemeToggle } from '../theme/ThemeToggle'
 import { Avatar, AvatarFallback } from '../ui/avatar'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu'
 
 export interface LayoutNavigationItem {
   label: string
@@ -97,7 +98,7 @@ export function AuthenticatedLayout({
 
       <aside
         className={cn(
-          'hidden border-r bg-background lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col',
+          'hidden border-r bg-card lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col',
           mode === 'admin' && 'bg-muted/45',
         )}
       >
@@ -117,8 +118,8 @@ export function AuthenticatedLayout({
                 to={item.href}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
-                  active && 'bg-accent text-accent-foreground shadow-sm',
+                  'flex min-h-11 cursor-pointer items-center gap-3 rounded-md border-l-[3px] border-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
+                  active && 'border-primary bg-accent text-accent-foreground',
                 )}
               >
                 <Icon className="size-5" aria-hidden="true" />
@@ -130,7 +131,7 @@ export function AuthenticatedLayout({
       </aside>
 
       <div className="min-w-0 pb-20 lg:pb-0">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background/92 px-4 backdrop-blur-md sm:px-6 lg:h-18 lg:px-8">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 backdrop-blur-md sm:px-6 lg:h-18 lg:px-8">
           <div className="lg:hidden">
             <Brand compact />
           </div>
@@ -145,14 +146,26 @@ export function AuthenticatedLayout({
               <p className="max-w-48 truncate text-sm font-semibold">{userName}</p>
               <p className="text-xs text-muted-foreground">Conta ativa</p>
             </div>
-            <Avatar>
-              <AvatarFallback aria-label={userName}>{initials}</AvatarFallback>
-            </Avatar>
+            {mode === 'admin' ? (
+              <Avatar><AvatarFallback aria-label={userName}>{initials}</AvatarFallback></Avatar>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" aria-label={`Abrir menu da conta de ${userName}`} className="rounded-full focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30">
+                    <Avatar className="border border-primary/20"><AvatarFallback>{initials}</AvatarFallback></Avatar>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel className="max-w-48 truncate">{userName}</DropdownMenuLabel>
+                  <DropdownMenuItem asChild><Link to="/conta">Ir para minha área</Link></DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </header>
 
         <main id="conteudo-principal" className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          <h1 className="mb-6 text-2xl font-black tracking-tight lg:hidden">{pageTitle}</h1>
+          <h1 className="mb-6 text-2xl font-bold tracking-tight lg:hidden">{pageTitle}</h1>
           {children}
         </main>
       </div>
@@ -171,8 +184,8 @@ export function AuthenticatedLayout({
               to={item.href}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex min-h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
-                active && 'bg-accent text-accent-foreground',
+                'relative flex min-h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
+                active && 'bg-accent text-accent-foreground after:absolute after:top-0 after:h-0.5 after:w-8 after:rounded-full after:bg-primary',
               )}
             >
               <Icon className="size-5" aria-hidden="true" />

@@ -104,7 +104,7 @@ export function ModeHomePage({ mode }: ModeHomePageProps) {
       <div className="mt-5 flex size-12 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
         <Icon aria-hidden="true" />
       </div>
-      <h2 className="mt-5 text-2xl font-black tracking-tight sm:text-3xl">
+      <h2 className="mt-5 text-2xl font-bold tracking-tight sm:text-3xl">
         Olá, {profile?.name || 'usuário ProFind'}.
       </h2>
       <p className="mt-3 max-w-2xl leading-7 text-muted-foreground">

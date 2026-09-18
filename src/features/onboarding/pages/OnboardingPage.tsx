@@ -133,7 +133,7 @@ export function OnboardingPage() {
               Sair da conta
             </Button>
           </div>
-          <h1 className="mt-5 max-w-2xl text-3xl font-black tracking-[-0.03em] text-balance sm:text-4xl">
+          <h1 className="mt-5 max-w-2xl text-3xl font-bold tracking-[-0.04em] text-balance sm:text-4xl">
             Como você quer usar o ProFind?
           </h1>
           <p className="mt-3 max-w-2xl leading-7 text-muted-foreground">
@@ -184,7 +184,7 @@ export function OnboardingPage() {
                     key={option.value}
                     htmlFor={`role-${option.value}`}
                     className={cn(
-                      'relative flex min-h-48 cursor-pointer flex-col rounded-lg border bg-card p-5 shadow-sm transition-colors hover:border-primary/60 hover:bg-accent/35',
+                      'relative flex min-h-48 cursor-pointer flex-col rounded-lg border bg-surface-raised p-5 shadow-soft transition-colors hover:border-primary/60 hover:bg-accent/35',
                       'focus-within:ring-[3px] focus-within:ring-ring/25',
                       selected && 'border-primary bg-accent/45',
                       isBusy && 'cursor-not-allowed opacity-60',

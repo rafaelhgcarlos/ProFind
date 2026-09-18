@@ -9,7 +9,6 @@ import {
   PanelRightOpen,
   Settings,
   ShieldAlert,
-  Star,
   TriangleAlert,
   UserRound,
   WifiOff,
@@ -19,8 +18,8 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { PublicLayout } from '../../../components/layout/PublicLayout'
+import { ProfessionalCard } from '../../../components/marketplace/ProfessionalCard'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
-import { Avatar, AvatarFallback } from '../../../components/ui/avatar'
 import { Badge } from '../../../components/ui/badge'
 import {
   Breadcrumb,
@@ -240,39 +239,10 @@ export function DesignSystemPage() {
             description="Agrupamentos usados apenas quando ajudam a comparar ou entender uma entidade."
           >
             <div className="grid gap-6 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <div className="flex items-start gap-4">
-                    <Avatar className="size-14">
-                      <AvatarFallback>MS</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <CardTitle>Marina Souza</CardTitle>
-                      <CardDescription>Profissional de manutenção residencial</CardDescription>
-                    </div>
-                    <Badge variant="success" className="ml-auto">Verificada</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Star className="size-4 fill-warning text-warning" aria-hidden="true" />
-                    <strong className="text-foreground">4,9</strong>
-                    <span>• 38 avaliações</span>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-                    <MapPin className="size-4" aria-hidden="true" />
-                    Atende na região central e bairros próximos
-                  </div>
-                  <p className="mt-4 text-sm leading-6 text-muted-foreground">
-                    Oito anos de experiência em reparos, instalações e manutenção
-                    residencial.
-                  </p>
-                </CardContent>
-                <CardFooter className="flex-wrap">
-                  <Button>Solicitar orçamento</Button>
-                  <Button variant="outline">Ver perfil</Button>
-                </CardFooter>
-              </Card>
+              <div>
+                <p className="mb-3 text-xs font-medium text-muted-foreground">Exemplo visual fictício · sem perfil publicado ou ações disponíveis</p>
+                <ProfessionalCard name="Marina Souza" specialty="Manutenção residencial" area="Região central" rating={4.9} reviewCount={38} verified />
+              </div>
 
               <Card>
                 <CardHeader>

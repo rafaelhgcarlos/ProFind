@@ -1,7 +1,12 @@
 import type { PropsWithChildren } from 'react'
 
-import { PublicLayout } from './PublicLayout'
+import { PublicLayout, type PublicNavigationItem } from './PublicLayout'
 
-export function AppShell({ children }: PropsWithChildren) {
-  return <PublicLayout>{children}</PublicLayout>
+interface AppShellProps extends PropsWithChildren {
+  navigation?: PublicNavigationItem[]
+  showAccountLinks?: boolean
+}
+
+export function AppShell({ children, ...props }: AppShellProps) {
+  return <PublicLayout {...props}>{children}</PublicLayout>
 }

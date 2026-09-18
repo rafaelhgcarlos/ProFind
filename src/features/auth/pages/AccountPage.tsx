@@ -42,7 +42,7 @@ export function AccountPage() {
           <ShieldCheck className="size-3.5" aria-hidden="true" />
           Sessão protegida
         </Badge>
-        <h1 className="mt-5 text-3xl font-black tracking-[-0.03em] sm:text-4xl">Minha conta</h1>
+        <h1 className="mt-5 text-3xl font-bold tracking-[-0.04em] sm:text-4xl">Minha conta</h1>
         <p className="mt-3 max-w-2xl leading-7 text-muted-foreground">
           Este espaço confirma seu acesso autenticado. Os demais recursos serão adicionados nas etapas próprias do produto.
         </p>

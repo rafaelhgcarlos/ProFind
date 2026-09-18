@@ -1,18 +1,49 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { User } from 'firebase/auth'
 import { MemoryRouter } from 'react-router-dom'
+import { vi } from 'vitest'
 
 import { TooltipProvider } from './components/ui/tooltip'
+import { AuthenticationContext, type AuthenticationContextValue } from './features/auth/auth-context'
+import { ProfileContext, type ProfileContextValue } from './features/onboarding/profile-context'
 import { ThemeProvider } from './providers/theme-provider'
 import { AppRouter } from './routes/AppRouter'
 
-function renderRoute(path: string) {
+function renderRoute(
+  path: string,
+  authOverrides: Partial<AuthenticationContextValue> = {},
+  profileOverrides: Partial<ProfileContextValue> = {},
+) {
+  const auth: AuthenticationContextValue = {
+    status: 'unauthenticated',
+    user: null,
+    sessionError: null,
+    login: vi.fn(),
+    logout: vi.fn(),
+    requestPasswordReset: vi.fn(),
+    retrySession: vi.fn(),
+    ...authOverrides,
+  }
+  const profile: ProfileContextValue = {
+    status: 'idle',
+    profile: null,
+    profileError: null,
+    completeOnboarding: vi.fn(),
+    switchMode: vi.fn(),
+    retryProfile: vi.fn(),
+    ...profileOverrides,
+  }
   return render(
     <ThemeProvider>
       <TooltipProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <AppRouter />
-        </MemoryRouter>
+        <AuthenticationContext.Provider value={auth}>
+          <ProfileContext.Provider value={profile}>
+            <MemoryRouter initialEntries={[path]}>
+              <AppRouter />
+            </MemoryRouter>
+          </ProfileContext.Provider>
+        </AuthenticationContext.Provider>
       </TooltipProvider>
     </ThemeProvider>,
   )
@@ -24,16 +55,38 @@ describe('AppRouter', () => {
 
     expect(
       screen.getByRole('heading', {
-        name: /encontre o profissional certo para cada necessidade/i,
+        name: /encontre o profissional certo, perto de você/i,
       }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: /criar minha conta/i }),
     ).toHaveAttribute('href', '/cadastro')
-    expect(screen.getByText(/permanecem privados/i)).toBeInTheDocument()
+    expect(screen.getByText(/dados de contato não viram um perfil público/i)).toBeInTheDocument()
     expect(
       screen.queryByRole('link', { name: /design system/i }),
     ).not.toBeInTheDocument()
+  })
+
+  it('mostra o acesso à conta na homepage quando já existe sessão autenticada', () => {
+    renderRoute(
+      '/',
+      { status: 'authenticated', user: { uid: 'user-123', email: 'marina@example.com' } as User },
+      {
+        status: 'ready',
+        profile: {
+          userId: 'user-123',
+          name: 'Marina Souza',
+          email: 'marina@example.com',
+          roles: ['client'],
+          activeMode: 'client',
+          professionalProfileStatus: 'not-started',
+        },
+      },
+    )
+
+    expect(screen.getByRole('button', { name: 'Abrir menu da conta de Marina Souza' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Entrar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Criar conta' })).not.toBeInTheDocument()
   })
 
   it('renderiza o cadastro com os campos obrigatórios', async () => {
