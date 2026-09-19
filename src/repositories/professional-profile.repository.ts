@@ -125,17 +125,24 @@ export const professionalProfileRepository = {
     const batch = writeBatch(firestore)
     const timestamp = serverTimestamp()
 
-    batch.set(
-      profileReference,
-      {
-        ownerId: userId,
-        ...profile,
-        status,
-        ...(!exists ? { createdAt: timestamp } : {}),
-        updatedAt: timestamp,
-      },
-      { merge: true },
-    )
+    const profileData = {
+      ownerId: userId,
+      ...profile,
+      selectedCityIbgeCodes: profile.selectedCities.map(
+        (location) => location.ibgeCode,
+      ),
+      status,
+      updatedAt: timestamp,
+    }
+
+    if (exists) {
+      batch.update(profileReference, profileData)
+    } else {
+      batch.set(profileReference, {
+        ...profileData,
+        createdAt: timestamp,
+      })
+    }
     batch.update(userReference, {
       professionalProfileStatus: userProfileStatusFor(status),
       updatedAt: timestamp,

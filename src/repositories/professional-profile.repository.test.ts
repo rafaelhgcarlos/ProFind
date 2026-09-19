@@ -99,11 +99,11 @@ describe('professionalProfileRepository', () => {
       {
         ownerId: 'user-123',
         ...profileInput,
+        selectedCityIbgeCodes: [],
         status: 'DRAFT',
         createdAt: firebaseMocks.timestamp,
         updatedAt: firebaseMocks.timestamp,
       },
-      { merge: true },
     )
     expect(firebaseMocks.batch.update).toHaveBeenCalledWith(
       firebaseMocks.userReference,
@@ -172,7 +172,14 @@ describe('professionalProfileRepository', () => {
       exists: true,
     })
 
-    const writtenData = firebaseMocks.batch.set.mock.calls[0][1]
+    expect(firebaseMocks.batch.update).toHaveBeenCalledWith(
+      firebaseMocks.profileReference,
+      expect.any(Object),
+    )
+    const profileUpdate = firebaseMocks.batch.update.mock.calls.find(
+      ([reference]) => reference === firebaseMocks.profileReference,
+    )
+    const writtenData = profileUpdate?.[1]
     expect(writtenData).not.toHaveProperty('rating')
     expect(writtenData).not.toHaveProperty('reviewCount')
     expect(writtenData).not.toHaveProperty('completedJobsCount')

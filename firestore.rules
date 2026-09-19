@@ -118,6 +118,7 @@ service cloud.firestore {
           'serviceMode',
           'serviceRadiusKm',
           'selectedCities',
+          'selectedCityIbgeCodes',
           'availability',
           'status',
           'createdAt',
@@ -151,7 +152,10 @@ service cloud.firestore {
               || data.serviceRadiusKm in [5, 10, 20, 30, 50]))
           || (data.serviceMode != 'RADIUS'
             && data.serviceRadiusKm == null))
-        && hasValidSelectedCities(data.selectedCities)
+        && hasValidSelectedCities(
+          data.selectedCities,
+          data.get('selectedCityIbgeCodes', null)
+        )
         && ((data.serviceMode == 'SELECTED_CITIES')
           || data.selectedCities.size() == 0)
         && data.availability in ['AVAILABLE', 'LIMITED', 'UNAVAILABLE']
@@ -169,33 +173,9 @@ service cloud.firestore {
     }
 
     function ibgeCodeMatchesState(stateCode, ibgeCode) {
-      return (stateCode == 'RO' && ibgeCode.matches('^11[0-9]{5}$'))
-        || (stateCode == 'AC' && ibgeCode.matches('^12[0-9]{5}$'))
-        || (stateCode == 'AM' && ibgeCode.matches('^13[0-9]{5}$'))
-        || (stateCode == 'RR' && ibgeCode.matches('^14[0-9]{5}$'))
-        || (stateCode == 'PA' && ibgeCode.matches('^15[0-9]{5}$'))
-        || (stateCode == 'AP' && ibgeCode.matches('^16[0-9]{5}$'))
-        || (stateCode == 'TO' && ibgeCode.matches('^17[0-9]{5}$'))
-        || (stateCode == 'MA' && ibgeCode.matches('^21[0-9]{5}$'))
-        || (stateCode == 'PI' && ibgeCode.matches('^22[0-9]{5}$'))
-        || (stateCode == 'CE' && ibgeCode.matches('^23[0-9]{5}$'))
-        || (stateCode == 'RN' && ibgeCode.matches('^24[0-9]{5}$'))
-        || (stateCode == 'PB' && ibgeCode.matches('^25[0-9]{5}$'))
-        || (stateCode == 'PE' && ibgeCode.matches('^26[0-9]{5}$'))
-        || (stateCode == 'AL' && ibgeCode.matches('^27[0-9]{5}$'))
-        || (stateCode == 'SE' && ibgeCode.matches('^28[0-9]{5}$'))
-        || (stateCode == 'BA' && ibgeCode.matches('^29[0-9]{5}$'))
-        || (stateCode == 'MG' && ibgeCode.matches('^31[0-9]{5}$'))
-        || (stateCode == 'ES' && ibgeCode.matches('^32[0-9]{5}$'))
-        || (stateCode == 'RJ' && ibgeCode.matches('^33[0-9]{5}$'))
-        || (stateCode == 'SP' && ibgeCode.matches('^35[0-9]{5}$'))
-        || (stateCode == 'PR' && ibgeCode.matches('^41[0-9]{5}$'))
-        || (stateCode == 'SC' && ibgeCode.matches('^42[0-9]{5}$'))
-        || (stateCode == 'RS' && ibgeCode.matches('^43[0-9]{5}$'))
-        || (stateCode == 'MS' && ibgeCode.matches('^50[0-9]{5}$'))
-        || (stateCode == 'MT' && ibgeCode.matches('^51[0-9]{5}$'))
-        || (stateCode == 'GO' && ibgeCode.matches('^52[0-9]{5}$'))
-        || (stateCode == 'DF' && ibgeCode.matches('^53[0-9]{5}$'));
+      return (stateCode + ':' + ibgeCode).matches(
+        '^(AC:12|AL:27|AP:16|AM:13|BA:29|CE:23|DF:53|ES:32|GO:52|MA:21|MT:51|MS:50|MG:31|PA:15|PB:25|PR:41|PE:26|PI:22|RJ:33|RN:24|RS:43|RO:11|RR:14|SC:42|SP:35|SE:28|TO:17)[0-9]{5}$'
+      );
     }
 
     function hasValidProfessionalBaseLocation(baseLocation) {
@@ -221,61 +201,34 @@ service cloud.firestore {
     function hasCompleteProfessionalLocation(location) {
       return hasValidProfessionalBaseLocation(location)
         && location.city.size() >= 1
-        && isBrazilianStateCode(location.stateCode)
-        && location.ibgeCode.matches('^[0-9]{7}$')
-        && ibgeCodeMatchesState(location.stateCode, location.ibgeCode);
+        && location.stateCode != ''
+        && location.ibgeCode != '';
     }
 
-    function hasValidSelectedCityAt(cities, index) {
-      return cities.size() <= index
-        || hasCompleteProfessionalLocation(cities[index]);
+    function hasValidSelectedCityCodeAt(codes, index) {
+      return codes.size() <= index
+        || (codes[index] is string
+          && codes[index].matches('^[0-9]{7}$'));
     }
 
-    function selectedCityIsUniqueAt(cities, index) {
-      return cities.size() <= index
-        || ((index <= 0
-            || cities[0].ibgeCode != cities[index].ibgeCode)
-          && (index <= 1
-            || cities[1].ibgeCode != cities[index].ibgeCode)
-          && (index <= 2
-            || cities[2].ibgeCode != cities[index].ibgeCode)
-          && (index <= 3
-            || cities[3].ibgeCode != cities[index].ibgeCode)
-          && (index <= 4
-            || cities[4].ibgeCode != cities[index].ibgeCode)
-          && (index <= 5
-            || cities[5].ibgeCode != cities[index].ibgeCode)
-          && (index <= 6
-            || cities[6].ibgeCode != cities[index].ibgeCode)
-          && (index <= 7
-            || cities[7].ibgeCode != cities[index].ibgeCode)
-          && (index <= 8
-            || cities[8].ibgeCode != cities[index].ibgeCode));
-    }
-
-    function hasValidSelectedCities(cities) {
+    function hasValidSelectedCities(cities, codes) {
       return cities is list
         && cities.size() <= 10
-        && hasValidSelectedCityAt(cities, 0)
-        && hasValidSelectedCityAt(cities, 1)
-        && hasValidSelectedCityAt(cities, 2)
-        && hasValidSelectedCityAt(cities, 3)
-        && hasValidSelectedCityAt(cities, 4)
-        && hasValidSelectedCityAt(cities, 5)
-        && hasValidSelectedCityAt(cities, 6)
-        && hasValidSelectedCityAt(cities, 7)
-        && hasValidSelectedCityAt(cities, 8)
-        && hasValidSelectedCityAt(cities, 9)
-        && selectedCityIsUniqueAt(cities, 0)
-        && selectedCityIsUniqueAt(cities, 1)
-        && selectedCityIsUniqueAt(cities, 2)
-        && selectedCityIsUniqueAt(cities, 3)
-        && selectedCityIsUniqueAt(cities, 4)
-        && selectedCityIsUniqueAt(cities, 5)
-        && selectedCityIsUniqueAt(cities, 6)
-        && selectedCityIsUniqueAt(cities, 7)
-        && selectedCityIsUniqueAt(cities, 8)
-        && selectedCityIsUniqueAt(cities, 9);
+        && ((codes == null
+            && cities.size() == cities.toSet().size())
+          || (codes is list
+            && codes.size() == cities.size()
+            && codes.size() == codes.toSet().size()
+            && hasValidSelectedCityCodeAt(codes, 0)
+            && hasValidSelectedCityCodeAt(codes, 1)
+            && hasValidSelectedCityCodeAt(codes, 2)
+            && hasValidSelectedCityCodeAt(codes, 3)
+            && hasValidSelectedCityCodeAt(codes, 4)
+            && hasValidSelectedCityCodeAt(codes, 5)
+            && hasValidSelectedCityCodeAt(codes, 6)
+            && hasValidSelectedCityCodeAt(codes, 7)
+            && hasValidSelectedCityCodeAt(codes, 8)
+            && hasValidSelectedCityCodeAt(codes, 9)));
     }
 
     function isPublishableProfessionalProfile() {
@@ -378,6 +331,7 @@ service cloud.firestore {
           'serviceMode',
           'serviceRadiusKm',
           'selectedCities',
+          'selectedCityIbgeCodes',
           'availability',
           'status',
           'createdAt',
@@ -406,6 +360,7 @@ service cloud.firestore {
           'serviceMode',
           'serviceRadiusKm',
           'selectedCities',
+          'selectedCityIbgeCodes',
           'availability',
           'status',
           'updatedAt'
