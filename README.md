@@ -97,6 +97,26 @@ e service, ordena por `order` e oferece em novos fluxos somente itens com
 bloqueadas. O modelo, a administração e a carga inicial estão documentados em
 [`docs/service-catalog.md`](docs/service-catalog.md).
 
+Profissionais configurados no onboarding criam e editam seu perfil em
+`/profissional/perfil`. Os dados ficam em `professionalProfiles/{userId}` e
+podem ser mantidos incompletos com status `DRAFT`. A publicação exige nome
+público, localização base estruturada (`city`, `stateCode` e
+`ibgeCode`), categoria, especialidade e uma modalidade de atendimento válida.
+A descrição é opcional e, quando informada, aceita até 1.200 caracteres.
+O raio é obrigatório somente na modalidade `RADIUS`. CEP e endereço
+exato não são armazenados no perfil público. Perfis `PAUSED` permanecem
+privados e `SUSPENDED` não podem ser
+alterados pelo cliente. As regras permitem escrita somente ao proprietário e
+impedem mudanças em rating, contagem de avaliações e serviços concluídos.
+O resumo `professionalProfileStatus` em `users/{userId}` é atualizado no mesmo
+batch para manter a jornada profissional consistente.
+
+Na seção de atendimento, a UF é escolhida antes do município. Os municípios
+são carregados da API oficial de Localidades do IBGE, com pesquisa, cache por
+UF e nova tentativa em caso de falha. O perfil registra também a modalidade
+`CITY_ONLY`, `RADIUS`, `SELECTED_CITIES` ou `REMOTE`; somente `RADIUS` exige uma
+das faixas configuradas e `SELECTED_CITIES` mantém até dez municípios únicos.
+
 ## Design system
 
 O design system usa Tailwind CSS com tokens semânticos definidos em

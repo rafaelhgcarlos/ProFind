@@ -1,0 +1,296 @@
+import { describe, expect, it, vi } from 'vitest'
+
+import type { ServiceCatalog } from '../types/catalog'
+import type { ProfessionalProfileInput } from '../types/professional-profile'
+import {
+  ProfessionalProfileError,
+  saveProfessionalProfile,
+  validateProfessionalProfile,
+  type ProfessionalProfileDependencies,
+} from './professional-profile.service'
+
+const catalog: ServiceCatalog = {
+  categories: [
+    { id: 'construction', name: 'Construção Civil', active: true, order: 10 },
+  ],
+  specialties: [
+    { id: 'electrician', categoryId: 'construction', name: 'Eletricista', active: true, order: 10 },
+  ],
+}
+
+const emptyInput: ProfessionalProfileInput = {
+  publicName: '',
+  headline: '',
+  bio: '',
+  categoryIds: [],
+  specialtyIds: [],
+  experienceYears: null,
+  baseLocation: { city: '', stateCode: '', ibgeCode: '' },
+  serviceMode: 'CITY_ONLY',
+  serviceRadiusKm: null,
+  selectedCities: [],
+  availability: 'AVAILABLE',
+}
+
+const publishableInput: ProfessionalProfileInput = {
+  ...emptyInput,
+  publicName: 'Marina Souza',
+  bio: 'Instalações e reparos residenciais.',
+  categoryIds: ['construction'],
+  specialtyIds: ['electrician'],
+  baseLocation: {
+    city: 'Campinas',
+    stateCode: 'SP',
+    ibgeCode: '3509502',
+  },
+  serviceMode: 'RADIUS',
+  serviceRadiusKm: 30,
+}
+
+function dependencies(): ProfessionalProfileDependencies {
+  return {
+    findByOwnerId: vi.fn().mockResolvedValue(null),
+    save: vi.fn().mockResolvedValue(undefined),
+  }
+}
+
+describe('professional profile service', () => {
+  it('permite salvar um perfil incompleto como DRAFT', async () => {
+    const repository = dependencies()
+
+    await expect(
+      saveProfessionalProfile(
+        'user-123',
+        emptyInput,
+        'DRAFT',
+        catalog,
+        null,
+        repository,
+      ),
+    ).resolves.toMatchObject({ userId: 'user-123', status: 'DRAFT' })
+    expect(repository.save).toHaveBeenCalledWith({
+      userId: 'user-123',
+      profile: emptyInput,
+      status: 'DRAFT',
+      exists: false,
+    })
+  })
+
+  it('impede publicar um perfil incompleto e informa todos os campos ausentes', async () => {
+    const repository = dependencies()
+
+    await expect(
+      saveProfessionalProfile(
+        'user-123',
+        emptyInput,
+        'PUBLISHED',
+        catalog,
+        null,
+        repository,
+      ),
+    ).rejects.toMatchObject({
+      code: 'invalid-profile',
+      fieldErrors: {
+        publicName: expect.any(String),
+        categoryIds: expect.any(String),
+        specialtyIds: expect.any(String),
+        baseLocation: expect.any(String),
+      },
+    })
+    expect(repository.save).not.toHaveBeenCalled()
+  })
+
+  it('publica um perfil completo usando apenas itens ativos do catálogo', async () => {
+    const repository = dependencies()
+
+    await expect(
+      saveProfessionalProfile(
+        'user-123',
+        publishableInput,
+        'PUBLISHED',
+        catalog,
+        null,
+        repository,
+      ),
+    ).resolves.toMatchObject({ status: 'PUBLISHED' })
+    expect(repository.save).toHaveBeenCalledOnce()
+  })
+
+  it('permite publicar com a descrição vazia ou ausente', async () => {
+    const emptyBioRepository = dependencies()
+    const missingBioRepository = dependencies()
+    const inputWithoutBio = { ...publishableInput }
+    delete inputWithoutBio.bio
+
+    await expect(
+      saveProfessionalProfile(
+        'user-123',
+        { ...publishableInput, bio: '   ' },
+        'PUBLISHED',
+        catalog,
+        null,
+        emptyBioRepository,
+      ),
+    ).resolves.toMatchObject({ status: 'PUBLISHED', bio: '' })
+    await expect(
+      saveProfessionalProfile(
+        'user-123',
+        inputWithoutBio,
+        'PUBLISHED',
+        catalog,
+        null,
+        missingBioRepository,
+      ),
+    ).resolves.toMatchObject({ status: 'PUBLISHED' })
+
+    expect(missingBioRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.not.objectContaining({ bio: expect.anything() }),
+      }),
+    )
+  })
+
+  it('mantém o limite de 1.200 caracteres para a descrição preenchida', () => {
+    const errors = validateProfessionalProfile(
+      { ...publishableInput, bio: 'a'.repeat(1201) },
+      'PUBLISHED',
+      catalog,
+    )
+
+    expect(errors.bio).toMatch(/1\.200 caracteres/i)
+  })
+
+  it('rejeita especialidade que não pertence à categoria selecionada', () => {
+    const errors = validateProfessionalProfile(
+      {
+        ...publishableInput,
+        categoryIds: [],
+      },
+      'DRAFT',
+      catalog,
+    )
+
+    expect(errors.specialtyIds).toMatch(/categorias escolhidas/i)
+  })
+
+  it('valida os campos condicionais de cada modalidade de atendimento', () => {
+    expect(
+      validateProfessionalProfile(
+        { ...publishableInput, serviceMode: 'CITY_ONLY', serviceRadiusKm: null },
+        'PUBLISHED',
+        catalog,
+      ),
+    ).not.toHaveProperty('serviceRadiusKm')
+    expect(
+      validateProfessionalProfile(
+        { ...publishableInput, serviceMode: 'REMOTE', serviceRadiusKm: null },
+        'PUBLISHED',
+        catalog,
+      ),
+    ).not.toHaveProperty('serviceRadiusKm')
+    expect(
+      validateProfessionalProfile(
+        { ...publishableInput, serviceMode: 'RADIUS', serviceRadiusKm: null },
+        'PUBLISHED',
+        catalog,
+      ),
+    ).toHaveProperty('serviceRadiusKm')
+    expect(
+      validateProfessionalProfile(
+        {
+          ...publishableInput,
+          serviceMode: 'SELECTED_CITIES',
+          serviceRadiusKm: null,
+          selectedCities: [],
+        },
+        'PUBLISHED',
+        catalog,
+      ),
+    ).toHaveProperty('selectedCities')
+  })
+
+  it('persiste municípios selecionados sem duplicatas e remove o raio', async () => {
+    const repository = dependencies()
+    const campinas = {
+      city: 'Campinas',
+      stateCode: 'SP',
+      ibgeCode: '3509502',
+    }
+
+    await saveProfessionalProfile(
+      'user-123',
+      {
+        ...publishableInput,
+        serviceMode: 'SELECTED_CITIES',
+        selectedCities: [campinas, { ...campinas }],
+      },
+      'PUBLISHED',
+      catalog,
+      null,
+      repository,
+    )
+
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          serviceRadiusKm: null,
+          selectedCities: [campinas],
+        }),
+      }),
+    )
+  })
+
+  it('rejeita localização livre ou código IBGE incompatível com a UF', () => {
+    const invalidState = validateProfessionalProfile(
+      {
+        ...publishableInput,
+        baseLocation: {
+          city: 'Campinas, SP',
+          stateCode: 'XX',
+          ibgeCode: '3509502',
+        },
+      },
+      'PUBLISHED',
+      catalog,
+    )
+    const mismatchedIbgeCode = validateProfessionalProfile(
+      {
+        ...publishableInput,
+        baseLocation: {
+          city: 'Campinas',
+          stateCode: 'RJ',
+          ibgeCode: '3509502',
+        },
+      },
+      'PUBLISHED',
+      catalog,
+    )
+
+    expect(invalidState.baseLocation).toMatch(/cidade, UF e código IBGE válidos/i)
+    expect(mismatchedIbgeCode.baseLocation).toMatch(/não pertence à UF/i)
+  })
+
+  it('impede alterações de um perfil suspenso', async () => {
+    const repository = dependencies()
+
+    await expect(
+      saveProfessionalProfile(
+        'user-123',
+        publishableInput,
+        'DRAFT',
+        catalog,
+        {
+          userId: 'user-123',
+          ...publishableInput,
+          status: 'SUSPENDED',
+        },
+        repository,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<ProfessionalProfileError>>({
+        code: 'suspended',
+      }),
+    )
+    expect(repository.save).not.toHaveBeenCalled()
+  })
+})

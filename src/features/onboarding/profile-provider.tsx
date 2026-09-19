@@ -18,7 +18,12 @@ import {
   type ProfileContextValue,
   type ProfileStatus,
 } from './profile-context'
-import type { OnboardingChoice, UserProfile, UserRole } from './user-role'
+import type {
+  OnboardingChoice,
+  ProfessionalProfileStatus,
+  UserProfile,
+  UserRole,
+} from './user-role'
 
 interface ProfileState {
   userId: string | null
@@ -124,6 +129,20 @@ export function ProfileProvider({ children }: PropsWithChildren) {
     await loadProfile(user.uid)
   }, [loadProfile, user])
 
+  const syncProfessionalProfileStatus = useCallback(
+    (professionalProfileStatus: ProfessionalProfileStatus) => {
+      setState((current) =>
+        current.profile
+          ? {
+              ...current,
+              profile: { ...current.profile, professionalProfileStatus },
+            }
+          : current,
+      )
+    },
+    [],
+  )
+
   const currentUserId =
     authenticationStatus === 'authenticated' ? (user?.uid ?? null) : null
   const visibleState = useMemo<ProfileState>(
@@ -148,9 +167,16 @@ export function ProfileProvider({ children }: PropsWithChildren) {
       profileError: visibleState.profileError,
       completeOnboarding,
       switchMode,
+      syncProfessionalProfileStatus,
       retryProfile,
     }),
-    [completeOnboarding, retryProfile, switchMode, visibleState],
+    [
+      completeOnboarding,
+      retryProfile,
+      switchMode,
+      syncProfessionalProfileStatus,
+      visibleState,
+    ],
   )
 
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>

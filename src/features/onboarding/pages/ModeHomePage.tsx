@@ -6,7 +6,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { ClientLayout } from '../../../components/layout/ClientLayout'
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
@@ -91,8 +91,13 @@ export function ModeHomePage({ mode }: ModeHomePageProps) {
           <CircleAlert aria-hidden="true" />
           <AlertTitle>Perfil profissional ainda não publicável</AlertTitle>
           <AlertDescription>
-            O papel Profissional está habilitado, mas o perfil profissional
-            ainda precisa ser concluído no fluxo específico antes da publicação.
+            <p>
+              O papel Profissional está habilitado, mas o perfil profissional
+              ainda precisa ser concluído antes da publicação.
+            </p>
+            <Button asChild variant="outline" size="sm" className="mt-3">
+              <Link to="/profissional/perfil">Criar perfil profissional</Link>
+            </Button>
           </AlertDescription>
         </Alert>
       ) : null}

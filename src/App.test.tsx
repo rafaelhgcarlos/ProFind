@@ -31,6 +31,7 @@ function renderRoute(
     profileError: null,
     completeOnboarding: vi.fn(),
     switchMode: vi.fn(),
+    syncProfessionalProfileStatus: vi.fn(),
     retryProfile: vi.fn(),
     ...profileOverrides,
   }

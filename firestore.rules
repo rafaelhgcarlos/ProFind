@@ -64,6 +64,232 @@ service cloud.firestore {
           || hasRoleEnablementGrant(userId, 'professional'));
     }
 
+    function hasProfessionalRole(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.roles is list
+        && 'professional' in get(
+          /databases/$(database)/documents/users/$(userId)
+        ).data.roles;
+    }
+
+    function hasValidProfessionalProfileSummary(userId) {
+      let currentStatus = resource.data.get('professionalProfileStatus', 'not-started');
+      let nextStatus = request.resource.data.professionalProfileStatus;
+      let profilePath = /databases/$(database)/documents/professionalProfiles/$(userId);
+
+      return nextStatus in ['not-started', 'incomplete', 'complete']
+        && (nextStatus == currentStatus
+          || ('professional' in request.resource.data.roles
+            && existsAfter(profilePath)
+            && ((nextStatus == 'incomplete'
+                && getAfter(profilePath).data.status == 'DRAFT')
+              || (nextStatus == 'complete'
+                && getAfter(profilePath).data.status in ['PUBLISHED', 'PAUSED']))));
+    }
+
+    function hasValidProfessionalProfileFields() {
+      let data = request.resource.data;
+
+      return data.keys().hasAll([
+          'ownerId',
+          'publicName',
+          'headline',
+          'categoryIds',
+          'specialtyIds',
+          'experienceYears',
+          'baseLocation',
+          'serviceMode',
+          'serviceRadiusKm',
+          'selectedCities',
+          'availability',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'publicName',
+          'headline',
+          'bio',
+          'categoryIds',
+          'specialtyIds',
+          'experienceYears',
+          'baseLocation',
+          'serviceMode',
+          'serviceRadiusKm',
+          'selectedCities',
+          'availability',
+          'status',
+          'createdAt',
+          'updatedAt',
+          'rating',
+          'reviewCount',
+          'completedJobsCount'
+        ])
+        && data.ownerId is string
+        && data.publicName is string
+        && data.publicName.size() <= 120
+        && data.headline is string
+        && data.headline.size() <= 120
+        && (!('bio' in data)
+          || (data.bio is string && data.bio.size() <= 1200))
+        && data.categoryIds is list
+        && data.categoryIds.size() <= 5
+        && data.specialtyIds is list
+        && data.specialtyIds.size() <= 10
+        && (data.experienceYears == null
+          || (data.experienceYears is int
+            && data.experienceYears >= 0
+            && data.experienceYears <= 80))
+        && hasValidProfessionalBaseLocation(data.baseLocation)
+        && data.serviceMode in [
+          'CITY_ONLY', 'RADIUS', 'SELECTED_CITIES', 'REMOTE'
+        ]
+        && ((data.serviceMode == 'RADIUS'
+            && (data.serviceRadiusKm == null
+              || data.serviceRadiusKm in [5, 10, 20, 30, 50]))
+          || (data.serviceMode != 'RADIUS'
+            && data.serviceRadiusKm == null))
+        && hasValidSelectedCities(data.selectedCities)
+        && ((data.serviceMode == 'SELECTED_CITIES')
+          || data.selectedCities.size() == 0)
+        && data.availability in ['AVAILABLE', 'LIMITED', 'UNAVAILABLE']
+        && data.status in ['DRAFT', 'PUBLISHED', 'PAUSED', 'SUSPENDED']
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isBrazilianStateCode(stateCode) {
+      return stateCode in [
+        'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO',
+        'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI',
+        'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
+      ];
+    }
+
+    function ibgeCodeMatchesState(stateCode, ibgeCode) {
+      return (stateCode == 'RO' && ibgeCode.matches('^11[0-9]{5}$'))
+        || (stateCode == 'AC' && ibgeCode.matches('^12[0-9]{5}$'))
+        || (stateCode == 'AM' && ibgeCode.matches('^13[0-9]{5}$'))
+        || (stateCode == 'RR' && ibgeCode.matches('^14[0-9]{5}$'))
+        || (stateCode == 'PA' && ibgeCode.matches('^15[0-9]{5}$'))
+        || (stateCode == 'AP' && ibgeCode.matches('^16[0-9]{5}$'))
+        || (stateCode == 'TO' && ibgeCode.matches('^17[0-9]{5}$'))
+        || (stateCode == 'MA' && ibgeCode.matches('^21[0-9]{5}$'))
+        || (stateCode == 'PI' && ibgeCode.matches('^22[0-9]{5}$'))
+        || (stateCode == 'CE' && ibgeCode.matches('^23[0-9]{5}$'))
+        || (stateCode == 'RN' && ibgeCode.matches('^24[0-9]{5}$'))
+        || (stateCode == 'PB' && ibgeCode.matches('^25[0-9]{5}$'))
+        || (stateCode == 'PE' && ibgeCode.matches('^26[0-9]{5}$'))
+        || (stateCode == 'AL' && ibgeCode.matches('^27[0-9]{5}$'))
+        || (stateCode == 'SE' && ibgeCode.matches('^28[0-9]{5}$'))
+        || (stateCode == 'BA' && ibgeCode.matches('^29[0-9]{5}$'))
+        || (stateCode == 'MG' && ibgeCode.matches('^31[0-9]{5}$'))
+        || (stateCode == 'ES' && ibgeCode.matches('^32[0-9]{5}$'))
+        || (stateCode == 'RJ' && ibgeCode.matches('^33[0-9]{5}$'))
+        || (stateCode == 'SP' && ibgeCode.matches('^35[0-9]{5}$'))
+        || (stateCode == 'PR' && ibgeCode.matches('^41[0-9]{5}$'))
+        || (stateCode == 'SC' && ibgeCode.matches('^42[0-9]{5}$'))
+        || (stateCode == 'RS' && ibgeCode.matches('^43[0-9]{5}$'))
+        || (stateCode == 'MS' && ibgeCode.matches('^50[0-9]{5}$'))
+        || (stateCode == 'MT' && ibgeCode.matches('^51[0-9]{5}$'))
+        || (stateCode == 'GO' && ibgeCode.matches('^52[0-9]{5}$'))
+        || (stateCode == 'DF' && ibgeCode.matches('^53[0-9]{5}$'));
+    }
+
+    function hasValidProfessionalBaseLocation(baseLocation) {
+      return baseLocation is map
+        && baseLocation.keys().hasAll(['city', 'stateCode', 'ibgeCode'])
+        && baseLocation.keys().hasOnly(['city', 'stateCode', 'ibgeCode'])
+        && baseLocation.city is string
+        && baseLocation.city.size() <= 120
+        && baseLocation.stateCode is string
+        && (baseLocation.stateCode == ''
+          || isBrazilianStateCode(baseLocation.stateCode))
+        && baseLocation.ibgeCode is string
+        && (baseLocation.ibgeCode == ''
+          || baseLocation.ibgeCode.matches('^[0-9]{7}$'))
+        && (baseLocation.stateCode == ''
+          || baseLocation.ibgeCode == ''
+          || ibgeCodeMatchesState(
+            baseLocation.stateCode,
+            baseLocation.ibgeCode
+          ));
+    }
+
+    function hasCompleteProfessionalLocation(location) {
+      return hasValidProfessionalBaseLocation(location)
+        && location.city.size() >= 1
+        && isBrazilianStateCode(location.stateCode)
+        && location.ibgeCode.matches('^[0-9]{7}$')
+        && ibgeCodeMatchesState(location.stateCode, location.ibgeCode);
+    }
+
+    function hasValidSelectedCityAt(cities, index) {
+      return cities.size() <= index
+        || hasCompleteProfessionalLocation(cities[index]);
+    }
+
+    function selectedCityIsUniqueAt(cities, index) {
+      return cities.size() <= index
+        || ((index <= 0
+            || cities[0].ibgeCode != cities[index].ibgeCode)
+          && (index <= 1
+            || cities[1].ibgeCode != cities[index].ibgeCode)
+          && (index <= 2
+            || cities[2].ibgeCode != cities[index].ibgeCode)
+          && (index <= 3
+            || cities[3].ibgeCode != cities[index].ibgeCode)
+          && (index <= 4
+            || cities[4].ibgeCode != cities[index].ibgeCode)
+          && (index <= 5
+            || cities[5].ibgeCode != cities[index].ibgeCode)
+          && (index <= 6
+            || cities[6].ibgeCode != cities[index].ibgeCode)
+          && (index <= 7
+            || cities[7].ibgeCode != cities[index].ibgeCode)
+          && (index <= 8
+            || cities[8].ibgeCode != cities[index].ibgeCode));
+    }
+
+    function hasValidSelectedCities(cities) {
+      return cities is list
+        && cities.size() <= 10
+        && hasValidSelectedCityAt(cities, 0)
+        && hasValidSelectedCityAt(cities, 1)
+        && hasValidSelectedCityAt(cities, 2)
+        && hasValidSelectedCityAt(cities, 3)
+        && hasValidSelectedCityAt(cities, 4)
+        && hasValidSelectedCityAt(cities, 5)
+        && hasValidSelectedCityAt(cities, 6)
+        && hasValidSelectedCityAt(cities, 7)
+        && hasValidSelectedCityAt(cities, 8)
+        && hasValidSelectedCityAt(cities, 9)
+        && selectedCityIsUniqueAt(cities, 0)
+        && selectedCityIsUniqueAt(cities, 1)
+        && selectedCityIsUniqueAt(cities, 2)
+        && selectedCityIsUniqueAt(cities, 3)
+        && selectedCityIsUniqueAt(cities, 4)
+        && selectedCityIsUniqueAt(cities, 5)
+        && selectedCityIsUniqueAt(cities, 6)
+        && selectedCityIsUniqueAt(cities, 7)
+        && selectedCityIsUniqueAt(cities, 8)
+        && selectedCityIsUniqueAt(cities, 9);
+    }
+
+    function isPublishableProfessionalProfile() {
+      let data = request.resource.data;
+
+      return data.publicName.size() >= 2
+        && hasCompleteProfessionalLocation(data.baseLocation)
+        && data.categoryIds.size() >= 1
+        && data.specialtyIds.size() >= 1
+        && (data.serviceMode != 'RADIUS'
+          || data.serviceRadiusKm in [5, 10, 20, 30, 50])
+        && (data.serviceMode != 'SELECTED_CITIES'
+          || data.selectedCities.size() >= 1);
+    }
+
     match /users/{userId} {
       allow create: if isDocumentOwner(userId)
         && request.resource.data.keys().hasOnly([
@@ -95,10 +321,12 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'roles',
           'activeMode',
+          'professionalProfileStatus',
           'updatedAt'
         ])
         && request.resource.data.updatedAt == request.time
         && hasValidRoleConfiguration()
+        && hasValidProfessionalProfileSummary(userId)
         && (hasNoConfiguredRoles()
           || request.resource.data.roles == resource.data.get('roles', [])
           || isGrantedRoleExpansion(userId));
@@ -122,6 +350,64 @@ service cloud.firestore {
     match /specialties/{specialtyId} {
       allow read: if true;
       allow write: if false;
+    }
+
+    match /professionalProfiles/{userId} {
+      allow read: if isDocumentOwner(userId)
+        || resource.data.status == 'PUBLISHED';
+
+      allow create: if isDocumentOwner(userId)
+        && hasProfessionalRole(userId)
+        && request.resource.data.ownerId == userId
+        && request.resource.data.keys().hasOnly([
+          'ownerId',
+          'publicName',
+          'headline',
+          'bio',
+          'categoryIds',
+          'specialtyIds',
+          'experienceYears',
+          'baseLocation',
+          'serviceMode',
+          'serviceRadiusKm',
+          'selectedCities',
+          'availability',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.status in ['DRAFT', 'PUBLISHED']
+        && request.resource.data.createdAt == request.time
+        && hasValidProfessionalProfileFields()
+        && (request.resource.data.status == 'DRAFT'
+          || isPublishableProfessionalProfile());
+
+      allow update: if isDocumentOwner(userId)
+        && hasProfessionalRole(userId)
+        && resource.data.ownerId == userId
+        && request.resource.data.ownerId == userId
+        && resource.data.status != 'SUSPENDED'
+        && request.resource.data.status in ['DRAFT', 'PUBLISHED', 'PAUSED']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'publicName',
+          'headline',
+          'bio',
+          'categoryIds',
+          'specialtyIds',
+          'experienceYears',
+          'baseLocation',
+          'serviceMode',
+          'serviceRadiusKm',
+          'selectedCities',
+          'availability',
+          'status',
+          'updatedAt'
+        ])
+        && hasValidProfessionalProfileFields()
+        && (request.resource.data.status == 'DRAFT'
+          || isPublishableProfessionalProfile());
+
+      allow delete: if false;
     }
   }
 }

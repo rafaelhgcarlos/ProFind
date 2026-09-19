@@ -41,6 +41,7 @@ function createProfileContext(
     profileError: null,
     completeOnboarding: vi.fn().mockResolvedValue(profile),
     switchMode: vi.fn().mockResolvedValue(profile),
+    syncProfessionalProfileStatus: vi.fn(),
     retryProfile: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -286,7 +287,9 @@ describe('onboarding de papéis', () => {
     expect(
       screen.getByText('Perfil profissional ainda não publicável'),
     ).toBeInTheDocument()
-    expect(screen.getByText(/fluxo específico antes da publicação/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'Criar perfil profissional' }),
+    ).toHaveAttribute('href', '/profissional/perfil')
   })
 
   it('mantém o conteúdo privado oculto durante o loading do perfil', () => {

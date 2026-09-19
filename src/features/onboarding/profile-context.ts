@@ -1,6 +1,11 @@
 import { createContext } from 'react'
 
-import type { OnboardingChoice, UserProfile, UserRole } from './user-role'
+import type {
+  OnboardingChoice,
+  ProfessionalProfileStatus,
+  UserProfile,
+  UserRole,
+} from './user-role'
 
 export type ProfileStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -10,6 +15,7 @@ export interface ProfileContextValue {
   profileError: string | null
   completeOnboarding(choice: OnboardingChoice): Promise<UserProfile>
   switchMode(mode: UserRole): Promise<UserProfile>
+  syncProfessionalProfileStatus(status: ProfessionalProfileStatus): void
   retryProfile(): Promise<void>
 }
 
