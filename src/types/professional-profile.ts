@@ -15,7 +15,6 @@ export const PROFESSIONAL_SERVICE_MODES = [
   'CITY_ONLY',
   'RADIUS',
   'SELECTED_CITIES',
-  'REMOTE',
 ] as const
 
 export const PROFESSIONAL_SERVICE_RADIUS_OPTIONS = [5, 10, 20, 30, 50] as const
@@ -73,7 +72,7 @@ export interface ProfessionalProfileInput {
   specialtyIds: string[]
   experienceYears: number | null
   baseLocation: ProfessionalBaseLocation
-  serviceMode: ProfessionalServiceMode
+  serviceMode: ProfessionalServiceMode | null
   serviceRadiusKm: number | null
   selectedCities: ProfessionalBaseLocation[]
   availability: ProfessionalAvailability

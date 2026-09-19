@@ -142,9 +142,10 @@ service cloud.firestore {
             && data.experienceYears >= 0
             && data.experienceYears <= 80))
         && hasValidProfessionalBaseLocation(data.baseLocation)
-        && data.serviceMode in [
-          'CITY_ONLY', 'RADIUS', 'SELECTED_CITIES', 'REMOTE'
-        ]
+        && (data.serviceMode == null
+          || data.serviceMode in [
+            'CITY_ONLY', 'RADIUS', 'SELECTED_CITIES'
+          ])
         && ((data.serviceMode == 'RADIUS'
             && (data.serviceRadiusKm == null
               || data.serviceRadiusKm in [5, 10, 20, 30, 50]))
@@ -284,6 +285,9 @@ service cloud.firestore {
         && hasCompleteProfessionalLocation(data.baseLocation)
         && data.categoryIds.size() >= 1
         && data.specialtyIds.size() >= 1
+        && data.serviceMode in [
+          'CITY_ONLY', 'RADIUS', 'SELECTED_CITIES'
+        ]
         && (data.serviceMode != 'RADIUS'
           || data.serviceRadiusKm in [5, 10, 20, 30, 50])
         && (data.serviceMode != 'SELECTED_CITIES'
@@ -354,7 +358,10 @@ service cloud.firestore {
 
     match /professionalProfiles/{userId} {
       allow read: if isDocumentOwner(userId)
-        || resource.data.status == 'PUBLISHED';
+        || (resource.data.status == 'PUBLISHED'
+          && resource.data.get('serviceMode', null) in [
+            'CITY_ONLY', 'RADIUS', 'SELECTED_CITIES'
+          ]);
 
       allow create: if isDocumentOwner(userId)
         && hasProfessionalRole(userId)

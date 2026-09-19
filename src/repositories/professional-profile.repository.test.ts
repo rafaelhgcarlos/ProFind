@@ -145,6 +145,25 @@ describe('professionalProfileRepository', () => {
     ).resolves.toMatchObject({ bio: '' })
   })
 
+  it('trata REMOTE legado como rascunho sem escolher outra modalidade', async () => {
+    firebaseMocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({
+        ...profileInput,
+        serviceMode: 'REMOTE',
+        status: 'PUBLISHED',
+      }),
+    })
+
+    await expect(
+      professionalProfileRepository.findByOwnerId('user-123'),
+    ).resolves.toMatchObject({
+      serviceMode: null,
+      status: 'DRAFT',
+    })
+    expect(firebaseMocks.writeBatch).not.toHaveBeenCalled()
+  })
+
   it('não envia rating ou métricas derivadas durante uma edição', async () => {
     await professionalProfileRepository.save({
       userId: 'user-123',

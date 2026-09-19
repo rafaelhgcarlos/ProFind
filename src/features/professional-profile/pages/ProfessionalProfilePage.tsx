@@ -77,7 +77,7 @@ interface ProfessionalProfileFormState {
   specialtyIds: string[]
   experienceYears: string
   baseLocation: ProfessionalBaseLocation
-  serviceMode: ProfessionalServiceMode
+  serviceMode: ProfessionalServiceMode | ''
   serviceRadiusKm: string
   selectedCities: ProfessionalBaseLocation[]
   availability: ProfessionalAvailability
@@ -108,11 +108,6 @@ const serviceModeOptions: Array<{
     value: 'SELECTED_CITIES',
     label: 'Cidades selecionadas',
     description: 'Escolha explicitamente os municípios atendidos.',
-  },
-  {
-    value: 'REMOTE',
-    label: 'Atendimento remoto',
-    description: 'Serviço prestado sem deslocamento presencial.',
   },
 ]
 
@@ -161,7 +156,7 @@ function formFromProfile(
     experienceYears:
       profile.experienceYears === null ? '' : String(profile.experienceYears),
     baseLocation: { ...profile.baseLocation },
-    serviceMode: profile.serviceMode,
+    serviceMode: profile.serviceMode ?? '',
     serviceRadiusKm:
       profile.serviceRadiusKm === null ? '' : String(profile.serviceRadiusKm),
     selectedCities: profile.selectedCities.map((location) => ({ ...location })),
@@ -179,6 +174,7 @@ function inputFromForm(form: ProfessionalProfileFormState): ProfessionalProfileI
   return {
     ...form,
     experienceYears: nullableInteger(form.experienceYears),
+    serviceMode: form.serviceMode || null,
     serviceRadiusKm: nullableInteger(form.serviceRadiusKm),
   }
 }
@@ -282,6 +278,7 @@ export function ProfessionalProfilePage() {
     return grouped
   }, [catalog])
   const currentStatus = professionalProfile?.status ?? 'DRAFT'
+  const needsServiceModeReview = professionalProfile?.serviceMode === null
   const isSuspended = currentStatus === 'SUSPENDED'
   const isSaving = savingStatus !== null
 
@@ -496,6 +493,16 @@ export function ProfessionalProfilePage() {
             <AlertTitle>Perfil suspenso</AlertTitle>
             <AlertDescription>
               Este perfil não pode ser editado ou republicado enquanto a suspensão estiver ativa.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {needsServiceModeReview && !isSuspended ? (
+          <Alert>
+            <CircleAlert aria-hidden="true" />
+            <AlertTitle>Escolha uma nova modalidade de atendimento</AlertTitle>
+            <AlertDescription>
+              A modalidade salva anteriormente não faz parte do MVP. O perfil foi tratado como rascunho e precisa de uma opção válida antes de ser publicado novamente.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -999,7 +1006,11 @@ export function ProfessionalProfilePage() {
               ].map(({ key, label, complete }) => {
                 const Icon = complete ? Check : Circle
                 return (
-                  <li key={key} className="flex items-start gap-2">
+                  <li
+                    key={key}
+                    className="flex items-start gap-2"
+                    aria-label={`${label}: ${complete ? 'completo' : 'pendente'}`}
+                  >
                     <Icon className={complete ? 'mt-0.5 size-4 text-success' : 'mt-0.5 size-4 text-muted-foreground'} aria-hidden="true" />
                     <span className={complete ? 'text-foreground' : 'text-muted-foreground'}>{label}</span>
                   </li>

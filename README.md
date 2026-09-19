@@ -114,8 +114,11 @@ batch para manter a jornada profissional consistente.
 Na seção de atendimento, a UF é escolhida antes do município. Os municípios
 são carregados da API oficial de Localidades do IBGE, com pesquisa, cache por
 UF e nova tentativa em caso de falha. O perfil registra também a modalidade
-`CITY_ONLY`, `RADIUS`, `SELECTED_CITIES` ou `REMOTE`; somente `RADIUS` exige uma
-das faixas configuradas e `SELECTED_CITIES` mantém até dez municípios únicos.
+`CITY_ONLY`, `RADIUS` ou `SELECTED_CITIES`; somente `RADIUS` exige uma das
+faixas configuradas e `SELECTED_CITIES` mantém até dez municípios únicos. A
+modalidade `REMOTE` não faz parte do MVP. Perfis legados com esse valor são
+tratados como rascunho e exigem uma nova escolha antes da republicação, sem
+conversão automática.
 
 ## Design system
 

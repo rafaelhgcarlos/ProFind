@@ -183,13 +183,6 @@ describe('professional profile service', () => {
     ).not.toHaveProperty('serviceRadiusKm')
     expect(
       validateProfessionalProfile(
-        { ...publishableInput, serviceMode: 'REMOTE', serviceRadiusKm: null },
-        'PUBLISHED',
-        catalog,
-      ),
-    ).not.toHaveProperty('serviceRadiusKm')
-    expect(
-      validateProfessionalProfile(
         { ...publishableInput, serviceMode: 'RADIUS', serviceRadiusKm: null },
         'PUBLISHED',
         catalog,
@@ -207,6 +200,38 @@ describe('professional profile service', () => {
         catalog,
       ),
     ).toHaveProperty('selectedCities')
+  })
+
+  it('mantém modalidade ausente no rascunho e exige uma opção válida para publicar', () => {
+    const draftErrors = validateProfessionalProfile(
+      { ...publishableInput, serviceMode: null, serviceRadiusKm: null },
+      'DRAFT',
+      catalog,
+    )
+    const publicationErrors = validateProfessionalProfile(
+      { ...publishableInput, serviceMode: null, serviceRadiusKm: null },
+      'PUBLISHED',
+      catalog,
+    )
+
+    expect(draftErrors).not.toHaveProperty('serviceMode')
+    expect(publicationErrors.serviceMode).toMatch(/selecione como você atende/i)
+  })
+
+  it('rejeita REMOTE em vez de convertê-lo para outra modalidade', () => {
+    const legacyRemoteInput = {
+      ...publishableInput,
+      serviceMode: 'REMOTE',
+      serviceRadiusKm: null,
+    } as unknown as ProfessionalProfileInput
+
+    const errors = validateProfessionalProfile(
+      legacyRemoteInput,
+      'DRAFT',
+      catalog,
+    )
+
+    expect(errors.serviceMode).toMatch(/não está disponível/i)
   })
 
   it('persiste municípios selecionados sem duplicatas e remove o raio', async () => {

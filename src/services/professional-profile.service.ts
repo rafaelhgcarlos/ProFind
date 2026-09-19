@@ -233,8 +233,11 @@ export function validateProfessionalProfile(
   ) {
     errors.experienceYears = 'Informe um valor inteiro entre 0 e 80.'
   }
-  if (!isProfessionalServiceMode(input.serviceMode)) {
-    errors.serviceMode = 'Selecione como você atende.'
+  if (
+    input.serviceMode !== null &&
+    !isProfessionalServiceMode(input.serviceMode)
+  ) {
+    errors.serviceMode = 'A modalidade informada não está disponível.'
   } else if (
     input.serviceMode === 'RADIUS' &&
     input.serviceRadiusKm !== null &&
@@ -293,6 +296,9 @@ export function validateProfessionalProfile(
     }
     if (input.specialtyIds.length === 0) {
       errors.specialtyIds = 'Selecione ao menos uma especialidade para publicar.'
+    }
+    if (!isProfessionalServiceMode(input.serviceMode)) {
+      errors.serviceMode = 'Selecione como você atende para publicar.'
     }
     if (input.serviceMode === 'RADIUS' && input.serviceRadiusKm === null) {
       errors.serviceRadiusKm = 'Selecione o raio de atendimento para publicar.'

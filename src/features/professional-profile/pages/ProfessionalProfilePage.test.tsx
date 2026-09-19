@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -224,7 +224,7 @@ describe('ProfessionalProfilePage', () => {
     expect(screen.queryByLabelText(/logradouro|rua|número|complemento/i)).not.toBeInTheDocument()
   })
 
-  it('alterna dinamicamente a modalidade sem exigir raio para remoto', async () => {
+  it('alterna dinamicamente entre raio e atendimento somente na cidade', async () => {
     const user = userEvent.setup()
     render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
 
@@ -240,9 +240,44 @@ describe('ProfessionalProfilePage', () => {
     expect(
       screen.getByRole('radiogroup', { name: 'Raio aproximado' }),
     ).toBeInTheDocument()
-    await user.click(screen.getByRole('radio', { name: 'Atendimento remoto' }))
+    await user.click(
+      screen.getByRole('radio', { name: 'Somente na minha cidade' }),
+    )
     expect(
       screen.queryByRole('radiogroup', { name: 'Raio aproximado' }),
     ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('radio', { name: 'Atendimento remoto' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('exige nova escolha para um perfil legado com atendimento remoto', async () => {
+    mocks.loadProfessionalProfile.mockResolvedValue({
+      ...publishedProfile,
+      serviceMode: null,
+      serviceRadiusKm: null,
+      status: 'DRAFT',
+    })
+
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    expect(
+      await screen.findByText('Escolha uma nova modalidade de atendimento'),
+    ).toBeInTheDocument()
+    const serviceModes = within(
+      screen.getByRole('radiogroup', { name: 'Como você atende?' }),
+    )
+    expect(serviceModes.getAllByRole('radio')).toHaveLength(3)
+    expect(
+      serviceModes
+        .getAllByRole('radio')
+        .some((option) => option.getAttribute('data-state') === 'checked'),
+    ).toBe(false)
+    expect(screen.getByText('Rascunho')).toBeInTheDocument()
+    expect(
+      screen.getByRole('listitem', {
+        name: 'Área de atendimento: pendente',
+      }),
+    ).toBeInTheDocument()
   })
 })

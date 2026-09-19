@@ -81,6 +81,12 @@ export const professionalProfileRepository = {
     if (!snapshot.exists()) return null
 
     const data = snapshot.data()
+    const serviceMode = isProfessionalServiceMode(data.serviceMode)
+      ? data.serviceMode
+      : null
+    const storedStatus = isProfessionalProfileStatus(data.status)
+      ? data.status
+      : 'DRAFT'
 
     return {
       userId,
@@ -91,17 +97,16 @@ export const professionalProfileRepository = {
       specialtyIds: stringArray(data.specialtyIds),
       experienceYears: nullableNumber(data.experienceYears),
       baseLocation: professionalBaseLocation(data.baseLocation),
-      serviceMode: isProfessionalServiceMode(data.serviceMode)
-        ? data.serviceMode
-        : nullableNumber(data.serviceRadiusKm) !== null
-          ? 'RADIUS'
-          : 'CITY_ONLY',
+      serviceMode,
       serviceRadiusKm: nullableNumber(data.serviceRadiusKm),
       selectedCities: professionalBaseLocations(data.selectedCities),
       availability: isProfessionalAvailability(data.availability)
         ? data.availability
         : 'AVAILABLE',
-      status: isProfessionalProfileStatus(data.status) ? data.status : 'DRAFT',
+      status:
+        storedStatus === 'SUSPENDED' || serviceMode !== null
+          ? storedStatus
+          : 'DRAFT',
       rating: optionalNumber(data.rating),
       reviewCount: optionalNumber(data.reviewCount),
       completedJobsCount: optionalNumber(data.completedJobsCount),
