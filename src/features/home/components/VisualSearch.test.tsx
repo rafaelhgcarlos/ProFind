@@ -40,4 +40,20 @@ describe('VisualSearch', () => {
     expect(screen.getByLabelText('Qual serviço você precisa?')).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByRole('alert')).toHaveTextContent('Revise o serviço informado.')
   })
+
+  it('oferece somente as especialidades recebidas pelo catálogo', () => {
+    const { container } = renderSearch({
+      serviceOptions: ['Eletricista', 'Diarista/Faxineiro'],
+    })
+
+    expect(screen.getByLabelText('Qual serviço você precisa?')).toHaveAttribute(
+      'list',
+      'service-options',
+    )
+    expect(
+      Array.from(container.querySelectorAll('datalist option')).map(
+        (option) => option.getAttribute('value'),
+      ),
+    ).toEqual(['Eletricista', 'Diarista/Faxineiro'])
+  })
 })

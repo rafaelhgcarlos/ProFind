@@ -17,11 +17,12 @@ interface VisualSearchProps {
   loading?: boolean
   error?: string
   serviceValue?: string
+  serviceOptions?: readonly string[]
   onServiceChange?: (value: string) => void
   onSearch?: (values: VisualSearchValues) => void
 }
 
-export function VisualSearch({ disabled = false, loading = false, error, serviceValue, onServiceChange, onSearch }: VisualSearchProps) {
+export function VisualSearch({ disabled = false, loading = false, error, serviceValue, serviceOptions = [], onServiceChange, onSearch }: VisualSearchProps) {
   const [localService, setLocalService] = useState('')
   const service = serviceValue ?? localService
   const [location, setLocation] = useState('')
@@ -45,7 +46,12 @@ export function VisualSearch({ disabled = false, loading = false, error, service
           <Label htmlFor="search-service">Qual serviço você precisa?</Label>
           <div className="relative">
             <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2 text-muted-foreground" />
-            <Input id="search-service" name="service" placeholder="Ex.: elétrica, limpeza, pintura" value={service} disabled={disabled || loading} aria-invalid={Boolean(error)} aria-describedby={error ? 'visual-search-error' : undefined} onChange={(event) => { if (serviceValue === undefined) setLocalService(event.target.value); else onServiceChange?.(event.target.value); setShowUnavailable(false) }} className="pl-10" />
+            <Input id="search-service" name="service" list={serviceOptions.length ? 'service-options' : undefined} placeholder="Ex.: eletricista, diarista, pintor" value={service} disabled={disabled || loading} aria-invalid={Boolean(error)} aria-describedby={error ? 'visual-search-error' : undefined} onChange={(event) => { if (serviceValue === undefined) setLocalService(event.target.value); else onServiceChange?.(event.target.value); setShowUnavailable(false) }} className="pl-10" />
+            {serviceOptions.length ? (
+              <datalist id="service-options">
+                {serviceOptions.map((option) => <option key={option} value={option} />)}
+              </datalist>
+            ) : null}
           </div>
         </div>
         <div className="min-w-0 space-y-2">

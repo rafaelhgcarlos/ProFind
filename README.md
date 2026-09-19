@@ -37,6 +37,8 @@ Também estão disponíveis:
 - `npm test`: executa os testes uma vez.
 - `npm run test:watch`: executa os testes em modo interativo.
 - `npm run preview`: serve localmente o build de produção.
+- `npm run seed:catalog -- --project=SEU_PROJECT_ID`: cria ou atualiza o
+  catálogo inicial de categorias e especialidades.
 
 ## Organização
 
@@ -87,6 +89,13 @@ Sem esse deploy, projetos criados no modo bloqueado retornam
 identidade automaticamente, mas o cadastro não pode ser concluído. Ao atualizar
 as versões dos documentos jurídicos, atualize também as versões permitidas nas
 regras antes de publicar a nova interface.
+
+O catálogo público de serviços usa `categories/{categoryId}` e
+`specialties/{specialtyId}`. A aplicação consulta essas coleções por repository
+e service, ordena por `order` e oferece em novos fluxos somente itens com
+`active: true` vinculados a categorias ativas. Escritas pelo cliente são
+bloqueadas. O modelo, a administração e a carga inicial estão documentados em
+[`docs/service-catalog.md`](docs/service-catalog.md).
 
 ## Design system
 

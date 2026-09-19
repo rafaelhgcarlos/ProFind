@@ -1,22 +1,18 @@
-import { ArrowRight, BadgeCheck, Bolt, BrushCleaning, Check, LockKeyhole, MapPin, Paintbrush, ShieldCheck, Wrench } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowRight, BadgeCheck, Check, CircleAlert, LayoutGrid, LockKeyhole, MapPin, ShieldCheck, Wrench } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { AppShell } from '../../../components/layout/AppShell'
 import { FeatureCard } from '../../../components/ui/FeatureCard'
+import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
 import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
+import { EmptyState } from '../../../components/ui/empty-state'
+import { Skeleton } from '../../../components/ui/skeleton'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { CategoryTile } from '../components/CategoryTile'
 import { VisualSearch } from '../components/VisualSearch'
-
-// Exemplos editoriais. O catálogo real pertence à issue #7.
-const exampleCategories = [
-  { name: 'Elétrica', description: 'Instalações e reparos', icon: Bolt },
-  { name: 'Limpeza', description: 'Cuidados com o espaço', icon: BrushCleaning },
-  { name: 'Pintura', description: 'Renovação de ambientes', icon: Paintbrush },
-  { name: 'Manutenção', description: 'Ajustes para o dia a dia', icon: Wrench },
-]
+import { useCatalog } from '../use-catalog'
 
 const availableSteps = [
   { icon: 'trust' as const, title: 'Crie sua conta', description: 'Cadastre-se com nome, e-mail e senha para ter uma identidade no ProFind.' },
@@ -27,6 +23,23 @@ const availableSteps = [
 export function HomePage() {
   useDocumentTitle('ProFind — encontre profissionais')
   const [service, setService] = useState('')
+  const catalogState = useCatalog()
+  const specialtiesByCategory = useMemo(() => {
+    const grouped = new Map<string, string[]>()
+
+    for (const specialty of catalogState.catalog?.specialties ?? []) {
+      const names = grouped.get(specialty.categoryId) ?? []
+      names.push(specialty.name)
+      grouped.set(specialty.categoryId, names)
+    }
+
+    return grouped
+  }, [catalogState.catalog])
+  const serviceOptions = Array.from(
+    new Set(
+      catalogState.catalog?.specialties.map((specialty) => specialty.name) ?? [],
+    ),
+  )
 
   return (
     <AppShell navigation={[{ label: 'Como funciona', href: '/#como-funciona' }]} showAccountLinks>
@@ -60,18 +73,55 @@ export function HomePage() {
         </div>
         <div id="busca" className="mx-auto max-w-7xl px-4 pb-12 sm:px-6 lg:px-8 lg:pb-16">
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-lg font-bold tracking-tight">Comece pelo que você precisa</h2><span className="text-xs font-medium text-muted-foreground">Prévia da busca · integração em desenvolvimento</span></div>
-          <VisualSearch serviceValue={service} onServiceChange={setService} />
+          <VisualSearch serviceValue={service} serviceOptions={serviceOptions} onServiceChange={setService} />
         </div>
       </section>
 
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div className="max-w-2xl"><p className="text-sm font-semibold text-primary">Ideias para começar</p><h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Qual serviço faz falta hoje?</h2><p className="mt-3 leading-7 text-muted-foreground">Alguns exemplos de áreas que você poderá explorar. O catálogo de serviços está em preparação.</p></div>
+          <div className="max-w-2xl"><p className="text-sm font-semibold text-primary">Categorias de serviços</p><h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Qual serviço faz falta hoje?</h2><p className="mt-3 leading-7 text-muted-foreground">Explore as categorias disponíveis e veja as especialidades oferecidas em cada uma.</p></div>
           <a href="#busca" className="inline-flex min-h-11 items-center gap-2 self-start rounded-sm text-sm font-semibold text-primary underline-offset-4 hover:underline sm:self-auto">Voltar à busca <ArrowRight className="size-4" aria-hidden="true" /></a>
         </div>
-        <div className="mt-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          {exampleCategories.map((category) => <CategoryTile key={category.name} {...category} active={service === category.name} onSelect={() => { setService(category.name); document.getElementById('busca')?.scrollIntoView() }} />)}
-        </div>
+        {catalogState.status === 'loading' ? (
+          <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4" role="status" aria-label="Carregando categorias">
+            {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-36 rounded-lg" />)}
+          </div>
+        ) : null}
+        {catalogState.status === 'error' ? (
+          <Alert variant="destructive" className="mt-8">
+            <CircleAlert aria-hidden="true" />
+            <AlertTitle>Catálogo indisponível</AlertTitle>
+            <AlertDescription>
+              <p>{catalogState.error}</p>
+              <Button type="button" variant="outline" size="sm" className="mt-4" onClick={catalogState.retry}>Tentar novamente</Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {catalogState.status === 'ready' && catalogState.catalog.categories.length === 0 ? (
+          <EmptyState
+            className="mt-8"
+            icon={<LayoutGrid aria-hidden="true" />}
+            title="Nenhuma categoria disponível"
+            description="O catálogo está sendo preparado. Tente novamente mais tarde."
+          />
+        ) : null}
+        {catalogState.status === 'ready' && catalogState.catalog.categories.length > 0 ? (
+          <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+            {catalogState.catalog.categories.map((category) => (
+              <CategoryTile
+                key={category.id}
+                name={category.name}
+                description={specialtiesByCategory.get(category.id)?.join(' · ')}
+                icon={Wrench}
+                active={service === category.name}
+                onSelect={() => {
+                  setService(category.name)
+                  document.getElementById('busca')?.scrollIntoView()
+                }}
+              />
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="border-y bg-card">

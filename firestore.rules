@@ -111,5 +111,17 @@ service cloud.firestore {
     match /roleEnablementGrants/{userId}/roles/{role} {
       allow read, write: if false;
     }
+
+    // O catálogo é público, mas sua manutenção acontece somente por
+    // ambientes administrativos confiáveis, que usam um SDK de servidor.
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /specialties/{specialtyId} {
+      allow read: if true;
+      allow write: if false;
+    }
   }
 }
