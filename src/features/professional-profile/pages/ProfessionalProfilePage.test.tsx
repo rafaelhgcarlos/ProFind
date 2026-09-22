@@ -5,11 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProfessionalProfile } from '../../../types/professional-profile'
 import { ProfessionalProfileError } from '../../../services/professional-profile.service'
+import { PostalCodeError } from '../../../services/postal-code.service'
 import { ProfessionalProfilePage } from './ProfessionalProfilePage'
 
 const mocks = vi.hoisted(() => ({
   loadProfessionalProfile: vi.fn(),
   saveProfessionalProfile: vi.fn(),
+  updateProfessionalAvailability: vi.fn(),
+  lookupPostalCode: vi.fn(),
   listAvailableCatalog: vi.fn(),
   listMunicipalitiesByState: vi.fn(),
   syncProfessionalProfileStatus: vi.fn(),
@@ -44,6 +47,16 @@ vi.mock('../../../services/ibge-localities.service', () => ({
   toProfessionalBaseLocation: (municipality: unknown) => municipality,
 }))
 
+vi.mock('../../../services/postal-code.service', async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import('../../../services/postal-code.service')
+  >()
+  return {
+    ...original,
+    lookupPostalCode: mocks.lookupPostalCode,
+  }
+})
+
 vi.mock('../../../services/professional-profile.service', async (importOriginal) => {
   const original = await importOriginal<
     typeof import('../../../services/professional-profile.service')
@@ -52,6 +65,7 @@ vi.mock('../../../services/professional-profile.service', async (importOriginal)
     ...original,
     loadProfessionalProfile: mocks.loadProfessionalProfile,
     saveProfessionalProfile: mocks.saveProfessionalProfile,
+    updateProfessionalAvailability: mocks.updateProfessionalAvailability,
   }
 })
 
@@ -85,6 +99,12 @@ const publishedProfile: ProfessionalProfile = {
   serviceRadiusKm: 30,
   selectedCities: [],
   availability: 'AVAILABLE',
+  phone: '11999998888',
+  contactVisibility: 'PRIVATE',
+  privateLocation: {
+    postalCode: '13083852',
+    neighborhood: 'Cidade Universitária',
+  },
   status: 'PUBLISHED',
 }
 
@@ -96,6 +116,17 @@ describe('ProfessionalProfilePage', () => {
     mocks.listMunicipalitiesByState.mockResolvedValue([
       { city: 'Campinas', stateCode: 'SP', ibgeCode: '3509502' },
     ])
+    mocks.lookupPostalCode.mockResolvedValue({
+      baseLocation: {
+        city: 'Campinas',
+        stateCode: 'SP',
+        ibgeCode: '3509502',
+      },
+      privateLocation: {
+        postalCode: '13083852',
+        neighborhood: 'Cidade Universitária',
+      },
+    })
   })
 
   it('carrega o catálogo real e permite salvar um perfil incompleto como rascunho', async () => {
@@ -193,7 +224,7 @@ describe('ProfessionalProfilePage', () => {
     expect(screen.queryByRole('button', { name: /publicar perfil/i })).not.toBeInTheDocument()
   })
 
-  it('envia a localização pública estruturada sem CEP ou endereço', async () => {
+  it('mantém CEP e bairro em campos privados sem coletar endereço exato', async () => {
     mocks.loadProfessionalProfile.mockResolvedValue(publishedProfile)
     mocks.saveProfessionalProfile.mockResolvedValue({
       ...publishedProfile,
@@ -215,12 +246,16 @@ describe('ProfessionalProfilePage', () => {
           stateCode: 'SP',
           ibgeCode: '3509502',
         },
+        privateLocation: {
+          postalCode: '13083-852',
+          neighborhood: 'Cidade Universitária',
+        },
       }),
       'DRAFT',
       catalog,
       publishedProfile,
     )
-    expect(screen.queryByLabelText(/cep/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('CEP (privado)')).toHaveValue('13083-852')
     expect(screen.queryByLabelText(/logradouro|rua|número|complemento/i)).not.toBeInTheDocument()
   })
 
@@ -249,6 +284,69 @@ describe('ProfessionalProfilePage', () => {
     expect(
       screen.queryByRole('radio', { name: 'Atendimento remoto' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('consulta o ViaCEP após oito dígitos e permite corrigir a localização', async () => {
+    const user = userEvent.setup()
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    const postalCode = await screen.findByLabelText('CEP (privado)')
+    await user.type(postalCode, '13083852')
+    await user.tab()
+
+    expect(await screen.findByText(/localização preenchida pelo CEP/i)).toBeInTheDocument()
+    expect(mocks.lookupPostalCode).toHaveBeenCalledWith('13083852')
+    expect(screen.getByDisplayValue('Campinas')).toBeInTheDocument()
+    expect(screen.getByLabelText('Bairro (privado)')).toHaveValue(
+      'Cidade Universitária',
+    )
+    expect(screen.getByText(/preenchimento manual/i)).toBeInTheDocument()
+  })
+
+  it('oferece nova tentativa e fallback manual quando o ViaCEP falha', async () => {
+    mocks.lookupPostalCode.mockRejectedValue(
+      new PostalCodeError(
+        'provider-unavailable',
+        'O serviço de CEP está indisponível. Tente novamente ou preencha a localização manualmente.',
+      ),
+    )
+    const user = userEvent.setup()
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    const postalCode = await screen.findByLabelText('CEP (privado)')
+    await user.type(postalCode, '13083852')
+    await user.tab()
+
+    expect(await screen.findByText(/serviço de CEP está indisponível/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeEnabled()
+    expect(screen.getByRole('combobox', { name: 'UF' })).toBeEnabled()
+    expect(screen.getByLabelText(/Município/)).toBeInTheDocument()
+  })
+
+  it('atualiza a disponibilidade sem republicar o perfil', async () => {
+    mocks.loadProfessionalProfile.mockResolvedValue(publishedProfile)
+    mocks.updateProfessionalAvailability.mockResolvedValue({
+      ...publishedProfile,
+      availability: 'LIMITED',
+    })
+    const user = userEvent.setup()
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    await user.click(
+      await screen.findByRole('radio', { name: 'Agenda limitada' }),
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Atualizar disponibilidade' }),
+    )
+
+    expect(mocks.updateProfessionalAvailability).toHaveBeenCalledWith(
+      'user-123',
+      'LIMITED',
+      publishedProfile,
+    )
+    expect(mocks.saveProfessionalProfile).not.toHaveBeenCalled()
+    expect(screen.getByText('Publicado')).toBeInTheDocument()
+    expect(await screen.findByText(/sem alterar a publicação/i)).toBeInTheDocument()
   })
 
   it('exige nova escolha para um perfil legado com atendimento remoto', async () => {

@@ -3,7 +3,12 @@ import {
   Check,
   Circle,
   CircleAlert,
+  Eye,
+  EyeOff,
+  MapPin,
   PauseCircle,
+  Phone,
+  RotateCcw,
   Save,
   Send,
   ShieldAlert,
@@ -42,9 +47,16 @@ import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { listAvailableCatalog } from '../../../services/catalog.service'
 import { toProfessionalBaseLocation } from '../../../services/ibge-localities.service'
 import {
+  formatPostalCode,
+  lookupPostalCode,
+  normalizePostalCode,
+  PostalCodeError,
+} from '../../../services/postal-code.service'
+import {
   loadProfessionalProfile,
   ProfessionalProfileError,
   saveProfessionalProfile,
+  updateProfessionalAvailability,
   normalizeProfessionalProfileInput,
   userProfileStatusForProfessionalProfile,
   validateProfessionalProfile,
@@ -55,6 +67,7 @@ import type { ServiceCatalog } from '../../../types/catalog'
 import type {
   ProfessionalAvailability,
   ProfessionalBaseLocation,
+  ProfessionalContactVisibility,
   ProfessionalProfile,
   ProfessionalProfileInput,
   ProfessionalProfileStatus,
@@ -81,6 +94,12 @@ interface ProfessionalProfileFormState {
   serviceRadiusKm: string
   selectedCities: ProfessionalBaseLocation[]
   availability: ProfessionalAvailability
+  phone: string
+  contactVisibility: ProfessionalContactVisibility
+  privateLocation: {
+    postalCode: string
+    neighborhood: string
+  }
 }
 
 const availabilityLabels: Record<ProfessionalAvailability, string> = {
@@ -88,6 +107,23 @@ const availabilityLabels: Record<ProfessionalAvailability, string> = {
   LIMITED: 'Agenda limitada',
   UNAVAILABLE: 'Temporariamente indisponível',
 }
+
+const contactVisibilityOptions: Array<{
+  value: ProfessionalContactVisibility
+  label: string
+  description: string
+}> = [
+  {
+    value: 'PRIVATE',
+    label: 'Privado',
+    description: 'Somente você e o backend autorizado podem acessar.',
+  },
+  {
+    value: 'PUBLIC',
+    label: 'Público',
+    description: 'Clientes poderão ver o telefone no perfil publicado.',
+  },
+]
 
 const serviceModeOptions: Array<{
   value: ProfessionalServiceMode
@@ -138,6 +174,9 @@ function emptyForm(publicName: string): ProfessionalProfileFormState {
     serviceRadiusKm: '',
     selectedCities: [],
     availability: 'AVAILABLE',
+    phone: '',
+    contactVisibility: 'PRIVATE',
+    privateLocation: { postalCode: '', neighborhood: '' },
   }
 }
 
@@ -161,6 +200,12 @@ function formFromProfile(
       profile.serviceRadiusKm === null ? '' : String(profile.serviceRadiusKm),
     selectedCities: profile.selectedCities.map((location) => ({ ...location })),
     availability: profile.availability,
+    phone: formatPhone(profile.phone),
+    contactVisibility: profile.contactVisibility,
+    privateLocation: {
+      postalCode: formatPostalCode(profile.privateLocation.postalCode),
+      neighborhood: profile.privateLocation.neighborhood ?? '',
+    },
   }
 }
 
@@ -168,6 +213,16 @@ function nullableInteger(value: string) {
   if (!value.trim()) return null
   const number = Number(value)
   return Number.isSafeInteger(number) ? number : Number.NaN
+}
+
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 11)
+  if (digits.length <= 2) return digits
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
 }
 
 function inputFromForm(form: ProfessionalProfileFormState): ProfessionalProfileInput {
@@ -217,6 +272,10 @@ export function ProfessionalProfilePage() {
   const [attempt, setAttempt] = useState(0)
   const [savingStatus, setSavingStatus] =
     useState<EditableProfessionalProfileStatus | null>(null)
+  const [savingAvailability, setSavingAvailability] = useState(false)
+  const [postalCodeStatus, setPostalCodeStatus] =
+    useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [postalCodeError, setPostalCodeError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] =
     useState<ProfessionalProfileFieldErrors>({})
   const [submissionError, setSubmissionError] = useState<string | null>(null)
@@ -280,7 +339,7 @@ export function ProfessionalProfilePage() {
   const currentStatus = professionalProfile?.status ?? 'DRAFT'
   const needsServiceModeReview = professionalProfile?.serviceMode === null
   const isSuspended = currentStatus === 'SUSPENDED'
-  const isSaving = savingStatus !== null
+  const isSaving = savingStatus !== null || savingAvailability
 
   function updateField<Key extends keyof ProfessionalProfileFormState>(
     field: Key,
@@ -297,10 +356,60 @@ export function ProfessionalProfilePage() {
       ...current,
       baseLocation: undefined,
       selectedCities: undefined,
+      privateLocation: undefined,
       form: undefined,
     }))
     setSubmissionError(null)
     setSuccessMessage(null)
+  }
+
+  function updatePrivateLocation(
+    field: 'postalCode' | 'neighborhood',
+    value: string,
+  ) {
+    setForm((current) => ({
+      ...current,
+      privateLocation: { ...current.privateLocation, [field]: value },
+    }))
+    setFieldErrors((current) => ({
+      ...current,
+      privateLocation: undefined,
+      form: undefined,
+    }))
+    setSubmissionError(null)
+    setSuccessMessage(null)
+  }
+
+  async function handlePostalCodeLookup() {
+    const postalCode = normalizePostalCode(form.privateLocation.postalCode)
+    if (postalCode.length !== 8 || postalCodeStatus === 'loading') {
+      setPostalCodeStatus('error')
+      setPostalCodeError('Informe um CEP válido com oito dígitos.')
+      return
+    }
+
+    setPostalCodeStatus('loading')
+    setPostalCodeError(null)
+    try {
+      const result = await lookupPostalCode(postalCode)
+      setForm((current) => ({
+        ...current,
+        baseLocation: result.baseLocation,
+        privateLocation: {
+          postalCode: formatPostalCode(result.privateLocation.postalCode),
+          neighborhood: result.privateLocation.neighborhood ?? '',
+        },
+      }))
+      clearLocationErrors()
+      setPostalCodeStatus('success')
+    } catch (error) {
+      setPostalCodeStatus('error')
+      setPostalCodeError(
+        error instanceof PostalCodeError
+          ? error.message
+          : 'Não foi possível consultar o CEP. Tente novamente ou selecione a localização manualmente.',
+      )
+    }
   }
 
   function updateBaseState(stateCode: string) {
@@ -424,6 +533,9 @@ export function ProfessionalProfilePage() {
           'bio',
           'categoryIds',
           'specialtyIds',
+          'phone',
+          'contactVisibility',
+          'privateLocation',
           'baseLocation',
           'serviceMode',
           'serviceRadiusKm',
@@ -443,6 +555,38 @@ export function ProfessionalProfilePage() {
       }
     } finally {
       setSavingStatus(null)
+    }
+  }
+
+  async function handleAvailabilityUpdate() {
+    if (!userId || !professionalProfile || isSaving || isSuspended) return
+    setSavingAvailability(true)
+    setSubmissionError(null)
+    setSuccessMessage(null)
+    setFieldErrors((current) => ({ ...current, availability: undefined }))
+
+    try {
+      const updatedProfile = await updateProfessionalAvailability(
+        userId,
+        form.availability,
+        professionalProfile,
+      )
+      setProfessionalProfile(updatedProfile)
+      const message = 'Disponibilidade atualizada sem alterar a publicação do perfil.'
+      setSuccessMessage(message)
+      toast.success(message)
+    } catch (error) {
+      if (error instanceof ProfessionalProfileError) {
+        setFieldErrors((current) => ({
+          ...current,
+          ...error.fieldErrors,
+        }))
+        setSubmissionError(error.message)
+      } else {
+        setSubmissionError('Não foi possível atualizar sua disponibilidade agora.')
+      }
+    } finally {
+      setSavingAvailability(false)
     }
   }
 
@@ -671,12 +815,184 @@ export function ProfessionalProfilePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Atendimento</CardTitle>
-            <CardDescription>
-              Selecione sua localização pública e como você atende. CEP, endereço exato e contato não fazem parte deste perfil.
-            </CardDescription>
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-primary/10 p-2 text-primary">
+                <Phone className="size-4" aria-hidden="true" />
+              </div>
+              <div>
+                <CardTitle>Contato</CardTitle>
+                <CardDescription className="mt-1">
+                  Informe um telefone com DDD e escolha se ele pode aparecer no perfil publicado.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-5">
+            <div className="space-y-2">
+              <Label htmlFor="professional-phone">Telefone com DDD <span aria-hidden="true">*</span></Label>
+              <Input
+                id="professional-phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel-national"
+                placeholder="(11) 99999-9999"
+                value={form.phone}
+                maxLength={15}
+                disabled={isSaving || isSuspended}
+                aria-invalid={Boolean(fieldErrors.phone)}
+                aria-describedby={fieldErrors.phone ? 'professional-phone-error' : 'professional-phone-help'}
+                onChange={(event) => updateField('phone', formatPhone(event.target.value))}
+              />
+              <p id="professional-phone-help" className="text-xs text-muted-foreground">
+                O número completo fica no documento privado quando a visibilidade for privada.
+              </p>
+              <FieldError id="professional-phone-error" message={fieldErrors.phone} />
+            </div>
+
+            <fieldset
+              id="professional-contactVisibility"
+              tabIndex={-1}
+              className="space-y-3 rounded-md focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+              aria-invalid={Boolean(fieldErrors.contactVisibility)}
+              aria-describedby={fieldErrors.contactVisibility ? 'professional-contactVisibility-error' : undefined}
+            >
+              <legend className="text-sm font-semibold">Visibilidade do telefone</legend>
+              <RadioGroup
+                aria-label="Visibilidade do telefone"
+                value={form.contactVisibility}
+                disabled={isSaving || isSuspended}
+                className="grid gap-3 sm:grid-cols-2"
+                onValueChange={(value) =>
+                  updateField('contactVisibility', value as ProfessionalContactVisibility)
+                }
+              >
+                {contactVisibilityOptions.map((option) => {
+                  const Icon = option.value === 'PRIVATE' ? EyeOff : Eye
+                  return (
+                    <label
+                      key={option.value}
+                      htmlFor={`professional-contactVisibility-${option.value}`}
+                      className="flex min-h-20 cursor-pointer items-start gap-3 rounded-md border bg-background p-4 hover:bg-accent/40 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
+                    >
+                      <RadioGroupItem
+                        id={`professional-contactVisibility-${option.value}`}
+                        value={option.value}
+                        aria-label={option.label}
+                        className="mt-0.5"
+                      />
+                      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <span>
+                        <span className="block text-sm font-semibold">{option.label}</span>
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{option.description}</span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </RadioGroup>
+              <FieldError id="professional-contactVisibility-error" message={fieldErrors.contactVisibility} />
+            </fieldset>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-primary/10 p-2 text-primary">
+                <MapPin className="size-4" aria-hidden="true" />
+              </div>
+              <div>
+                <CardTitle>Atendimento</CardTitle>
+                <CardDescription className="mt-1">
+                  Use o CEP para preencher a localização ou selecione UF e município manualmente. Só cidade, UF e área atendida ficam públicas.
+                </CardDescription>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="professional-postalCode">CEP (privado)</Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="professional-postalCode"
+                  className="sm:max-w-52"
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  placeholder="00000-000"
+                  value={form.privateLocation.postalCode}
+                  maxLength={9}
+                  disabled={isSaving || isSuspended || postalCodeStatus === 'loading'}
+                  aria-invalid={Boolean(postalCodeError || fieldErrors.privateLocation)}
+                  aria-describedby={
+                    postalCodeError || fieldErrors.privateLocation
+                      ? 'professional-postalCode-error'
+                      : 'professional-postalCode-help'
+                  }
+                  onChange={(event) => {
+                    updatePrivateLocation('postalCode', formatPostalCode(event.target.value))
+                    setPostalCodeStatus('idle')
+                    setPostalCodeError(null)
+                  }}
+                  onBlur={() => {
+                    const postalCodeLength = normalizePostalCode(
+                      form.privateLocation.postalCode,
+                    ).length
+                    if (postalCodeLength === 8 && postalCodeStatus === 'idle') {
+                      void handlePostalCodeLookup()
+                    } else if (postalCodeLength > 0 && postalCodeLength < 8) {
+                      setPostalCodeStatus('error')
+                      setPostalCodeError('Informe um CEP válido com oito dígitos.')
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  loading={postalCodeStatus === 'loading'}
+                  loadingLabel="Consultando CEP…"
+                  disabled={
+                    isSaving ||
+                    isSuspended ||
+                    postalCodeStatus === 'loading' ||
+                    normalizePostalCode(form.privateLocation.postalCode).length !== 8
+                  }
+                  onClick={() => void handlePostalCodeLookup()}
+                >
+                  {postalCodeStatus === 'error' ? <RotateCcw aria-hidden="true" /> : null}
+                  {postalCodeStatus === 'error' ? 'Tentar novamente' : 'Consultar CEP'}
+                </Button>
+              </div>
+              <p id="professional-postalCode-help" className="text-xs text-muted-foreground">
+                O CEP é usado apenas para preenchimento e não aparece no perfil público.
+              </p>
+              <div aria-live="polite">
+                {postalCodeStatus === 'success' ? (
+                  <p className="text-sm text-success">Localização preenchida pelo CEP. Você pode corrigi-la abaixo.</p>
+                ) : null}
+                <FieldError id="professional-postalCode-error" message={postalCodeError ?? fieldErrors.privateLocation} />
+              </div>
+            </div>
+
+            <div className="space-y-2 sm:col-span-2 sm:max-w-md">
+              <Label htmlFor="professional-neighborhood">Bairro (privado)</Label>
+              <Input
+                id="professional-neighborhood"
+                value={form.privateLocation.neighborhood}
+                maxLength={120}
+                disabled={isSaving || isSuspended}
+                aria-describedby="professional-neighborhood-help"
+                onChange={(event) => updatePrivateLocation('neighborhood', event.target.value)}
+              />
+              <p id="professional-neighborhood-help" className="text-xs text-muted-foreground">
+                Campo opcional armazenado somente no documento privado. Rua, número e complemento não são coletados.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 sm:col-span-2" aria-hidden="true">
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Preenchimento manual</span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="professional-stateCode">UF <span aria-hidden="true">*</span></Label>
               <Select
@@ -701,7 +1017,7 @@ export function ProfessionalProfilePage() {
 
             <div className="sm:col-span-2">
               <MunicipalityCombobox
-                key={form.baseLocation.stateCode || 'no-base-state'}
+                key={`${form.baseLocation.stateCode || 'no-base-state'}-${form.baseLocation.ibgeCode || 'no-base-city'}`}
                 id="professional-baseLocation"
                 label="Município"
                 stateCode={form.baseLocation.stateCode}
@@ -908,6 +1224,25 @@ export function ProfessionalProfilePage() {
                 ))}
               </RadioGroup>
               <FieldError id="professional-availability-error" message={fieldErrors.availability} />
+              {professionalProfile ? (
+                <div className="flex flex-col items-start gap-2 rounded-md bg-muted p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Esta ação altera somente a disponibilidade e mantém o perfil no status {statusLabels[currentStatus].toLowerCase()}.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    loading={savingAvailability}
+                    loadingLabel="Atualizando…"
+                    disabled={isSaving || isSuspended}
+                    onClick={() => void handleAvailabilityUpdate()}
+                  >
+                    Atualizar disponibilidade
+                  </Button>
+                </div>
+              ) : null}
             </fieldset>
           </CardContent>
           {!isSuspended ? (
@@ -991,6 +1326,13 @@ export function ProfessionalProfilePage() {
                     !publicationErrors.specialtyIds,
                 },
                 {
+                  key: 'contact',
+                  label: 'Telefone de contato',
+                  complete:
+                    !publicationErrors.phone &&
+                    !publicationErrors.contactVisibility,
+                },
+                {
                   key: 'baseLocation',
                   label: 'Localização base',
                   complete: !publicationErrors.baseLocation,
@@ -1021,7 +1363,7 @@ export function ProfessionalProfilePage() {
         </Card>
 
         <PrivacyNotice title="Dados protegidos">
-          Rating, avaliações e métricas são calculados pela plataforma e não podem ser editados neste formulário.
+          CEP, bairro e telefone privado ficam em um documento separado, acessível somente por você e pelo backend autorizado. Rua, número e complemento não são coletados.
         </PrivacyNotice>
       </aside>
     </div>,

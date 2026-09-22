@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const firebaseMocks = vi.hoisted(() => ({
   firestore: { name: 'firestore' },
   profileReference: { path: 'professionalProfiles/user-123' },
+  privateProfileReference: { path: 'professionalPrivateProfiles/user-123' },
   userReference: { path: 'users/user-123' },
   timestamp: { type: 'server-timestamp' },
+  deletedField: { type: 'delete-field' },
   batch: {
     set: vi.fn(),
     update: vi.fn(),
@@ -14,13 +16,17 @@ const firebaseMocks = vi.hoisted(() => ({
   getDoc: vi.fn(),
   serverTimestamp: vi.fn(),
   writeBatch: vi.fn(),
+  updateDoc: vi.fn(),
+  deleteField: vi.fn(),
   getFirebaseFirestore: vi.fn(),
 }))
 
 vi.mock('firebase/firestore', () => ({
+  deleteField: firebaseMocks.deleteField,
   doc: firebaseMocks.doc,
   getDoc: firebaseMocks.getDoc,
   serverTimestamp: firebaseMocks.serverTimestamp,
+  updateDoc: firebaseMocks.updateDoc,
   writeBatch: firebaseMocks.writeBatch,
 }))
 
@@ -46,17 +52,28 @@ const profileInput = {
   serviceRadiusKm: 25,
   selectedCities: [],
   availability: 'AVAILABLE' as const,
+  phone: '11999998888',
+  contactVisibility: 'PRIVATE' as const,
+  privateLocation: {
+    postalCode: '13083852',
+    neighborhood: 'Cidade Universitária',
+  },
 }
 
 describe('professionalProfileRepository', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     firebaseMocks.getFirebaseFirestore.mockReturnValue(firebaseMocks.firestore)
-    firebaseMocks.doc.mockImplementation((_firestore, collection) =>
-      collection === 'professionalProfiles'
-        ? firebaseMocks.profileReference
-        : firebaseMocks.userReference,
-    )
+    firebaseMocks.doc.mockImplementation((_firestore, collection) => {
+      if (collection === 'professionalProfiles') {
+        return firebaseMocks.profileReference
+      }
+      if (collection === 'professionalPrivateProfiles') {
+        return firebaseMocks.privateProfileReference
+      }
+      return firebaseMocks.userReference
+    })
+    firebaseMocks.deleteField.mockReturnValue(firebaseMocks.deletedField)
     firebaseMocks.serverTimestamp.mockReturnValue(firebaseMocks.timestamp)
     firebaseMocks.writeBatch.mockReturnValue(firebaseMocks.batch)
     firebaseMocks.batch.commit.mockResolvedValue(undefined)
@@ -86,6 +103,31 @@ describe('professionalProfileRepository', () => {
     })
   })
 
+  it('mantém o perfil público acessível durante a migração das regras privadas', async () => {
+    firebaseMocks.getDoc
+      .mockResolvedValueOnce({
+        exists: () => true,
+        data: () => ({
+          ...profileInput,
+          phone: undefined,
+          privateLocation: undefined,
+          contactVisibility: undefined,
+          status: 'PUBLISHED',
+        }),
+      })
+      .mockRejectedValueOnce({ code: 'firestore/permission-denied' })
+
+    await expect(
+      professionalProfileRepository.findByOwnerId('user-123'),
+    ).resolves.toMatchObject({
+      userId: 'user-123',
+      phone: '',
+      contactVisibility: 'PRIVATE',
+      privateLocation: { postalCode: '' },
+      status: 'PUBLISHED',
+    })
+  })
+
   it('cria o perfil e atualiza o resumo do usuário em um único batch', async () => {
     await professionalProfileRepository.save({
       userId: 'user-123',
@@ -98,10 +140,30 @@ describe('professionalProfileRepository', () => {
       firebaseMocks.profileReference,
       {
         ownerId: 'user-123',
-        ...profileInput,
+        publicName: profileInput.publicName,
+        headline: profileInput.headline,
+        bio: profileInput.bio,
+        categoryIds: profileInput.categoryIds,
+        specialtyIds: profileInput.specialtyIds,
+        experienceYears: profileInput.experienceYears,
+        baseLocation: profileInput.baseLocation,
+        serviceMode: profileInput.serviceMode,
+        serviceRadiusKm: profileInput.serviceRadiusKm,
+        selectedCities: profileInput.selectedCities,
+        availability: profileInput.availability,
+        contactVisibility: profileInput.contactVisibility,
         selectedCityIbgeCodes: [],
         status: 'DRAFT',
         createdAt: firebaseMocks.timestamp,
+        updatedAt: firebaseMocks.timestamp,
+      },
+    )
+    expect(firebaseMocks.batch.set).toHaveBeenCalledWith(
+      firebaseMocks.privateProfileReference,
+      {
+        ownerId: 'user-123',
+        phone: profileInput.phone,
+        privateLocation: profileInput.privateLocation,
         updatedAt: firebaseMocks.timestamp,
       },
     )
@@ -184,9 +246,46 @@ describe('professionalProfileRepository', () => {
     expect(writtenData).not.toHaveProperty('reviewCount')
     expect(writtenData).not.toHaveProperty('completedJobsCount')
     expect(writtenData).not.toHaveProperty('createdAt')
+    expect(writtenData).not.toHaveProperty('privateLocation')
+    expect(writtenData?.phone).toBe(firebaseMocks.deletedField)
     expect(firebaseMocks.batch.update).toHaveBeenCalledWith(
       firebaseMocks.userReference,
       expect.objectContaining({ professionalProfileStatus: 'complete' }),
     )
+  })
+
+  it('expõe o telefone no documento público somente quando autorizado', async () => {
+    await professionalProfileRepository.save({
+      userId: 'user-123',
+      profile: { ...profileInput, contactVisibility: 'PUBLIC' },
+      status: 'PUBLISHED',
+      exists: true,
+    })
+
+    expect(firebaseMocks.batch.update).toHaveBeenCalledWith(
+      firebaseMocks.profileReference,
+      expect.objectContaining({
+        phone: '11999998888',
+        contactVisibility: 'PUBLIC',
+      }),
+    )
+  })
+
+  it('atualiza disponibilidade sem alterar status ou republicar', async () => {
+    firebaseMocks.updateDoc.mockResolvedValue(undefined)
+
+    await professionalProfileRepository.updateAvailability(
+      'user-123',
+      'LIMITED',
+    )
+
+    expect(firebaseMocks.updateDoc).toHaveBeenCalledWith(
+      firebaseMocks.profileReference,
+      {
+        availability: 'LIMITED',
+        updatedAt: firebaseMocks.timestamp,
+      },
+    )
+    expect(firebaseMocks.writeBatch).not.toHaveBeenCalled()
   })
 })

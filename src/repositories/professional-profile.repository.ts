@@ -1,7 +1,9 @@
 import {
+  deleteField,
   doc,
   getDoc,
   serverTimestamp,
+  updateDoc,
   writeBatch,
 } from 'firebase/firestore'
 
@@ -9,12 +11,15 @@ import { getFirebaseFirestore } from '../lib/firebase'
 import type { ProfessionalProfileStatus as UserProfessionalProfileStatus } from '../features/onboarding/user-role'
 import {
   isProfessionalAvailability,
+  isProfessionalContactVisibility,
   isProfessionalProfileStatus,
   isProfessionalServiceMode,
+  type ProfessionalAvailability,
   type ProfessionalProfile,
   type ProfessionalProfileInput,
   type ProfessionalProfileStatus,
   type ProfessionalBaseLocation,
+  type ProfessionalPrivateLocation,
 } from '../types/professional-profile'
 
 function stringArray(value: unknown) {
@@ -29,6 +34,17 @@ function nullableNumber(value: unknown) {
 
 function optionalNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function isPermissionDenied(error: unknown) {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false
+  }
+
+  return (
+    error.code === 'permission-denied' ||
+    error.code === 'firestore/permission-denied'
+  )
 }
 
 function professionalBaseLocation(value: unknown): ProfessionalBaseLocation {
@@ -59,6 +75,24 @@ function professionalBaseLocations(value: unknown): ProfessionalBaseLocation[] {
   )
 }
 
+function professionalPrivateLocation(value: unknown): ProfessionalPrivateLocation {
+  if (typeof value !== 'object' || value === null) {
+    return { postalCode: '' }
+  }
+
+  const location = value as Record<string, unknown>
+  const neighborhood =
+    typeof location.neighborhood === 'string'
+      ? location.neighborhood
+      : undefined
+
+  return {
+    postalCode:
+      typeof location.postalCode === 'string' ? location.postalCode : '',
+    ...(neighborhood ? { neighborhood } : {}),
+  }
+}
+
 export interface SaveProfessionalProfileInput {
   userId: string
   profile: ProfessionalProfileInput
@@ -74,13 +108,23 @@ function userProfileStatusFor(
 
 export const professionalProfileRepository = {
   async findByOwnerId(userId: string): Promise<ProfessionalProfile | null> {
-    const snapshot = await getDoc(
-      doc(getFirebaseFirestore(), 'professionalProfiles', userId),
-    )
+    const firestore = getFirebaseFirestore()
+    const [snapshot, privateSnapshot] = await Promise.all([
+      getDoc(doc(firestore, 'professionalProfiles', userId)),
+      getDoc(doc(firestore, 'professionalPrivateProfiles', userId)).catch(
+        (error: unknown) => {
+          // Mantém a edição de perfis legados disponível durante a janela entre
+          // a publicação do cliente e a atualização das Security Rules.
+          if (isPermissionDenied(error)) return null
+          throw error
+        },
+      ),
+    ])
 
     if (!snapshot.exists()) return null
 
     const data = snapshot.data()
+    const privateData = privateSnapshot?.exists() ? privateSnapshot.data() : {}
     const serviceMode = isProfessionalServiceMode(data.serviceMode)
       ? data.serviceMode
       : null
@@ -103,6 +147,16 @@ export const professionalProfileRepository = {
       availability: isProfessionalAvailability(data.availability)
         ? data.availability
         : 'AVAILABLE',
+      phone:
+        typeof privateData.phone === 'string'
+          ? privateData.phone
+          : typeof data.phone === 'string'
+            ? data.phone
+            : '',
+      contactVisibility: isProfessionalContactVisibility(data.contactVisibility)
+        ? data.contactVisibility
+        : 'PRIVATE',
+      privateLocation: professionalPrivateLocation(privateData.privateLocation),
       status:
         storedStatus === 'SUSPENDED' || serviceMode !== null
           ? storedStatus
@@ -121,13 +175,23 @@ export const professionalProfileRepository = {
   }: SaveProfessionalProfileInput): Promise<void> {
     const firestore = getFirebaseFirestore()
     const profileReference = doc(firestore, 'professionalProfiles', userId)
+    const privateProfileReference = doc(
+      firestore,
+      'professionalPrivateProfiles',
+      userId,
+    )
     const userReference = doc(firestore, 'users', userId)
     const batch = writeBatch(firestore)
     const timestamp = serverTimestamp()
 
+    const {
+      phone,
+      privateLocation,
+      ...publicProfile
+    } = profile
     const profileData = {
       ownerId: userId,
-      ...profile,
+      ...publicProfile,
       selectedCityIbgeCodes: profile.selectedCities.map(
         (location) => location.ibgeCode,
       ),
@@ -136,18 +200,42 @@ export const professionalProfileRepository = {
     }
 
     if (exists) {
-      batch.update(profileReference, profileData)
+      batch.update(profileReference, {
+        ...profileData,
+        phone:
+          profile.contactVisibility === 'PUBLIC' ? phone : deleteField(),
+      })
     } else {
       batch.set(profileReference, {
         ...profileData,
+        ...(profile.contactVisibility === 'PUBLIC' ? { phone } : {}),
         createdAt: timestamp,
       })
     }
+    batch.set(privateProfileReference, {
+      ownerId: userId,
+      phone,
+      privateLocation,
+      updatedAt: timestamp,
+    })
     batch.update(userReference, {
       professionalProfileStatus: userProfileStatusFor(status),
       updatedAt: timestamp,
     })
 
     await batch.commit()
+  },
+
+  async updateAvailability(
+    userId: string,
+    availability: ProfessionalAvailability,
+  ): Promise<void> {
+    await updateDoc(
+      doc(getFirebaseFirestore(), 'professionalProfiles', userId),
+      {
+        availability,
+        updatedAt: serverTimestamp(),
+      },
+    )
   },
 }

@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "seed:catalog": "node scripts/seed-catalog.mjs",
     "test": "vitest run",
+    "test:rules": "firebase emulators:exec --only firestore \"vitest run --config vitest.rules.config.ts\"",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@google-cloud/firestore": "^9.2.0",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
@@ -48,6 +50,7 @@
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.6",
+    "firebase-tools": "^15.30.2",
     "globals": "^17.12.0",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.3.3",

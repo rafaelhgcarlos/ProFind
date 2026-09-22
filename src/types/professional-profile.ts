@@ -17,6 +17,8 @@ export const PROFESSIONAL_SERVICE_MODES = [
   'SELECTED_CITIES',
 ] as const
 
+export const PROFESSIONAL_CONTACT_VISIBILITIES = ['PUBLIC', 'PRIVATE'] as const
+
 export const PROFESSIONAL_SERVICE_RADIUS_OPTIONS = [5, 10, 20, 30, 50] as const
 
 export type ProfessionalProfileStatus =
@@ -25,6 +27,8 @@ export type ProfessionalAvailability =
   (typeof PROFESSIONAL_AVAILABILITIES)[number]
 export type ProfessionalServiceMode =
   (typeof PROFESSIONAL_SERVICE_MODES)[number]
+export type ProfessionalContactVisibility =
+  (typeof PROFESSIONAL_CONTACT_VISIBILITIES)[number]
 
 export const BRAZILIAN_STATE_CODES = [
   'AC',
@@ -64,6 +68,11 @@ export interface ProfessionalBaseLocation {
   ibgeCode: string
 }
 
+export interface ProfessionalPrivateLocation {
+  postalCode: string
+  neighborhood?: string
+}
+
 export interface ProfessionalProfileInput {
   publicName: string
   headline: string
@@ -76,6 +85,21 @@ export interface ProfessionalProfileInput {
   serviceRadiusKm: number | null
   selectedCities: ProfessionalBaseLocation[]
   availability: ProfessionalAvailability
+  phone: string
+  contactVisibility: ProfessionalContactVisibility
+  privateLocation: ProfessionalPrivateLocation
+}
+
+export type ProfessionalPublicProfileInput = Omit<
+  ProfessionalProfileInput,
+  'phone' | 'privateLocation'
+> & {
+  phone?: string
+}
+
+export interface ProfessionalPrivateProfileInput {
+  phone: string
+  privateLocation: ProfessionalPrivateLocation
 }
 
 export interface ProfessionalProfile extends ProfessionalProfileInput {
@@ -110,5 +134,16 @@ export function isProfessionalServiceMode(
   return (
     typeof value === 'string' &&
     PROFESSIONAL_SERVICE_MODES.includes(value as ProfessionalServiceMode)
+  )
+}
+
+export function isProfessionalContactVisibility(
+  value: unknown,
+): value is ProfessionalContactVisibility {
+  return (
+    typeof value === 'string' &&
+    PROFESSIONAL_CONTACT_VISIBILITIES.includes(
+      value as ProfessionalContactVisibility,
+    )
   )
 }

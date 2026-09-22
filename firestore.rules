@@ -102,6 +102,7 @@ service cloud.firestore {
           'serviceRadiusKm',
           'selectedCities',
           'availability',
+          'contactVisibility',
           'status',
           'createdAt',
           'updatedAt'
@@ -120,6 +121,8 @@ service cloud.firestore {
           'selectedCities',
           'selectedCityIbgeCodes',
           'availability',
+          'contactVisibility',
+          'phone',
           'status',
           'createdAt',
           'updatedAt',
@@ -159,6 +162,11 @@ service cloud.firestore {
         && ((data.serviceMode == 'SELECTED_CITIES')
           || data.selectedCities.size() == 0)
         && data.availability in ['AVAILABLE', 'LIMITED', 'UNAVAILABLE']
+        && data.contactVisibility in ['PUBLIC', 'PRIVATE']
+        && ((data.contactVisibility == 'PRIVATE' && !('phone' in data))
+          || (data.contactVisibility == 'PUBLIC'
+            && data.phone is string
+            && data.phone.matches('^[0-9]{10,11}$')))
         && data.status in ['DRAFT', 'PUBLISHED', 'PAUSED', 'SUSPENDED']
         && data.createdAt is timestamp
         && data.updatedAt == request.time;
@@ -247,6 +255,30 @@ service cloud.firestore {
           || data.selectedCities.size() >= 1);
     }
 
+    function hasValidProfessionalPrivateProfile(data, userId) {
+      let location = data.privateLocation;
+
+      return data.keys().hasAll([
+          'ownerId', 'phone', 'privateLocation', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'phone', 'privateLocation', 'updatedAt'
+        ])
+        && data.ownerId == userId
+        && data.phone is string
+        && (data.phone == '' || data.phone.matches('^[0-9]{10,11}$'))
+        && location is map
+        && location.keys().hasAll(['postalCode'])
+        && location.keys().hasOnly(['postalCode', 'neighborhood'])
+        && location.postalCode is string
+        && (location.postalCode == ''
+          || location.postalCode.matches('^[0-9]{8}$'))
+        && (!('neighborhood' in location)
+          || (location.neighborhood is string
+            && location.neighborhood.size() <= 120))
+        && data.updatedAt == request.time;
+    }
+
     match /users/{userId} {
       allow create: if isDocumentOwner(userId)
         && request.resource.data.keys().hasOnly([
@@ -333,6 +365,8 @@ service cloud.firestore {
           'selectedCities',
           'selectedCityIbgeCodes',
           'availability',
+          'contactVisibility',
+          'phone',
           'status',
           'createdAt',
           'updatedAt'
@@ -362,12 +396,31 @@ service cloud.firestore {
           'selectedCities',
           'selectedCityIbgeCodes',
           'availability',
+          'contactVisibility',
+          'phone',
           'status',
           'updatedAt'
         ])
         && hasValidProfessionalProfileFields()
         && (request.resource.data.status == 'DRAFT'
           || isPublishableProfessionalProfile());
+
+      allow delete: if false;
+    }
+
+    // CEP, bairro e telefone privado ficam isolados do documento consultado
+    // por visitantes. Backends que usam o Admin SDK não dependem destas regras.
+    match /professionalPrivateProfiles/{userId} {
+      allow read: if isDocumentOwner(userId);
+
+      allow create: if isDocumentOwner(userId)
+        && hasProfessionalRole(userId)
+        && hasValidProfessionalPrivateProfile(request.resource.data, userId);
+
+      allow update: if isDocumentOwner(userId)
+        && hasProfessionalRole(userId)
+        && resource.data.ownerId == userId
+        && hasValidProfessionalPrivateProfile(request.resource.data, userId);
 
       allow delete: if false;
     }

@@ -10,6 +10,7 @@ import type {
 import {
   BRAZILIAN_STATE_CODES,
   isProfessionalAvailability,
+  isProfessionalContactVisibility,
   isProfessionalServiceMode,
   PROFESSIONAL_SERVICE_RADIUS_OPTIONS,
 } from '../types/professional-profile'
@@ -52,6 +53,10 @@ export interface ProfessionalProfileDependencies {
     status: EditableProfessionalProfileStatus
     exists: boolean
   }): Promise<void>
+  updateAvailability(
+    userId: string,
+    availability: ProfessionalProfileInput['availability'],
+  ): Promise<void>
 }
 
 const defaultDependencies: ProfessionalProfileDependencies =
@@ -198,6 +203,14 @@ export function normalizeProfessionalProfileInput(
         ? uniqueLocations(input.selectedCities)
         : [],
     availability: input.availability,
+    phone: input.phone.replace(/\D/g, ''),
+    contactVisibility: input.contactVisibility,
+    privateLocation: {
+      postalCode: input.privateLocation.postalCode.replace(/\D/g, ''),
+      ...(input.privateLocation.neighborhood?.trim()
+        ? { neighborhood: input.privateLocation.neighborhood.trim() }
+        : {}),
+    },
   }
 }
 
@@ -262,6 +275,22 @@ export function validateProfessionalProfile(
   if (!isProfessionalAvailability(input.availability)) {
     errors.availability = 'Selecione sua disponibilidade.'
   }
+  if (input.phone && !/^\d{10,11}$/.test(input.phone)) {
+    errors.phone = 'Informe um telefone com DDD e 10 ou 11 dígitos.'
+  } else if (input.contactVisibility === 'PUBLIC' && !input.phone) {
+    errors.phone = 'Informe um telefone antes de torná-lo público.'
+  }
+  if (!isProfessionalContactVisibility(input.contactVisibility)) {
+    errors.contactVisibility = 'Selecione quem pode ver seu telefone.'
+  }
+  if (
+    input.privateLocation.postalCode &&
+    !/^\d{8}$/.test(input.privateLocation.postalCode)
+  ) {
+    errors.privateLocation = 'Informe um CEP válido com oito dígitos.'
+  } else if ((input.privateLocation.neighborhood?.length ?? 0) > 120) {
+    errors.privateLocation = 'Use no máximo 120 caracteres para o bairro.'
+  }
   if (input.categoryIds.length > 5) {
     errors.categoryIds = 'Selecione no máximo 5 categorias.'
   } else if (input.categoryIds.some((id) => !categoryIds.has(id))) {
@@ -297,6 +326,9 @@ export function validateProfessionalProfile(
     if (input.specialtyIds.length === 0) {
       errors.specialtyIds = 'Selecione ao menos uma especialidade para publicar.'
     }
+    if (!/^\d{10,11}$/.test(input.phone) && !errors.phone) {
+      errors.phone = 'Informe um telefone com DDD para publicar.'
+    }
     if (!isProfessionalServiceMode(input.serviceMode)) {
       errors.serviceMode = 'Selecione como você atende para publicar.'
     }
@@ -313,6 +345,42 @@ export function validateProfessionalProfile(
   }
 
   return errors
+}
+
+export async function updateProfessionalAvailability(
+  userId: string,
+  availability: ProfessionalProfileInput['availability'],
+  currentProfile: ProfessionalProfile | null,
+  dependencies: ProfessionalProfileDependencies = defaultDependencies,
+): Promise<ProfessionalProfile> {
+  if (!currentProfile) {
+    throw new ProfessionalProfileError(
+      'invalid-profile',
+      'Salve o perfil antes de atualizar a disponibilidade separadamente.',
+      { availability: 'Salve o perfil antes de atualizar a disponibilidade.' },
+    )
+  }
+  if (currentProfile.status === 'SUSPENDED') {
+    throw new ProfessionalProfileError(
+      'suspended',
+      'Este perfil está suspenso e não pode ser alterado.',
+    )
+  }
+  if (!isProfessionalAvailability(availability)) {
+    throw new ProfessionalProfileError(
+      'invalid-profile',
+      'Selecione uma disponibilidade válida.',
+      { availability: 'Selecione sua disponibilidade.' },
+    )
+  }
+
+  try {
+    await dependencies.updateAvailability(userId, availability)
+  } catch (error) {
+    throw normalizePersistenceError(error)
+  }
+
+  return { ...currentProfile, availability }
 }
 
 export async function loadProfessionalProfile(

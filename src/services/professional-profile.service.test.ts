@@ -5,6 +5,7 @@ import type { ProfessionalProfileInput } from '../types/professional-profile'
 import {
   ProfessionalProfileError,
   saveProfessionalProfile,
+  updateProfessionalAvailability,
   validateProfessionalProfile,
   type ProfessionalProfileDependencies,
 } from './professional-profile.service'
@@ -30,6 +31,9 @@ const emptyInput: ProfessionalProfileInput = {
   serviceRadiusKm: null,
   selectedCities: [],
   availability: 'AVAILABLE',
+  phone: '',
+  contactVisibility: 'PRIVATE',
+  privateLocation: { postalCode: '' },
 }
 
 const publishableInput: ProfessionalProfileInput = {
@@ -45,12 +49,14 @@ const publishableInput: ProfessionalProfileInput = {
   },
   serviceMode: 'RADIUS',
   serviceRadiusKm: 30,
+  phone: '11999998888',
 }
 
 function dependencies(): ProfessionalProfileDependencies {
   return {
     findByOwnerId: vi.fn().mockResolvedValue(null),
     save: vi.fn().mockResolvedValue(undefined),
+    updateAvailability: vi.fn().mockResolvedValue(undefined),
   }
 }
 
@@ -315,6 +321,89 @@ describe('professional profile service', () => {
       expect.objectContaining<Partial<ProfessionalProfileError>>({
         code: 'suspended',
       }),
+    )
+    expect(repository.save).not.toHaveBeenCalled()
+  })
+
+  it('valida telefone e visibilidade antes de publicar', () => {
+    const missingPhone = validateProfessionalProfile(
+      { ...publishableInput, phone: '' },
+      'PUBLISHED',
+      catalog,
+    )
+    const invalidPhone = validateProfessionalProfile(
+      { ...publishableInput, phone: '11999' },
+      'PUBLISHED',
+      catalog,
+    )
+    const publicWithoutPhone = validateProfessionalProfile(
+      {
+        ...emptyInput,
+        contactVisibility: 'PUBLIC',
+      },
+      'DRAFT',
+      catalog,
+    )
+
+    expect(missingPhone.phone).toMatch(/telefone com DDD/i)
+    expect(invalidPhone.phone).toMatch(/10 ou 11 dígitos/i)
+    expect(publicWithoutPhone.phone).toMatch(/antes de torná-lo público/i)
+  })
+
+  it('normaliza contato e localização privada antes de persistir', async () => {
+    const repository = dependencies()
+
+    await saveProfessionalProfile(
+      'user-123',
+      {
+        ...publishableInput,
+        phone: '(11) 99999-8888',
+        privateLocation: {
+          postalCode: '13083-852',
+          neighborhood: '  Cidade Universitária  ',
+        },
+      },
+      'PUBLISHED',
+      catalog,
+      null,
+      repository,
+    )
+
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          phone: '11999998888',
+          privateLocation: {
+            postalCode: '13083852',
+            neighborhood: 'Cidade Universitária',
+          },
+        }),
+      }),
+    )
+  })
+
+  it('atualiza somente a disponibilidade e preserva o status publicado', async () => {
+    const repository = dependencies()
+    const currentProfile = {
+      userId: 'user-123',
+      ...publishableInput,
+      status: 'PUBLISHED' as const,
+    }
+
+    await expect(
+      updateProfessionalAvailability(
+        'user-123',
+        'LIMITED',
+        currentProfile,
+        repository,
+      ),
+    ).resolves.toMatchObject({
+      availability: 'LIMITED',
+      status: 'PUBLISHED',
+    })
+    expect(repository.updateAvailability).toHaveBeenCalledWith(
+      'user-123',
+      'LIMITED',
     )
     expect(repository.save).not.toHaveBeenCalled()
   })

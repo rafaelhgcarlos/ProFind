@@ -6,6 +6,7 @@ Base web/PWA mobile-first para conectar pessoas a profissionais de serviços.
 
 - Node.js 22 ou superior
 - npm 10 ou superior
+- JDK 21 ou superior para executar o emulador do Firestore
 
 ## Comandos
 
@@ -35,6 +36,8 @@ Também estão disponíveis:
 - `npm run typecheck`: valida somente os tipos.
 - `npm run lint`: executa o ESLint.
 - `npm test`: executa os testes uma vez.
+- `npm run test:rules`: inicia o emulador do Firestore e executa os testes de
+  privacidade das regras.
 - `npm run test:watch`: executa os testes em modo interativo.
 - `npm run preview`: serve localmente o build de produção.
 - `npm run seed:catalog -- --project=SEU_PROJECT_ID`: cria ou atualiza o
@@ -119,6 +122,18 @@ faixas configuradas e `SELECTED_CITIES` mantém até dez municípios únicos. A
 modalidade `REMOTE` não faz parte do MVP. Perfis legados com esse valor são
 tratados como rascunho e exigem uma nova escolha antes da republicação, sem
 conversão automática.
+
+O mesmo formulário aceita CEP com máscara, consulta o ViaCEP somente quando há
+oito dígitos e preenche cidade, UF, código IBGE e bairro. Falhas de validação,
+CEP inexistente, timeout, falta de rede ou indisponibilidade do provedor não
+bloqueiam o preenchimento manual padronizado pela API de Localidades do IBGE.
+Telefone, visibilidade do contato e disponibilidade também são editáveis. A
+disponibilidade possui uma gravação isolada, que não altera `status` nem
+republica um perfil pausado ou em rascunho.
+
+Os limites entre dados públicos e privados do perfil, incluindo as coleções
+`professionalProfiles` e `professionalPrivateProfiles`, estão documentados em
+[`docs/professional-profile-privacy.md`](docs/professional-profile-privacy.md).
 
 ## Design system
 
