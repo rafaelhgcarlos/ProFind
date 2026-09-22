@@ -34,6 +34,8 @@ const emptyInput: ProfessionalProfileInput = {
   phone: '',
   contactVisibility: 'PRIVATE',
   privateLocation: { postalCode: '' },
+  profileImage: null,
+  portfolioImages: [],
 }
 
 const publishableInput: ProfessionalProfileInput = {
@@ -50,6 +52,12 @@ const publishableInput: ProfessionalProfileInput = {
   serviceMode: 'RADIUS',
   serviceRadiusKm: 30,
   phone: '11999998888',
+}
+
+const imageReferenceBase = {
+  ownerId: 'user-123',
+  createdAt: 100,
+  updatedAt: 100,
 }
 
 function dependencies(): ProfessionalProfileDependencies {
@@ -164,6 +172,106 @@ describe('professional profile service', () => {
     )
 
     expect(errors.bio).toMatch(/1\.200 caracteres/i)
+  })
+
+  it('normaliza e valida somente metadados de imagens', async () => {
+    const repository = dependencies()
+    const inputWithImages: ProfessionalProfileInput = {
+      ...publishableInput,
+      profileImage: {
+        ...imageReferenceBase,
+        purpose: 'PROFESSIONAL_AVATAR',
+        url: '  https://images.example/profile.webp  ',
+        providerId: '  profile-1  ',
+        order: 4,
+        altText: '  Profissional em atendimento  ',
+      },
+      portfolioImages: [
+        {
+          ...imageReferenceBase,
+          purpose: 'PROFESSIONAL_PORTFOLIO',
+          url: 'https://images.example/two.webp',
+          providerId: 'portfolio-2',
+          order: 9,
+          altText: 'Segundo serviço',
+        },
+        {
+          ...imageReferenceBase,
+          purpose: 'PROFESSIONAL_PORTFOLIO',
+          url: 'https://images.example/one.webp',
+          providerId: 'portfolio-1',
+          order: 8,
+          altText: 'Primeiro serviço',
+        },
+      ],
+    }
+
+    await saveProfessionalProfile(
+      'user-123',
+      inputWithImages,
+      'PUBLISHED',
+      catalog,
+      null,
+      repository,
+    )
+
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          profileImage: {
+            ...imageReferenceBase,
+            purpose: 'PROFESSIONAL_AVATAR',
+            url: 'https://images.example/profile.webp',
+            providerId: 'profile-1',
+            order: 0,
+            altText: 'Profissional em atendimento',
+          },
+          portfolioImages: [
+            expect.objectContaining({ providerId: 'portfolio-2', order: 0 }),
+            expect.objectContaining({ providerId: 'portfolio-1', order: 1 }),
+          ],
+        }),
+      }),
+    )
+  })
+
+  it('exige texto alternativo ao publicar e rejeita URL não HTTPS', () => {
+    expect(
+      validateProfessionalProfile(
+        {
+          ...publishableInput,
+          profileImage: {
+            ...imageReferenceBase,
+            purpose: 'PROFESSIONAL_AVATAR',
+            url: 'https://images.example/profile.webp',
+            providerId: 'profile-1',
+            order: 0,
+            altText: '',
+          },
+        },
+        'PUBLISHED',
+        catalog,
+      ),
+    ).toHaveProperty('profileImage')
+    expect(
+      validateProfessionalProfile(
+        {
+          ...publishableInput,
+          portfolioImages: [
+            {
+              ...imageReferenceBase,
+              purpose: 'PROFESSIONAL_PORTFOLIO',
+              url: 'data:image/webp;base64,AAAA',
+              providerId: 'portfolio-1',
+              order: 0,
+              altText: 'Serviço concluído',
+            },
+          ],
+        },
+        'DRAFT',
+        catalog,
+      ),
+    ).toHaveProperty('portfolioImages')
   })
 
   it('rejeita especialidade que não pertence à categoria selecionada', () => {

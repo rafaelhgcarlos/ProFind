@@ -8,11 +8,13 @@ const firebaseMocks = vi.hoisted(() => ({
   getDoc: vi.fn(),
   setDoc: vi.fn(),
   updateDoc: vi.fn(),
+  deleteField: vi.fn(),
   serverTimestamp: vi.fn(),
   getFirebaseFirestore: vi.fn(),
 }))
 
 vi.mock('firebase/firestore', () => ({
+  deleteField: firebaseMocks.deleteField,
   doc: firebaseMocks.doc,
   getDoc: firebaseMocks.getDoc,
   setDoc: firebaseMocks.setDoc,
@@ -33,6 +35,7 @@ describe('userRepository', () => {
     firebaseMocks.getFirebaseFirestore.mockReturnValue(firebaseMocks.firestore)
     firebaseMocks.doc.mockReturnValue(firebaseMocks.reference)
     firebaseMocks.serverTimestamp.mockReturnValue(firebaseMocks.timestamp)
+    firebaseMocks.deleteField.mockReturnValue({ type: 'delete-field' })
     firebaseMocks.setDoc.mockResolvedValue(undefined)
     firebaseMocks.updateDoc.mockResolvedValue(undefined)
   })
@@ -112,6 +115,42 @@ describe('userRepository', () => {
       firebaseMocks.reference,
       {
         activeMode: 'professional',
+        updatedAt: firebaseMocks.timestamp,
+      },
+    )
+  })
+
+  it('persiste avatar de cliente somente no escopo correto', async () => {
+    const avatar = {
+      ownerId: 'user-123',
+      purpose: 'CLIENT_AVATAR' as const,
+      url: 'https://images.example/client.webp',
+      providerId: 'client-avatar-1',
+      createdAt: 100,
+      updatedAt: 100,
+    }
+
+    await userRepository.updateClientAvatar('user-123', avatar)
+
+    expect(firebaseMocks.updateDoc).toHaveBeenCalledWith(
+      firebaseMocks.reference,
+      { clientAvatar: avatar, updatedAt: firebaseMocks.timestamp },
+    )
+    expect(() =>
+      userRepository.updateClientAvatar('user-123', {
+        ...avatar,
+        purpose: 'PROFESSIONAL_AVATAR',
+      }),
+    ).toThrow(/não pertence ao proprietário e à finalidade/i)
+  })
+
+  it('remove somente a referência do avatar de cliente', async () => {
+    await userRepository.updateClientAvatar('user-123', null)
+
+    expect(firebaseMocks.updateDoc).toHaveBeenCalledWith(
+      firebaseMocks.reference,
+      {
+        clientAvatar: { type: 'delete-field' },
         updatedAt: firebaseMocks.timestamp,
       },
     )

@@ -1,3 +1,5 @@
+import type { ImageReference } from './image'
+
 export const PROFESSIONAL_PROFILE_STATUSES = [
   'DRAFT',
   'PUBLISHED',
@@ -73,6 +75,11 @@ export interface ProfessionalPrivateLocation {
   neighborhood?: string
 }
 
+export interface ProfessionalImageMetadata extends ImageReference {
+  order: number
+  altText: string
+}
+
 export interface ProfessionalProfileInput {
   publicName: string
   headline: string
@@ -88,6 +95,8 @@ export interface ProfessionalProfileInput {
   phone: string
   contactVisibility: ProfessionalContactVisibility
   privateLocation: ProfessionalPrivateLocation
+  profileImage: ProfessionalImageMetadata | null
+  portfolioImages: ProfessionalImageMetadata[]
 }
 
 export type ProfessionalPublicProfileInput = Omit<

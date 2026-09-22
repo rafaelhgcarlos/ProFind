@@ -5,6 +5,7 @@ import {
   CircleAlert,
   Eye,
   EyeOff,
+  Images,
   MapPin,
   PauseCircle,
   Phone,
@@ -12,9 +13,11 @@ import {
   Save,
   Send,
   ShieldAlert,
+  Trash2,
+  Upload,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
@@ -44,6 +47,8 @@ import {
 import { Skeleton } from '../../../components/ui/skeleton'
 import { Textarea } from '../../../components/ui/textarea'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
+import { getImageProvider } from '../../../providers/image-provider.factory'
+import type { ImagePurpose } from '../../../types/image'
 import { listAvailableCatalog } from '../../../services/catalog.service'
 import { toProfessionalBaseLocation } from '../../../services/ibge-localities.service'
 import {
@@ -52,6 +57,15 @@ import {
   normalizePostalCode,
   PostalCodeError,
 } from '../../../services/postal-code.service'
+import {
+  PROFESSIONAL_IMAGE_ACCEPTED_TYPES,
+  PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH,
+  PROFESSIONAL_PORTFOLIO_MAX_IMAGES,
+  ProfessionalImageError,
+  removeProfessionalImage,
+  uploadProfessionalImage,
+  validateProfessionalImageFile,
+} from '../../../services/professional-images.service'
 import {
   loadProfessionalProfile,
   ProfessionalProfileError,
@@ -70,6 +84,7 @@ import type {
   ProfessionalContactVisibility,
   ProfessionalProfile,
   ProfessionalProfileInput,
+  ProfessionalImageMetadata,
   ProfessionalProfileStatus,
   ProfessionalServiceMode,
 } from '../../../types/professional-profile'
@@ -100,6 +115,30 @@ interface ProfessionalProfileFormState {
     postalCode: string
     neighborhood: string
   }
+  profileImage: ProfessionalImageMetadata | null
+  portfolioImages: ProfessionalImageMetadata[]
+}
+
+type ProfessionalImagePurpose = Exclude<ImagePurpose, 'CLIENT_AVATAR'>
+
+type ImageUploadStatus = 'uploading' | 'success' | 'error'
+
+interface ImageUploadTask {
+  id: string
+  file: File
+  purpose: ProfessionalImagePurpose
+  order: number
+  previewUrl: string
+  progress: number
+  status: ImageUploadStatus
+  error?: string
+  providerId?: string
+}
+
+function uploadTaskId() {
+  return typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 const availabilityLabels: Record<ProfessionalAvailability, string> = {
@@ -177,6 +216,8 @@ function emptyForm(publicName: string): ProfessionalProfileFormState {
     phone: '',
     contactVisibility: 'PRIVATE',
     privateLocation: { postalCode: '', neighborhood: '' },
+    profileImage: null,
+    portfolioImages: [],
   }
 }
 
@@ -206,6 +247,8 @@ function formFromProfile(
       postalCode: formatPostalCode(profile.privateLocation.postalCode),
       neighborhood: profile.privateLocation.neighborhood ?? '',
     },
+    profileImage: profile.profileImage ? { ...profile.profileImage } : null,
+    portfolioImages: profile.portfolioImages.map((image) => ({ ...image })),
   }
 }
 
@@ -242,6 +285,64 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   ) : null
 }
 
+function ImageUploadStatus({
+  task,
+  onRetry,
+  onDiscard,
+}: {
+  task: ImageUploadTask
+  onRetry: () => void
+  onDiscard: () => void
+}) {
+  const isUploading = task.status === 'uploading'
+
+  return (
+    <div
+      className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-[5rem_minmax(0,1fr)]"
+      aria-live="polite"
+    >
+      {task.previewUrl ? (
+        <img
+          src={task.previewUrl}
+          alt="Prévia da imagem selecionada"
+          className="aspect-square w-20 rounded-md bg-muted object-cover"
+        />
+      ) : (
+        <div className="flex aspect-square w-20 items-center justify-center rounded-md bg-muted">
+          <Images className="size-6 text-muted-foreground" aria-hidden="true" />
+        </div>
+      )}
+      <div className="min-w-0 space-y-2">
+        <p className="truncate text-sm font-medium">{task.file.name}</p>
+        {isUploading ? (
+          <>
+            <progress
+              value={task.progress}
+              max={100}
+              aria-label={`Enviando ${task.file.name}: ${task.progress}%`}
+              className="h-2 w-full accent-primary"
+            />
+            <p className="text-xs text-muted-foreground">Enviando… {task.progress}%</p>
+          </>
+        ) : null}
+        {task.status === 'error' ? (
+          <>
+            <p role="alert" className="text-sm text-destructive">{task.error}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+                <RotateCcw aria-hidden="true" /> Tentar novamente
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={onDiscard}>
+                <X aria-hidden="true" /> Descartar
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function ProfileLoading() {
   return (
     <div role="status" aria-label="Carregando perfil profissional" className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
@@ -263,6 +364,7 @@ export function ProfessionalProfilePage() {
     syncProfessionalProfileStatus,
   } = useProfile()
   const userId = user?.uid
+  const imageProvider = useMemo(() => getImageProvider(), [])
   const [catalog, setCatalog] = useState<ServiceCatalog | null>(null)
   const [professionalProfile, setProfessionalProfile] =
     useState<ProfessionalProfile | null>(null)
@@ -282,6 +384,22 @@ export function ProfessionalProfilePage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [selectedCityStateCode, setSelectedCityStateCode] = useState('')
   const [selectedCityPickerKey, setSelectedCityPickerKey] = useState(0)
+  const [imageTasks, setImageTasks] = useState<ImageUploadTask[]>([])
+  const [imageSelectionError, setImageSelectionError] = useState<string | null>(null)
+  const [imageRemovalErrors, setImageRemovalErrors] = useState<
+    Record<string, string | undefined>
+  >({})
+  const [removingImageIds, setRemovingImageIds] = useState<string[]>([])
+  const previewUrls = useRef(new Set<string>())
+
+  useEffect(
+    () => () => {
+      for (const previewUrl of previewUrls.current) {
+        URL.revokeObjectURL(previewUrl)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!userId) return
@@ -340,6 +458,9 @@ export function ProfessionalProfilePage() {
   const needsServiceModeReview = professionalProfile?.serviceMode === null
   const isSuspended = currentStatus === 'SUSPENDED'
   const isSaving = savingStatus !== null || savingAvailability
+  const isImageOperationInProgress =
+    imageTasks.some((task) => task.status === 'uploading') ||
+    removingImageIds.length > 0
 
   function updateField<Key extends keyof ProfessionalProfileFormState>(
     field: Key,
@@ -496,8 +617,273 @@ export function ProfessionalProfilePage() {
     )
   }
 
+  function releasePreview(previewUrl: string) {
+    if (!previewUrl) return
+    URL.revokeObjectURL(previewUrl)
+    previewUrls.current.delete(previewUrl)
+  }
+
+  function discardImageTask(task: ImageUploadTask) {
+    releasePreview(task.previewUrl)
+    setImageTasks((current) => current.filter((item) => item.id !== task.id))
+    setImageSelectionError(null)
+  }
+
+  async function runImageUpload(task: ImageUploadTask, retry = false) {
+    if (!userId) return
+    setImageTasks((current) =>
+      current.map((item) =>
+        item.id === task.id
+          ? { ...item, status: 'uploading', progress: 0, error: undefined }
+          : item,
+      ),
+    )
+
+    try {
+      const metadata = await uploadProfessionalImage(
+        imageProvider,
+        {
+          ownerId: userId,
+          file: task.file,
+          purpose: task.purpose,
+          onProgress: (progress) =>
+            setImageTasks((current) =>
+              current.map((item) =>
+                item.id === task.id ? { ...item, progress } : item,
+              ),
+            ),
+        },
+        {
+          retry,
+          order: task.order,
+          currentPortfolioCount: form.portfolioImages.length,
+        },
+      )
+
+      setForm((current) => {
+        if (task.purpose === 'PROFESSIONAL_AVATAR') {
+          return { ...current, profileImage: metadata }
+        }
+        if (
+          current.portfolioImages.some(
+            (image) => image.providerId === metadata.providerId,
+          )
+        ) {
+          return current
+        }
+        return {
+          ...current,
+          portfolioImages: [...current.portfolioImages, metadata]
+            .map((image, order) => ({
+              ...image,
+              order,
+              updatedAt: image.order === order ? image.updatedAt : Date.now(),
+            })),
+        }
+      })
+      setFieldErrors((current) => ({
+        ...current,
+        [task.purpose === 'PROFESSIONAL_AVATAR' ? 'profileImage' : 'portfolioImages']:
+          undefined,
+        form: undefined,
+      }))
+      setImageTasks((current) =>
+        current.map((item) =>
+          item.id === task.id
+            ? {
+                ...item,
+                status: 'success',
+                progress: 100,
+                providerId: metadata.providerId,
+                error: undefined,
+              }
+            : item,
+        ),
+      )
+      setImageSelectionError(null)
+    } catch (error) {
+      const message =
+        error instanceof ProfessionalImageError
+          ? error.message
+          : 'Não foi possível enviar a imagem. Tente novamente.'
+      setImageTasks((current) =>
+        current.map((item) =>
+          item.id === task.id
+            ? { ...item, status: 'error', error: message }
+            : item,
+        ),
+      )
+    }
+  }
+
+  async function handleImageFiles(
+    files: FileList | null,
+    purpose: ProfessionalImagePurpose,
+  ) {
+    if (!files || files.length === 0 || isSuspended) return
+    const selectedFiles = Array.from(files)
+    setImageSelectionError(null)
+
+    if (purpose === 'PROFESSIONAL_AVATAR' && form.profileImage) {
+      setImageSelectionError(
+        'Remova a foto de perfil atual antes de selecionar outra.',
+      )
+      return
+    }
+
+    const pendingPortfolioCount = imageTasks.filter(
+      (task) =>
+        task.purpose === 'PROFESSIONAL_PORTFOLIO' && task.status !== 'success',
+    ).length
+    const currentPortfolioCount =
+      form.portfolioImages.length + pendingPortfolioCount
+    if (
+      purpose === 'PROFESSIONAL_PORTFOLIO' &&
+      currentPortfolioCount + selectedFiles.length >
+        PROFESSIONAL_PORTFOLIO_MAX_IMAGES
+    ) {
+      setImageSelectionError(
+        `Adicione no máximo ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens ao portfólio.`,
+      )
+      return
+    }
+
+    try {
+      selectedFiles.forEach((file, index) =>
+        validateProfessionalImageFile(
+          file,
+          purpose,
+          currentPortfolioCount + index,
+        ),
+      )
+    } catch (error) {
+      setImageSelectionError(
+        error instanceof ProfessionalImageError
+          ? error.message
+          : 'Revise as imagens selecionadas.',
+      )
+      return
+    }
+
+    for (const [index, file] of selectedFiles.entries()) {
+      const previewUrl =
+        typeof URL.createObjectURL === 'function'
+          ? URL.createObjectURL(file)
+          : ''
+      if (previewUrl) previewUrls.current.add(previewUrl)
+      const task: ImageUploadTask = {
+        id: uploadTaskId(),
+        file,
+        purpose,
+        order:
+          purpose === 'PROFESSIONAL_AVATAR'
+            ? 0
+            : currentPortfolioCount + index,
+        previewUrl,
+        progress: 0,
+        status: 'uploading',
+      }
+      setImageTasks((current) => [...current, task])
+      await runImageUpload(task)
+    }
+  }
+
+  async function handleRemoveImage(
+    image: ProfessionalImageMetadata,
+    purpose: ProfessionalImagePurpose,
+  ) {
+    if (!userId || removingImageIds.includes(image.providerId)) return
+    setRemovingImageIds((current) => [...current, image.providerId])
+    setImageRemovalErrors((current) => ({
+      ...current,
+      [image.providerId]: undefined,
+    }))
+
+    try {
+      await removeProfessionalImage(imageProvider, image, userId, purpose)
+      setForm((current) =>
+        purpose === 'PROFESSIONAL_AVATAR'
+          ? { ...current, profileImage: null }
+          : {
+              ...current,
+              portfolioImages: current.portfolioImages
+                .filter((item) => item.providerId !== image.providerId)
+                .map((item, order) => ({
+                  ...item,
+                  order,
+                  updatedAt:
+                    item.order === order ? item.updatedAt : Date.now(),
+                })),
+            },
+      )
+      const localTask = imageTasks.find(
+        (task) => task.providerId === image.providerId,
+      )
+      if (localTask) discardImageTask(localTask)
+      setFieldErrors((current) => ({
+        ...current,
+        [purpose === 'PROFESSIONAL_AVATAR' ? 'profileImage' : 'portfolioImages']:
+          undefined,
+      }))
+    } catch (error) {
+      setImageRemovalErrors((current) => ({
+        ...current,
+        [image.providerId]:
+          error instanceof ProfessionalImageError
+            ? error.message
+            : 'Não foi possível remover a imagem. Tente novamente.',
+      }))
+    } finally {
+      setRemovingImageIds((current) =>
+        current.filter((providerId) => providerId !== image.providerId),
+      )
+    }
+  }
+
+  function updateImageAltText(
+    image: ProfessionalImageMetadata,
+    purpose: ProfessionalImagePurpose,
+    altText: string,
+  ) {
+    setForm((current) =>
+      purpose === 'PROFESSIONAL_AVATAR'
+        ? {
+            ...current,
+            profileImage: current.profileImage
+              ? { ...current.profileImage, altText, updatedAt: Date.now() }
+              : null,
+          }
+        : {
+            ...current,
+            portfolioImages: current.portfolioImages.map((item) =>
+              item.providerId === image.providerId
+                ? { ...item, altText, updatedAt: Date.now() }
+                : item,
+            ),
+          },
+    )
+    setFieldErrors((current) => ({
+      ...current,
+      [purpose === 'PROFESSIONAL_AVATAR' ? 'profileImage' : 'portfolioImages']:
+        undefined,
+    }))
+  }
+
+  function previewFor(image: ProfessionalImageMetadata) {
+    return (
+      imageTasks.find((task) => task.providerId === image.providerId)
+        ?.previewUrl || image.url
+    )
+  }
+
   async function handleSave(status: EditableProfessionalProfileStatus) {
-    if (!userId || !catalog || isSaving || isSuspended) return
+    if (
+      !userId ||
+      !catalog ||
+      isSaving ||
+      isImageOperationInProgress ||
+      isSuspended
+    ) return
     setSavingStatus(status)
     setFieldErrors({})
     setSubmissionError(null)
@@ -534,6 +920,8 @@ export function ProfessionalProfilePage() {
           'bio',
           'categoryIds',
           'specialtyIds',
+          'profileImage',
+          'portfolioImages',
           'phone',
           'contactVisibility',
           'privateLocation',
@@ -637,7 +1025,7 @@ export function ProfessionalProfilePage() {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
       <form
         noValidate
-        aria-busy={isSaving}
+        aria-busy={isSaving || isImageOperationInProgress}
         onSubmit={(event) => event.preventDefault()}
         className="min-w-0 space-y-6"
       >
@@ -749,6 +1137,258 @@ export function ProfessionalProfilePage() {
               />
               <FieldError id="professional-experienceYears-error" message={fieldErrors.experienceYears} />
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-start gap-3">
+              <Images className="mt-0.5 size-5 text-primary" aria-hidden="true" />
+              <div>
+                <CardTitle>Foto e portfólio</CardTitle>
+                <CardDescription className="mt-1">
+                  Use imagens JPEG, PNG ou WebP de até 5 MB. O portfólio aceita até {PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-8">
+            {!imageProvider.configured ? (
+              <Alert>
+                <CircleAlert aria-hidden="true" />
+                <AlertTitle>Envio de imagens indisponível</AlertTitle>
+                <AlertDescription>
+                  O provedor de imagens não está configurado. Seus outros dados ainda podem ser salvos normalmente.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <fieldset
+              id="professional-profileImage"
+              tabIndex={-1}
+              aria-invalid={Boolean(fieldErrors.profileImage)}
+              aria-describedby={fieldErrors.profileImage ? 'professional-profileImage-error' : undefined}
+              className="space-y-4 rounded-md focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+            >
+              <legend className="text-sm font-semibold">Foto de perfil</legend>
+              {form.profileImage ? (
+                <div className="grid gap-4 rounded-lg border bg-card p-4 sm:grid-cols-[7rem_minmax(0,1fr)]">
+                  <img
+                    src={previewFor(form.profileImage)}
+                    alt={form.profileImage.altText || 'Prévia da foto de perfil'}
+                    className="aspect-square w-full rounded-md bg-muted object-cover"
+                  />
+                  <div className="min-w-0 space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="professional-profile-image-alt">Texto alternativo</Label>
+                      <Input
+                        id="professional-profile-image-alt"
+                        value={form.profileImage.altText}
+                        maxLength={PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH}
+                        placeholder="Descreva a imagem para quem não pode vê-la"
+                        disabled={isSaving || isSuspended}
+                        onChange={(event) =>
+                          form.profileImage &&
+                          updateImageAltText(
+                            form.profileImage,
+                            'PROFESSIONAL_AVATAR',
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      loading={removingImageIds.includes(form.profileImage.providerId)}
+                      loadingLabel="Removendo…"
+                      disabled={isSaving || isSuspended}
+                      onClick={() =>
+                        form.profileImage &&
+                        void handleRemoveImage(
+                          form.profileImage,
+                          'PROFESSIONAL_AVATAR',
+                        )
+                      }
+                    >
+                      <Trash2 aria-hidden="true" /> Remover foto
+                    </Button>
+                    {imageRemovalErrors[form.profileImage.providerId] ? (
+                      <p role="alert" className="text-sm text-destructive">
+                        {imageRemovalErrors[form.profileImage.providerId]}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="professional-profile-image-file"
+                    className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-5 text-center hover:bg-muted/60"
+                  >
+                    <Upload className="size-5" aria-hidden="true" />
+                    <span>Selecionar foto de perfil</span>
+                    <span className="text-xs font-normal text-muted-foreground">Uma imagem, até 5 MB</span>
+                  </Label>
+                  <Input
+                    id="professional-profile-image-file"
+                    type="file"
+                    accept={PROFESSIONAL_IMAGE_ACCEPTED_TYPES.join(',')}
+                    className="sr-only"
+                    disabled={
+                      !imageProvider.configured ||
+                      isSaving ||
+                      isImageOperationInProgress ||
+                      isSuspended
+                    }
+                    onChange={(event) => {
+                      void handleImageFiles(
+                        event.currentTarget.files,
+                        'PROFESSIONAL_AVATAR',
+                      )
+                      event.currentTarget.value = ''
+                    }}
+                  />
+                </div>
+              )}
+              {imageTasks
+                .filter(
+                  (task) =>
+                    task.purpose === 'PROFESSIONAL_AVATAR' &&
+                    task.status !== 'success',
+                )
+                .map((task) => (
+                  <ImageUploadStatus
+                    key={task.id}
+                    task={task}
+                    onRetry={() => void runImageUpload(task, true)}
+                    onDiscard={() => discardImageTask(task)}
+                  />
+                ))}
+              <FieldError id="professional-profileImage-error" message={fieldErrors.profileImage} />
+            </fieldset>
+
+            <fieldset
+              id="professional-portfolioImages"
+              tabIndex={-1}
+              aria-invalid={Boolean(fieldErrors.portfolioImages)}
+              aria-describedby={fieldErrors.portfolioImages ? 'professional-portfolioImages-error' : undefined}
+              className="space-y-4 rounded-md focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+            >
+              <legend className="text-sm font-semibold">Portfólio</legend>
+              <p className="text-xs text-muted-foreground">
+                {form.portfolioImages.length}/{PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens adicionadas
+              </p>
+              {form.portfolioImages.length > 0 ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {form.portfolioImages.map((image, index) => (
+                    <div key={image.providerId} className="min-w-0 space-y-3 rounded-lg border bg-card p-3">
+                      <img
+                        src={previewFor(image)}
+                        alt={image.altText || `Prévia da imagem ${index + 1} do portfólio`}
+                        className="aspect-[4/3] w-full rounded-md bg-muted object-cover"
+                      />
+                      <div className="space-y-2">
+                        <Label htmlFor={`professional-portfolio-alt-${index}`}>
+                          Texto alternativo da imagem {index + 1}
+                        </Label>
+                        <Input
+                          id={`professional-portfolio-alt-${index}`}
+                          value={image.altText}
+                          maxLength={PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH}
+                          placeholder="Descreva o serviço mostrado"
+                          disabled={isSaving || isSuspended}
+                          onChange={(event) =>
+                            updateImageAltText(
+                              image,
+                              'PROFESSIONAL_PORTFOLIO',
+                              event.target.value,
+                            )
+                          }
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        loading={removingImageIds.includes(image.providerId)}
+                        loadingLabel="Removendo…"
+                        disabled={isSaving || isSuspended}
+                        onClick={() =>
+                          void handleRemoveImage(
+                            image,
+                            'PROFESSIONAL_PORTFOLIO',
+                          )
+                        }
+                      >
+                        <Trash2 aria-hidden="true" /> Remover imagem
+                      </Button>
+                      {imageRemovalErrors[image.providerId] ? (
+                        <p role="alert" className="text-sm text-destructive">
+                          {imageRemovalErrors[image.providerId]}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Nenhuma imagem adicionada ao portfólio.</p>
+              )}
+              {imageTasks
+                .filter(
+                  (task) =>
+                    task.purpose === 'PROFESSIONAL_PORTFOLIO' &&
+                    task.status !== 'success',
+                )
+                .map((task) => (
+                  <ImageUploadStatus
+                    key={task.id}
+                    task={task}
+                    onRetry={() => void runImageUpload(task, true)}
+                    onDiscard={() => discardImageTask(task)}
+                  />
+                ))}
+              <div className="space-y-2">
+                <Label
+                  htmlFor="professional-portfolio-image-files"
+                  className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-md border bg-background px-4 py-2 text-sm font-medium shadow-xs hover:bg-accent"
+                >
+                  <Upload className="size-4" aria-hidden="true" /> Adicionar imagens
+                </Label>
+                <Input
+                  id="professional-portfolio-image-files"
+                  type="file"
+                  accept={PROFESSIONAL_IMAGE_ACCEPTED_TYPES.join(',')}
+                  multiple
+                  className="sr-only"
+                  disabled={
+                    !imageProvider.configured ||
+                    isSaving ||
+                    isImageOperationInProgress ||
+                    isSuspended ||
+                    form.portfolioImages.length >= PROFESSIONAL_PORTFOLIO_MAX_IMAGES
+                  }
+                  onChange={(event) => {
+                    void handleImageFiles(
+                      event.currentTarget.files,
+                      'PROFESSIONAL_PORTFOLIO',
+                    )
+                    event.currentTarget.value = ''
+                  }}
+                />
+              </div>
+              <FieldError id="professional-portfolioImages-error" message={fieldErrors.portfolioImages} />
+            </fieldset>
+
+            {imageSelectionError ? (
+              <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {imageSelectionError}
+              </p>
+            ) : null}
+            <PrivacyNotice>
+              O arquivo é enviado somente ao provedor configurado. No perfil, salvamos apenas URL, identificador, ordem e texto alternativo — nunca base64 ou o arquivo bruto.
+            </PrivacyNotice>
           </CardContent>
         </Card>
 
@@ -1272,7 +1912,7 @@ export function ProfessionalProfilePage() {
                 variant="outline"
                 loading={savingStatus === 'DRAFT'}
                 loadingLabel="Salvando rascunho…"
-                disabled={isSaving}
+                disabled={isSaving || isImageOperationInProgress}
                 onClick={() => void handleSave('DRAFT')}
               >
                 <Save aria-hidden="true" />
@@ -1284,7 +1924,7 @@ export function ProfessionalProfilePage() {
                   variant="secondary"
                   loading={savingStatus === 'PAUSED'}
                   loadingLabel="Pausando…"
-                  disabled={isSaving}
+                  disabled={isSaving || isImageOperationInProgress}
                   onClick={() => void handleSave('PAUSED')}
                 >
                   <PauseCircle aria-hidden="true" /> Pausar perfil
@@ -1296,7 +1936,7 @@ export function ProfessionalProfilePage() {
                   variant="secondary"
                   loading={savingStatus === 'PAUSED'}
                   loadingLabel="Salvando…"
-                  disabled={isSaving}
+                  disabled={isSaving || isImageOperationInProgress}
                   onClick={() => void handleSave('PAUSED')}
                 >
                   <Save aria-hidden="true" /> Salvar pausado
@@ -1307,7 +1947,7 @@ export function ProfessionalProfilePage() {
                 className="sm:ml-auto"
                 loading={savingStatus === 'PUBLISHED'}
                 loadingLabel={currentStatus === 'PUBLISHED' ? 'Salvando…' : 'Publicando…'}
-                disabled={isSaving}
+                disabled={isSaving || isImageOperationInProgress}
                 onClick={() => void handleSave('PUBLISHED')}
               >
                 <Send aria-hidden="true" />

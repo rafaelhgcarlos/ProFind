@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   syncProfessionalProfileStatus: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  imageUpload: vi.fn(),
+  imageRetry: vi.fn(),
+  imageRemove: vi.fn(),
 }))
 
 vi.mock('../../../components/layout/ProfessionalLayout', () => ({
@@ -74,6 +77,16 @@ vi.mock('sonner', () => ({
   toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }))
 
+vi.mock('../../../providers/image-provider.factory', () => ({
+  getImageProvider: () => ({
+    name: 'test',
+    configured: true,
+    upload: mocks.imageUpload,
+    retry: mocks.imageRetry,
+    remove: mocks.imageRemove,
+  }),
+}))
+
 const catalog = {
   categories: [
     { id: 'construction', name: 'Construção Civil', active: true, order: 10 },
@@ -106,6 +119,8 @@ const publishedProfile: ProfessionalProfile = {
     postalCode: '13083852',
     neighborhood: 'Cidade Universitária',
   },
+  profileImage: null,
+  portfolioImages: [],
   status: 'PUBLISHED',
 }
 
@@ -128,6 +143,15 @@ describe('ProfessionalProfilePage', () => {
         neighborhood: 'Cidade Universitária',
       },
     })
+    mocks.imageUpload.mockResolvedValue({
+      url: 'https://images.example/profile.webp',
+      providerId: 'profile-123',
+    })
+    mocks.imageRetry.mockResolvedValue({
+      url: 'https://images.example/profile.webp',
+      providerId: 'profile-123',
+    })
+    mocks.imageRemove.mockResolvedValue(undefined)
   })
 
   it('carrega o catálogo real e permite salvar um perfil incompleto como rascunho', async () => {
@@ -222,6 +246,76 @@ describe('ProfessionalProfilePage', () => {
     expect(description).not.toBeRequired()
     expect(description).toHaveAttribute('maxlength', '1200')
     expect(screen.getAllByText('Descrição')).toHaveLength(1)
+  })
+
+  it('valida a imagem antes do envio sem apagar os outros campos', async () => {
+    const user = userEvent.setup()
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    const publicName = await screen.findByLabelText('Nome público *')
+    fireEvent.change(publicName, { target: { value: 'Nome preservado' } })
+    await user.upload(
+      screen.getByLabelText(/selecionar foto de perfil/i),
+      new File([], 'foto-vazia.png', { type: 'image/png' }),
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/5 mb/i)
+    expect(mocks.imageUpload).not.toHaveBeenCalled()
+    expect(publicName).toHaveValue('Nome preservado')
+  })
+
+  it('mostra erro por imagem, permite retry e salva somente os metadados', async () => {
+    mocks.imageUpload.mockRejectedValueOnce(new Error('offline'))
+    mocks.saveProfessionalProfile.mockImplementation(
+      async (_userId, input, status) => ({
+        ...publishedProfile,
+        ...input,
+        status,
+      }),
+    )
+    const user = userEvent.setup()
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    const publicName = await screen.findByLabelText('Nome público *')
+    fireEvent.change(publicName, { target: { value: 'Nome preservado' } })
+    await user.upload(
+      screen.getByLabelText(/selecionar foto de perfil/i),
+      new File(['image'], 'foto.png', { type: 'image/png' }),
+    )
+
+    expect(await screen.findByText(/não foi possível enviar a imagem/i)).toBeInTheDocument()
+    expect(publicName).toHaveValue('Nome preservado')
+    await user.click(screen.getByRole('button', { name: /tentar novamente/i }))
+
+    const altText = await screen.findByLabelText('Texto alternativo')
+    fireEvent.change(altText, {
+      target: { value: 'Profissional em atendimento' },
+    })
+    await user.click(screen.getByRole('button', { name: 'Salvar rascunho' }))
+
+    expect(mocks.imageRetry).toHaveBeenCalledOnce()
+    expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
+      'user-123',
+      expect.objectContaining({
+        publicName: 'Nome preservado',
+        profileImage: expect.objectContaining({
+          ownerId: 'user-123',
+          purpose: 'PROFESSIONAL_AVATAR',
+          url: 'https://images.example/profile.webp',
+          providerId: 'profile-123',
+          createdAt: expect.any(Number),
+          updatedAt: expect.any(Number),
+          order: 0,
+          altText: 'Profissional em atendimento',
+        }),
+      }),
+      'DRAFT',
+      catalog,
+      null,
+    )
+    const savedInput = mocks.saveProfessionalProfile.mock.calls.at(-1)?.[1]
+    expect(savedInput).not.toHaveProperty('file')
+    expect(JSON.stringify(savedInput)).not.toMatch(/base64|data:image/i)
   })
 
   it('carrega os dados para edição e oferece pausar um perfil publicado', async () => {

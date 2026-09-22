@@ -87,6 +87,20 @@ service cloud.firestore {
                 && getAfter(profilePath).data.status in ['PUBLISHED', 'PAUSED']))));
     }
 
+    function hasValidClientAvatar(image, userId) {
+      return image.keys().size() == 6
+        && image.keys().hasOnly([
+          'ownerId', 'purpose', 'url', 'providerId', 'createdAt', 'updatedAt'
+        ])
+        && image.ownerId == userId
+        && image.purpose == 'CLIENT_AVATAR'
+        && image.url.matches('^https://.+')
+        && image.url.size() <= 2048
+        && image.providerId.matches('^.{1,300}$')
+        && image.createdAt > 0
+        && image.updatedAt >= image.createdAt;
+    }
+
     function hasValidProfessionalProfileFields() {
       let data = request.resource.data;
 
@@ -123,6 +137,8 @@ service cloud.firestore {
           'availability',
           'contactVisibility',
           'phone',
+          'profileImage',
+          'portfolioImages',
           'status',
           'createdAt',
           'updatedAt',
@@ -167,8 +183,73 @@ service cloud.firestore {
           || (data.contactVisibility == 'PUBLIC'
             && data.phone is string
             && data.phone.matches('^[0-9]{10,11}$')))
+        && hasValidProfessionalImages(
+          data.ownerId,
+          data.get('profileImage', null),
+          data.get('portfolioImages', [])
+        )
         && data.status in ['DRAFT', 'PUBLISHED', 'PAUSED', 'SUSPENDED']
         && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function hasValidProfessionalProfileUpdate() {
+      let data = request.resource.data;
+      let changed = data.diff(resource.data).affectedKeys();
+
+      return (!changed.hasAny(['publicName'])
+          || (data.publicName is string && data.publicName.size() <= 120))
+        && (!changed.hasAny(['headline'])
+          || (data.headline is string && data.headline.size() <= 120))
+        && (!changed.hasAny(['bio'])
+          || (!('bio' in data)
+            || (data.bio is string && data.bio.size() <= 1200)))
+        && (!changed.hasAny(['categoryIds'])
+          || (data.categoryIds is list && data.categoryIds.size() <= 5))
+        && (!changed.hasAny(['specialtyIds'])
+          || (data.specialtyIds is list && data.specialtyIds.size() <= 10))
+        && (!changed.hasAny(['experienceYears'])
+          || data.experienceYears == null
+          || (data.experienceYears is int
+            && data.experienceYears >= 0
+            && data.experienceYears <= 80))
+        && (!changed.hasAny(['baseLocation'])
+          || hasValidProfessionalBaseLocation(data.baseLocation))
+        && (!changed.hasAny(['serviceMode', 'serviceRadiusKm'])
+          || ((data.serviceMode == null
+              || data.serviceMode in [
+                'CITY_ONLY', 'RADIUS', 'SELECTED_CITIES'
+              ])
+            && ((data.serviceMode == 'RADIUS'
+                && (data.serviceRadiusKm == null
+                  || data.serviceRadiusKm in [5, 10, 20, 30, 50]))
+              || (data.serviceMode != 'RADIUS'
+                && data.serviceRadiusKm == null))
+            && ((data.serviceMode == 'SELECTED_CITIES')
+              || data.selectedCities.size() == 0)))
+        && (!changed.hasAny(['selectedCities', 'selectedCityIbgeCodes'])
+          || (hasValidSelectedCities(
+              data.selectedCities,
+              data.get('selectedCityIbgeCodes', null)
+            )
+            && ((data.serviceMode == 'SELECTED_CITIES')
+              || data.selectedCities.size() == 0)))
+        && (!changed.hasAny(['availability'])
+          || data.availability in ['AVAILABLE', 'LIMITED', 'UNAVAILABLE'])
+        && (!changed.hasAny(['contactVisibility', 'phone'])
+          || (data.contactVisibility in ['PUBLIC', 'PRIVATE']
+            && ((data.contactVisibility == 'PRIVATE' && !('phone' in data))
+              || (data.contactVisibility == 'PUBLIC'
+                && data.phone is string
+                && data.phone.matches('^[0-9]{10,11}$')))))
+        && (!changed.hasAny(['profileImage', 'portfolioImages'])
+          || hasValidProfessionalImages(
+            data.ownerId,
+            data.get('profileImage', null),
+            data.get('portfolioImages', [])
+          ))
+        && (!changed.hasAny(['status'])
+          || data.status in ['DRAFT', 'PUBLISHED', 'PAUSED'])
         && data.updatedAt == request.time;
     }
 
@@ -222,7 +303,9 @@ service cloud.firestore {
     function hasValidSelectedCities(cities, codes) {
       return cities is list
         && cities.size() <= 10
-        && ((codes == null
+        && ((cities.size() == 0
+            && (codes == null || codes.size() == 0))
+          || (codes == null
             && cities.size() == cities.toSet().size())
           || (codes is list
             && codes.size() == cities.size()
@@ -239,6 +322,55 @@ service cloud.firestore {
             && hasValidSelectedCityCodeAt(codes, 9)));
     }
 
+    function hasValidProfessionalImage(image, ownerId, purpose) {
+      return image.keys().size() == 8
+        && image.keys().hasOnly([
+          'ownerId', 'purpose', 'url', 'providerId',
+          'createdAt', 'updatedAt', 'order', 'altText'
+        ])
+        && image.ownerId == ownerId
+        && image.purpose == purpose
+        && image.url.matches('^https://.+')
+        && image.url.size() <= 2048
+        && image.providerId.matches('^.{1,300}$')
+        && image.altText.matches('^.{0,240}$')
+        && image.createdAt > 0
+        && image.updatedAt >= image.createdAt;
+    }
+
+    function hasValidProfessionalImageAt(images, index, ownerId) {
+      return images.size() <= index
+        || (hasValidProfessionalImage(
+            images[index], ownerId, 'PROFESSIONAL_PORTFOLIO'
+          )
+          && images[index].order == index);
+    }
+
+    function hasAccessibleProfessionalImageAt(images, index) {
+      return images.size() <= index
+        || images[index].altText.size() >= 1;
+    }
+
+    function hasValidProfessionalImages(ownerId, profileImage, portfolioImages) {
+      return (profileImage == null
+          || (hasValidProfessionalImage(
+              profileImage, ownerId, 'PROFESSIONAL_AVATAR'
+            )
+            && profileImage.order == 0))
+        && portfolioImages is list
+        && portfolioImages.size() <= 3
+        && hasValidProfessionalImageAt(portfolioImages, 0, ownerId)
+        && hasValidProfessionalImageAt(portfolioImages, 1, ownerId)
+        && hasValidProfessionalImageAt(portfolioImages, 2, ownerId);
+    }
+
+    function hasAccessibleProfessionalImages(profileImage, portfolioImages) {
+      return (profileImage == null || profileImage.altText.size() >= 1)
+        && hasAccessibleProfessionalImageAt(portfolioImages, 0)
+        && hasAccessibleProfessionalImageAt(portfolioImages, 1)
+        && hasAccessibleProfessionalImageAt(portfolioImages, 2);
+    }
+
     function isPublishableProfessionalProfile() {
       let data = request.resource.data;
 
@@ -252,7 +384,11 @@ service cloud.firestore {
         && (data.serviceMode != 'RADIUS'
           || data.serviceRadiusKm in [5, 10, 20, 30, 50])
         && (data.serviceMode != 'SELECTED_CITIES'
-          || data.selectedCities.size() >= 1);
+          || data.selectedCities.size() >= 1)
+        && hasAccessibleProfessionalImages(
+          data.get('profileImage', null),
+          data.get('portfolioImages', [])
+        );
     }
 
     function hasValidProfessionalPrivateProfile(data, userId) {
@@ -311,9 +447,17 @@ service cloud.firestore {
           'roles',
           'activeMode',
           'professionalProfileStatus',
+          'clientAvatar',
           'updatedAt'
         ])
         && request.resource.data.updatedAt == request.time
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['clientAvatar'])
+          || (!('clientAvatar' in request.resource.data)
+            || hasValidClientAvatar(
+              request.resource.data.clientAvatar,
+              userId
+            )))
         && hasValidRoleConfiguration()
         && hasValidProfessionalProfileSummary(userId)
         && (hasNoConfiguredRoles()
@@ -367,6 +511,8 @@ service cloud.firestore {
           'availability',
           'contactVisibility',
           'phone',
+          'profileImage',
+          'portfolioImages',
           'status',
           'createdAt',
           'updatedAt'
@@ -398,10 +544,12 @@ service cloud.firestore {
           'availability',
           'contactVisibility',
           'phone',
+          'profileImage',
+          'portfolioImages',
           'status',
           'updatedAt'
         ])
-        && hasValidProfessionalProfileFields()
+        && hasValidProfessionalProfileUpdate()
         && (request.resource.data.status == 'DRAFT'
           || isPublishableProfessionalProfile());
 

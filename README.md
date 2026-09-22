@@ -135,6 +135,11 @@ Os limites entre dados públicos e privados do perfil, incluindo as coleções
 `professionalProfiles` e `professionalPrivateProfiles`, estão documentados em
 [`docs/professional-profile-privacy.md`](docs/professional-profile-privacy.md).
 
+Foto de perfil e portfólio usam uma abstração substituível, sem Firebase
+Storage nem SDK de provedor dentro das features. A configuração dos adapters,
+o contrato do backend seguro e os metadados persistidos estão documentados em
+[`docs/image-provider.md`](docs/image-provider.md).
+
 ## Design system
 
 O design system usa Tailwind CSS com tokens semânticos definidos em

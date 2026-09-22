@@ -41,6 +41,28 @@ const publicProfile = {
   selectedCityIbgeCodes: [],
   availability: 'AVAILABLE',
   contactVisibility: 'PRIVATE',
+  profileImage: {
+    ownerId,
+    purpose: 'PROFESSIONAL_AVATAR',
+    url: 'https://images.example/profile.webp',
+    providerId: 'profile-123',
+    createdAt: 1_795_000_000_000,
+    updatedAt: 1_795_000_000_000,
+    order: 0,
+    altText: 'Marina em seu ambiente de trabalho',
+  },
+  portfolioImages: [
+    {
+      ownerId,
+      purpose: 'PROFESSIONAL_PORTFOLIO',
+      url: 'https://images.example/service.webp',
+      providerId: 'portfolio-123',
+      createdAt: 1_795_000_000_000,
+      updatedAt: 1_795_000_000_000,
+      order: 0,
+      altText: 'Instalação elétrica concluída',
+    },
+  ],
   status: 'PUBLISHED',
   createdAt: new Date('2026-09-22T12:00:00Z'),
   updatedAt: new Date('2026-09-22T12:00:00Z'),
@@ -95,6 +117,42 @@ afterAll(async () => {
 })
 
 describe('Firestore privacy rules for professional profiles', () => {
+  it('keeps the client avatar isolated by owner and purpose', async () => {
+    await seedProfiles()
+    const owner = testEnvironment.authenticatedContext(ownerId).firestore()
+    const reference = doc(owner, 'users', ownerId)
+    const clientAvatar = {
+      ownerId,
+      purpose: 'CLIENT_AVATAR',
+      url: 'https://images.example/client.webp',
+      providerId: 'client-avatar-1',
+      createdAt: 1_795_000_000_000,
+      updatedAt: 1_795_000_000_000,
+    }
+
+    await assertSucceeds(
+      updateDoc(reference, {
+        clientAvatar,
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(reference, {
+        clientAvatar: { ...clientAvatar, ownerId: otherUserId },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(reference, {
+        clientAvatar: {
+          ...clientAvatar,
+          purpose: 'PROFESSIONAL_AVATAR',
+        },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
   it('returns only authorized approximate data to a visitor', async () => {
     await seedProfiles()
     const firestore = testEnvironment.unauthenticatedContext().firestore()
@@ -116,6 +174,8 @@ describe('Firestore privacy rules for professional profiles', () => {
     expect(snapshot.data()).not.toHaveProperty('privateLocation')
     expect(snapshot.data()).not.toHaveProperty('postalCode')
     expect(snapshot.data()).not.toHaveProperty('neighborhood')
+    expect(snapshot.data()).not.toHaveProperty('file')
+    expect(snapshot.data()).not.toHaveProperty('base64')
   })
 
   it('blocks private reads for visitors and authenticated non-owners', async () => {
@@ -192,6 +252,117 @@ describe('Firestore privacy rules for professional profiles', () => {
         postalCode: '13083852',
         neighborhood: 'Cidade Universitária',
         privateLocation: privateProfile.privateLocation,
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('allows only minimal image metadata in the public profile', async () => {
+    await seedProfiles()
+    const owner = testEnvironment.authenticatedContext(ownerId).firestore()
+    const reference = doc(owner, 'professionalProfiles', ownerId)
+
+    await assertSucceeds(
+      updateDoc(reference, {
+        portfolioImages: [
+          {
+            ownerId,
+            purpose: 'PROFESSIONAL_PORTFOLIO',
+            url: 'https://images.example/new-service.webp',
+            providerId: 'portfolio-456',
+            createdAt: 1_795_000_000_000,
+            updatedAt: 1_795_000_000_000,
+            order: 0,
+            altText: 'Novo serviço concluído',
+          },
+        ],
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(reference, {
+        profileImage: {
+          ...publicProfile.profileImage,
+          base64: 'data:image/webp;base64,AAAA',
+        },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(reference, {
+        portfolioImages: [
+          {
+            ownerId,
+            purpose: 'PROFESSIONAL_PORTFOLIO',
+            url: 'data:image/webp;base64,AAAA',
+            providerId: 'portfolio-unsafe',
+            createdAt: 1_795_000_000_000,
+            updatedAt: 1_795_000_000_000,
+            order: 0,
+            altText: 'Imagem inválida',
+          },
+        ],
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('allows the owner to create a draft containing valid image metadata', async () => {
+    const imageOwnerId = 'image-owner'
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', imageOwnerId), {
+        roles: ['professional'],
+        activeMode: 'professional',
+        professionalProfileStatus: 'not-started',
+      })
+    })
+    const owner = testEnvironment.authenticatedContext(imageOwnerId).firestore()
+
+    await assertSucceeds(
+      setDoc(doc(owner, 'professionalProfiles', imageOwnerId), {
+        ...publicProfile,
+        ownerId: imageOwnerId,
+        status: 'DRAFT',
+        profileImage: {
+          ...publicProfile.profileImage,
+          ownerId: imageOwnerId,
+        },
+        portfolioImages: Array.from({ length: 3 }, (_, order) => ({
+          ownerId: imageOwnerId,
+          purpose: 'PROFESSIONAL_PORTFOLIO',
+          url: `https://images.example/service-${order}.webp`,
+          providerId: `portfolio-${order}`,
+          createdAt: 1_795_000_000_000,
+          updatedAt: 1_795_000_000_000,
+          order,
+          altText: `Serviço concluído ${order + 1}`,
+        })),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('rejects image metadata with another owner or purpose', async () => {
+    await seedProfiles()
+    const owner = testEnvironment.authenticatedContext(ownerId).firestore()
+    const reference = doc(owner, 'professionalProfiles', ownerId)
+
+    await assertFails(
+      updateDoc(reference, {
+        profileImage: {
+          ...publicProfile.profileImage,
+          ownerId: otherUserId,
+        },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(reference, {
+        profileImage: {
+          ...publicProfile.profileImage,
+          purpose: 'PROFESSIONAL_PORTFOLIO',
+        },
         updatedAt: serverTimestamp(),
       }),
     )

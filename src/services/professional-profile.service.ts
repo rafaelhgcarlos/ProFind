@@ -3,6 +3,7 @@ import type { ServiceCatalog } from '../types/catalog'
 import type {
   BrazilianStateCode,
   ProfessionalBaseLocation,
+  ProfessionalImageMetadata,
   ProfessionalProfile,
   ProfessionalProfileInput,
   ProfessionalProfileStatus,
@@ -15,6 +16,10 @@ import {
   PROFESSIONAL_SERVICE_RADIUS_OPTIONS,
 } from '../types/professional-profile'
 import type { ProfessionalProfileStatus as UserProfessionalProfileStatus } from '../features/onboarding/user-role'
+import {
+  PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH,
+  PROFESSIONAL_PORTFOLIO_MAX_IMAGES,
+} from './professional-images.service'
 
 export type EditableProfessionalProfileStatus = Exclude<
   ProfessionalProfileStatus,
@@ -192,6 +197,50 @@ function uniqueLocations(locations: ProfessionalBaseLocation[]) {
   return [...uniqueByIbgeCode.values()]
 }
 
+function normalizeImage(
+  image: ProfessionalImageMetadata,
+  order: number,
+): ProfessionalImageMetadata {
+  return {
+    ownerId: image.ownerId.trim(),
+    purpose: image.purpose,
+    url: image.url.trim(),
+    providerId: image.providerId.trim(),
+    createdAt: image.createdAt,
+    updatedAt: image.updatedAt,
+    order,
+    altText: image.altText.trim(),
+  }
+}
+
+function imageMetadataError(
+  image: ProfessionalImageMetadata,
+  purpose: ProfessionalImageMetadata['purpose'],
+  ownerId?: string,
+) {
+  if (image.purpose !== purpose || (ownerId && image.ownerId !== ownerId)) {
+    return 'A imagem não pertence ao proprietário e à finalidade esperados.'
+  }
+  if (!image.url.startsWith('https://') || image.url.length > 2_048) {
+    return 'A imagem não possui uma URL HTTPS válida.'
+  }
+  if (!image.providerId || image.providerId.length > 300) {
+    return 'A imagem não possui um identificador de provedor válido.'
+  }
+  if (image.altText.length > PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH) {
+    return `Use no máximo ${PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH} caracteres no texto alternativo.`
+  }
+  if (
+    !Number.isSafeInteger(image.createdAt) ||
+    image.createdAt <= 0 ||
+    !Number.isSafeInteger(image.updatedAt) ||
+    image.updatedAt < image.createdAt
+  ) {
+    return 'A imagem não possui timestamps válidos.'
+  }
+  return null
+}
+
 function structuredLocationError(location: ProfessionalBaseLocation) {
   if (location.city.length > 120) {
     return 'Use no máximo 120 caracteres para a cidade.'
@@ -239,6 +288,10 @@ export function normalizeProfessionalProfileInput(
         ? { neighborhood: input.privateLocation.neighborhood.trim() }
         : {}),
     },
+    profileImage: input.profileImage
+      ? normalizeImage(input.profileImage, 0)
+      : null,
+    portfolioImages: input.portfolioImages.map(normalizeImage),
   }
 }
 
@@ -246,6 +299,7 @@ export function validateProfessionalProfile(
   input: ProfessionalProfileInput,
   status: EditableProfessionalProfileStatus,
   catalog: ServiceCatalog,
+  ownerId?: string,
 ): ProfessionalProfileFieldErrors {
   const errors: ProfessionalProfileFieldErrors = {}
   const categoryIds = new Set(catalog.categories.map((category) => category.id))
@@ -263,6 +317,28 @@ export function validateProfessionalProfile(
   }
   if ((input.bio?.length ?? 0) > 1200) {
     errors.bio = 'Use no máximo 1.200 caracteres.'
+  }
+  if (input.profileImage) {
+    const imageError = imageMetadataError(
+      input.profileImage,
+      'PROFESSIONAL_AVATAR',
+      ownerId,
+    )
+    if (imageError) errors.profileImage = imageError
+  }
+  if (input.portfolioImages.length > PROFESSIONAL_PORTFOLIO_MAX_IMAGES) {
+    errors.portfolioImages = `Adicione no máximo ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens ao portfólio.`
+  } else if (
+    input.portfolioImages.some((image) =>
+      imageMetadataError(image, 'PROFESSIONAL_PORTFOLIO', ownerId),
+    )
+  ) {
+    errors.portfolioImages = 'Revise as imagens do portfólio.'
+  } else if (
+    new Set(input.portfolioImages.map((image) => image.providerId)).size !==
+    input.portfolioImages.length
+  ) {
+    errors.portfolioImages = 'O portfólio contém imagens duplicadas.'
   }
   const baseLocationError = structuredLocationError(input.baseLocation)
   if (baseLocationError) errors.baseLocation = baseLocationError
@@ -353,6 +429,13 @@ export function validateProfessionalProfile(
     }
     if (input.specialtyIds.length === 0) {
       errors.specialtyIds = 'Selecione ao menos uma especialidade para publicar.'
+    }
+    if (input.profileImage && !input.profileImage.altText) {
+      errors.profileImage = 'Descreva a foto de perfil para publicar.'
+    }
+    if (input.portfolioImages.some((image) => !image.altText)) {
+      errors.portfolioImages =
+        'Descreva todas as imagens do portfólio para publicar.'
     }
     if (!/^\d{10,11}$/.test(input.phone) && !errors.phone) {
       errors.phone = 'Informe um telefone com DDD para publicar.'
@@ -451,7 +534,12 @@ export async function saveProfessionalProfile(
   }
 
   const normalized = normalizeProfessionalProfileInput(input)
-  const fieldErrors = validateProfessionalProfile(normalized, status, catalog)
+  const fieldErrors = validateProfessionalProfile(
+    normalized,
+    status,
+    catalog,
+    userId,
+  )
 
   if (Object.keys(fieldErrors).length > 0) {
     throw new ProfessionalProfileError(

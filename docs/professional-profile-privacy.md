@@ -14,10 +14,17 @@ Issue #8 e, para localização e atendimento, somente:
 - `availability`;
 - `contactVisibility`;
 - `phone` apenas quando `contactVisibility` for `PUBLIC`.
+- `profileImage` e `portfolioImages` somente com proprietário, finalidade, URL
+  HTTPS, identificador do provedor, timestamps, ordem e texto alternativo.
 
 Ao trocar a visibilidade para `PRIVATE`, o repository remove `phone` do
 documento público no mesmo batch que atualiza o documento privado. CEP, bairro,
 rua, número e complemento nunca são aceitos pelas regras nesse documento.
+Arquivo bruto, data URL, base64 e campos adicionais dentro dos metadados de
+imagem também são rejeitados.
+As regras exigem `PROFESSIONAL_AVATAR` na foto e
+`PROFESSIONAL_PORTFOLIO` no portfólio, sempre com `ownerId` igual ao dono do
+perfil; referências de `CLIENT_AVATAR` não são aceitas nesse documento.
 
 ## Documento privado
 
@@ -71,3 +78,4 @@ Execute `npm run test:rules`. A suíte usa o emulador do Firestore e cobre:
 - bloqueio de leitura e escrita para usuário autenticado não proprietário;
 - leitura e escrita privada pelo proprietário;
 - rejeição de CEP, bairro e localização privada no documento público.
+- aceitação apenas dos metadados mínimos de imagem e rejeição de base64.

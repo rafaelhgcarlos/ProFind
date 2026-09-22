@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore'
 
 import { getFirebaseFirestore } from '../lib/firebase'
+import type { ImagePurpose } from '../types/image'
 import type { ProfessionalProfileStatus as UserProfessionalProfileStatus } from '../features/onboarding/user-role'
 import {
   isProfessionalAvailability,
@@ -19,6 +20,7 @@ import {
   type ProfessionalProfileInput,
   type ProfessionalProfileStatus,
   type ProfessionalBaseLocation,
+  type ProfessionalImageMetadata,
   type ProfessionalPrivateLocation,
 } from '../types/professional-profile'
 
@@ -73,6 +75,62 @@ function professionalBaseLocations(value: unknown): ProfessionalBaseLocation[] {
         (candidate) => candidate.ibgeCode === location.ibgeCode,
       ) === index,
   )
+}
+
+function professionalImage(
+  value: unknown,
+  fallbackOrder: number,
+  ownerId: string,
+  purpose: ImagePurpose,
+): ProfessionalImageMetadata | null {
+  if (typeof value !== 'object' || value === null) return null
+
+  const image = value as Record<string, unknown>
+  if (
+    typeof image.url !== 'string' ||
+    typeof image.providerId !== 'string' ||
+    image.ownerId !== ownerId ||
+    image.purpose !== purpose ||
+    typeof image.createdAt !== 'number' ||
+    !Number.isSafeInteger(image.createdAt) ||
+    typeof image.updatedAt !== 'number' ||
+    !Number.isSafeInteger(image.updatedAt)
+  ) {
+    return null
+  }
+
+  return {
+    ownerId,
+    purpose,
+    url: image.url,
+    providerId: image.providerId,
+    createdAt: image.createdAt,
+    updatedAt: image.updatedAt,
+    order:
+      typeof image.order === 'number' && Number.isSafeInteger(image.order)
+        ? image.order
+        : fallbackOrder,
+    altText: typeof image.altText === 'string' ? image.altText : '',
+  }
+}
+
+function professionalImages(
+  value: unknown,
+  ownerId: string,
+): ProfessionalImageMetadata[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((image, index) =>
+      professionalImage(
+        image,
+        index,
+        ownerId,
+        'PROFESSIONAL_PORTFOLIO',
+      ),
+    )
+    .filter((image): image is ProfessionalImageMetadata => image !== null)
+    .sort((first, second) => first.order - second.order)
 }
 
 function professionalPrivateLocation(value: unknown): ProfessionalPrivateLocation {
@@ -157,6 +215,13 @@ export const professionalProfileRepository = {
         ? data.contactVisibility
         : 'PRIVATE',
       privateLocation: professionalPrivateLocation(privateData.privateLocation),
+      profileImage: professionalImage(
+        data.profileImage,
+        0,
+        userId,
+        'PROFESSIONAL_AVATAR',
+      ),
+      portfolioImages: professionalImages(data.portfolioImages, userId),
       status:
         storedStatus === 'SUSPENDED' || serviceMode !== null
           ? storedStatus

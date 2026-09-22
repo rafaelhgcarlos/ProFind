@@ -58,6 +58,8 @@ const profileInput = {
     postalCode: '13083852',
     neighborhood: 'Cidade Universitária',
   },
+  profileImage: null,
+  portfolioImages: [],
 }
 
 describe('professionalProfileRepository', () => {
@@ -152,6 +154,8 @@ describe('professionalProfileRepository', () => {
         selectedCities: profileInput.selectedCities,
         availability: profileInput.availability,
         contactVisibility: profileInput.contactVisibility,
+        profileImage: null,
+        portfolioImages: [],
         selectedCityIbgeCodes: [],
         status: 'DRAFT',
         createdAt: firebaseMocks.timestamp,
@@ -247,11 +251,58 @@ describe('professionalProfileRepository', () => {
     expect(writtenData).not.toHaveProperty('completedJobsCount')
     expect(writtenData).not.toHaveProperty('createdAt')
     expect(writtenData).not.toHaveProperty('privateLocation')
+    expect(writtenData).not.toHaveProperty('file')
+    expect(writtenData).not.toHaveProperty('base64')
     expect(writtenData?.phone).toBe(firebaseMocks.deletedField)
     expect(firebaseMocks.batch.update).toHaveBeenCalledWith(
       firebaseMocks.userReference,
       expect.objectContaining({ professionalProfileStatus: 'complete' }),
     )
+  })
+
+  it('persiste apenas os metadados necessários das imagens', async () => {
+    const imageMetadata = {
+      ownerId: 'user-123',
+      purpose: 'PROFESSIONAL_AVATAR' as const,
+      url: 'https://images.example/profile.webp',
+      providerId: 'profile-1',
+      createdAt: 100,
+      updatedAt: 100,
+      order: 0,
+      altText: 'Profissional em atendimento',
+    }
+
+    await professionalProfileRepository.save({
+      userId: 'user-123',
+      profile: {
+        ...profileInput,
+        profileImage: imageMetadata,
+        portfolioImages: [
+          {
+            ...imageMetadata,
+            purpose: 'PROFESSIONAL_PORTFOLIO',
+            providerId: 'portfolio-1',
+          },
+        ],
+      },
+      status: 'DRAFT',
+      exists: true,
+    })
+
+    const profileUpdate = firebaseMocks.batch.update.mock.calls.find(
+      ([reference]) => reference === firebaseMocks.profileReference,
+    )?.[1]
+    expect(profileUpdate).toMatchObject({
+      profileImage: imageMetadata,
+      portfolioImages: [
+        {
+          ...imageMetadata,
+          purpose: 'PROFESSIONAL_PORTFOLIO',
+          providerId: 'portfolio-1',
+        },
+      ],
+    })
+    expect(JSON.stringify(profileUpdate)).not.toMatch(/base64|data:image|"file"/i)
   })
 
   it('expõe o telefone no documento público somente quando autorizado', async () => {
