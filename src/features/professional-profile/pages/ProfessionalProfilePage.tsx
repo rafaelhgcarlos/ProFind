@@ -528,6 +528,7 @@ export function ProfessionalProfilePage() {
       if (error instanceof ProfessionalProfileError) {
         setFieldErrors(error.fieldErrors)
         setSubmissionError(error.message)
+        toast.error(error.message)
         const fieldOrder = [
           'publicName',
           'bio',
@@ -549,9 +550,15 @@ export function ProfessionalProfilePage() {
           requestAnimationFrame(() =>
             document.getElementById(`professional-${firstInvalidField}`)?.focus(),
           )
+        } else {
+          requestAnimationFrame(() =>
+            document.getElementById('professional-save-feedback')?.focus(),
+          )
         }
       } else {
-        setSubmissionError('Não foi possível salvar seu perfil agora.')
+        const message = 'Não foi possível salvar seu perfil agora.'
+        setSubmissionError(message)
+        toast.error(message)
       }
     } finally {
       setSavingStatus(null)
@@ -582,8 +589,11 @@ export function ProfessionalProfilePage() {
           ...error.fieldErrors,
         }))
         setSubmissionError(error.message)
+        toast.error(error.message)
       } else {
-        setSubmissionError('Não foi possível atualizar sua disponibilidade agora.')
+        const message = 'Não foi possível atualizar sua disponibilidade agora.'
+        setSubmissionError(message)
+        toast.error(message)
       }
     } finally {
       setSavingAvailability(false)
@@ -1247,6 +1257,16 @@ export function ProfessionalProfilePage() {
           </CardContent>
           {!isSuspended ? (
             <CardFooter className="flex-col items-stretch border-t pt-5 sm:flex-row sm:flex-wrap">
+              {submissionError ? (
+                <p
+                  id="professional-save-feedback"
+                  tabIndex={-1}
+                  aria-live="assertive"
+                  className="w-full rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+                >
+                  {submissionError}
+                </p>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"

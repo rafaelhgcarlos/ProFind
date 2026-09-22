@@ -57,10 +57,38 @@ export interface ProfessionalProfileDependencies {
     userId: string,
     availability: ProfessionalProfileInput['availability'],
   ): Promise<void>
+  persistenceTimeoutMs?: number
 }
 
 const defaultDependencies: ProfessionalProfileDependencies =
   professionalProfileRepository
+
+const DEFAULT_PERSISTENCE_TIMEOUT_MS = 10_000
+
+async function withPersistenceTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(
+            new ProfessionalProfileError(
+              'network-error',
+              'A gravação demorou mais que o esperado. Verifique sua conexão e tente novamente.',
+            ),
+          )
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+}
 
 function externalErrorCode(error: unknown) {
   if (
@@ -375,7 +403,10 @@ export async function updateProfessionalAvailability(
   }
 
   try {
-    await dependencies.updateAvailability(userId, availability)
+    await withPersistenceTimeout(
+      dependencies.updateAvailability(userId, availability),
+      dependencies.persistenceTimeoutMs ?? DEFAULT_PERSISTENCE_TIMEOUT_MS,
+    )
   } catch (error) {
     throw normalizePersistenceError(error)
   }
@@ -433,12 +464,15 @@ export async function saveProfessionalProfile(
   }
 
   try {
-    await dependencies.save({
-      userId,
-      profile: normalized,
-      status,
-      exists: currentProfile !== null,
-    })
+    await withPersistenceTimeout(
+      dependencies.save({
+        userId,
+        profile: normalized,
+        status,
+        exists: currentProfile !== null,
+      }),
+      dependencies.persistenceTimeoutMs ?? DEFAULT_PERSISTENCE_TIMEOUT_MS,
+    )
   } catch (error) {
     throw normalizePersistenceError(error)
   }

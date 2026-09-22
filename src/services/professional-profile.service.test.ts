@@ -407,4 +407,28 @@ describe('professional profile service', () => {
     )
     expect(repository.save).not.toHaveBeenCalled()
   })
+
+  it('encerra uma gravação pendente com feedback de rede', async () => {
+    const repository: ProfessionalProfileDependencies = {
+      ...dependencies(),
+      persistenceTimeoutMs: 1,
+      save: vi.fn(() => new Promise<void>(() => undefined)),
+    }
+
+    await expect(
+      saveProfessionalProfile(
+        'user-123',
+        emptyInput,
+        'DRAFT',
+        catalog,
+        null,
+        repository,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<ProfessionalProfileError>>({
+        code: 'network-error',
+        message: expect.stringMatching(/demorou mais que o esperado/i),
+      }),
+    )
+  })
 })

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   listMunicipalitiesByState: vi.fn(),
   syncProfessionalProfileStatus: vi.fn(),
   toastSuccess: vi.fn(),
+  toastError: vi.fn(),
 }))
 
 vi.mock('../../../components/layout/ProfessionalLayout', () => ({
@@ -70,7 +71,7 @@ vi.mock('../../../services/professional-profile.service', async (importOriginal)
 })
 
 vi.mock('sonner', () => ({
-  toast: { success: mocks.toastSuccess },
+  toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }))
 
 const catalog = {
@@ -184,6 +185,33 @@ describe('ProfessionalProfilePage', () => {
       /complete os campos obrigatórios/i,
     )
     expect(screen.getByText(/selecione ao menos uma categoria/i)).toBeInTheDocument()
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      'Complete os campos obrigatórios antes de publicar o perfil.',
+    )
+  })
+
+  it('mostra falhas de permissão junto aos botões de salvamento', async () => {
+    mocks.saveProfessionalProfile.mockRejectedValue(
+      new ProfessionalProfileError(
+        'permission-denied',
+        'Sua sessão não tem permissão para alterar este perfil.',
+      ),
+    )
+    const user = userEvent.setup()
+
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await screen.findByLabelText('Nome público *')
+    await user.click(screen.getByRole('button', { name: 'Salvar rascunho' }))
+
+    const feedback = await screen.findByText(
+      'Sua sessão não tem permissão para alterar este perfil.',
+      { selector: '#professional-save-feedback' },
+    )
+    expect(feedback).toHaveFocus()
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      'Sua sessão não tem permissão para alterar este perfil.',
+    )
+    expect(screen.getByRole('button', { name: 'Salvar rascunho' })).toBeEnabled()
   })
 
   it('apresenta a descrição como opcional e fora do checklist de publicação', async () => {
