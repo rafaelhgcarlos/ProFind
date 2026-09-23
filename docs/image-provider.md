@@ -74,15 +74,35 @@ O watcher do frontend ignora `worker/.wrangler`, pois o runtime local atualiza
 esse diretório a cada requisição e essas escritas não podem recarregar o
 formulário aberto.
 
-Para um deploy futuro, configure `FIREBASE_PROJECT_ID`, `ALLOWED_ORIGINS` e a
-public key como vars do Worker e cadastre a private key manualmente com:
+## Cloudflare Pages e Worker em produção
+
+O arquivo `.env` local não participa do build do Cloudflare Pages. No ambiente
+**Production** do projeto Pages, configure antes do build:
+
+```dotenv
+VITE_IMAGE_PROVIDER=imagekit
+VITE_IMAGEKIT_PUBLIC_KEY=public_...
+VITE_IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/...
+VITE_IMAGEKIT_AUTH_ENDPOINT=https://profind-imagekit.<account-subdomain>.workers.dev/api/imagekit/auth
+```
+
+`VITE_IMAGEKIT_AUTH_ENDPOINT` nunca pode apontar para localhost em produção.
+Como variáveis `VITE_*` são incorporadas no build, alterar o dashboard exige um
+novo deployment do Pages.
+
+No Worker, `FIREBASE_PROJECT_ID` e `ALLOWED_ORIGINS` ficam como vars. A origem
+`https://profind.pages.dev` já está autorizada em `worker/wrangler.jsonc`.
+Configure `IMAGEKIT_PUBLIC_KEY` como variável do Worker e cadastre a private key
+manualmente com:
 
 ```sh
 npx wrangler secret put IMAGEKIT_PRIVATE_KEY --config worker/wrangler.jsonc
 ```
 
-Esse comando não foi executado nesta implementação. O deploy futuro seria
-`npx wrangler deploy --config worker/wrangler.jsonc`, também não executado.
+Depois publique o Worker com `npx wrangler deploy --config
+worker/wrangler.jsonc`, copie a URL HTTPS retornada para a variável do Pages e
+refaça seu deployment. Nenhum valor `IMAGEKIT_PRIVATE_KEY` deve ser cadastrado
+no Pages ou em variável `VITE_*`.
 
 Para rotacionar a chave, crie uma nova private key no ImageKit, atualize o secret
 do Worker com o mesmo comando, valide upload e remoção e somente então revogue a

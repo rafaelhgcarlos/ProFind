@@ -6,6 +6,6 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "FIREBASE_PROJECT_ID": "profind-42bf7",
-    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173"
+    "ALLOWED_ORIGINS": "https://profind.pages.dev,http://localhost:5173,http://127.0.0.1:5173"
   }
 }
