@@ -69,6 +69,19 @@ export class MockImageProvider implements ImageProvider {
     return this.performUpload(request)
   }
 
+  async prepareRemoval({ ownerId, purpose, providerId }: ImageRemovalRequest) {
+    const storedImage = this.storedImages.get(providerId)
+    if (
+      storedImage &&
+      (storedImage.ownerId !== ownerId || storedImage.purpose !== purpose)
+    ) {
+      throw new ImageProviderError(
+        'scope-mismatch',
+        'A imagem não pertence ao proprietário e à finalidade informados.',
+      )
+    }
+  }
+
   async remove({ ownerId, purpose, providerId }: ImageRemovalRequest) {
     if (this.removalFailures > 0) {
       this.removalFailures -= 1

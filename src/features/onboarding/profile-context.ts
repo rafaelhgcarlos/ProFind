@@ -5,6 +5,7 @@ import type {
   ClientProfileEditor,
   ClientProfileReadiness,
 } from '../../types/client-profile'
+import type { ProfessionalProfile } from '../../types/professional-profile'
 import type {
   OnboardingChoice,
   ProfessionalProfileStatus,
@@ -20,10 +21,12 @@ export interface ProfileContextValue {
   profileError: string | null
   clientProfile: ClientProfile | null
   clientProfileReadiness: ClientProfileReadiness | null
+  professionalProfile: ProfessionalProfile | null
   completeOnboarding(choice: OnboardingChoice): Promise<UserProfile>
   switchMode(mode: UserRole): Promise<UserProfile>
   resolveLandingRoute(profile: UserProfile): Promise<string>
   syncClientProfile(profile: ClientProfileEditor): void
+  syncProfessionalProfile(profile: ProfessionalProfile): void
   syncProfessionalProfileStatus(status: ProfessionalProfileStatus): void
   retryProfile(): Promise<void>
 }

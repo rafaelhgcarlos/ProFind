@@ -107,6 +107,33 @@ export class BackendImageProvider implements ImageProvider {
     return this.performUpload(request)
   }
 
+  async prepareRemoval({ ownerId, purpose, providerId }: ImageRemovalRequest) {
+    try {
+      const response = await this.fetcher(
+        `${this.baseUrl}/images/${encodeURIComponent(providerId)}/removal-authorization`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ownerId, purpose }),
+        },
+      )
+      if (!response.ok) {
+        throw new ImageProviderError(
+          'removal-failed',
+          'O backend não conseguiu autorizar a remoção da imagem.',
+        )
+      }
+    } catch (error) {
+      if (error instanceof ImageProviderError) throw error
+      throw new ImageProviderError(
+        'network-error',
+        'Não foi possível acessar o backend de imagens.',
+        { cause: error },
+      )
+    }
+  }
+
   async remove({ ownerId, purpose, providerId }: ImageRemovalRequest) {
     try {
       const response = await this.fetcher(

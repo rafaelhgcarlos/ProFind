@@ -356,6 +356,32 @@ async function remove(
     return json({ error: 'invalid-request' }, 400, origin)
   }
 
+  if (input.prepareOnly === true) {
+    const persisted = await persistedReferenceMatches(
+      uid,
+      input.purpose,
+      providerId,
+      idToken,
+      env,
+      dependencies,
+    )
+    if (!persisted) return json({ error: 'scope-mismatch' }, 403, origin)
+    return json(
+      {
+        deletionProviderId: providerId,
+        deletionGrant: await signDeletionGrant(
+          uid,
+          input.purpose,
+          providerId,
+          env,
+          dependencies,
+        ),
+      },
+      200,
+      origin,
+    )
+  }
+
   const preauthorized =
     typeof input.deletionGrant === 'string' &&
     (await validDeletionGrant(
@@ -383,7 +409,20 @@ async function remove(
       status: 204,
       headers: origin ? corsHeaders(origin) : undefined,
     })
-  } catch {
+  } catch (error) {
+    // DELETE é idempotente: uma referência já ausente no ImageKit não deixa
+    // trabalho pendente e deve limpar o estado de recovery no frontend.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'status' in error &&
+      error.status === 404
+    ) {
+      return new Response(null, {
+        status: 204,
+        headers: origin ? corsHeaders(origin) : undefined,
+      })
+    }
     return json({ error: 'provider-error' }, 502, origin)
   }
 }
@@ -404,7 +443,10 @@ const defaultDependencies: WorkerDependencies = {
     const imageKit = new ImageKit({ privateKey })
     await imageKit.files.delete(providerId)
   },
-  fetcher: fetch,
+  // O runtime do Cloudflare exige que a função nativa seja chamada diretamente.
+  // Guardar `fetch` no objeto e invocá-la como `dependencies.fetcher(...)` altera
+  // sua referência de `this` e causa `Illegal invocation` no Miniflare/Worker.
+  fetcher: (input, init) => fetch(input, init),
   now: Date.now,
   randomUUID: () => crypto.randomUUID(),
 }

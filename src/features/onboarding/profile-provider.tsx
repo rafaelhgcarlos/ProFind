@@ -22,6 +22,11 @@ import type {
   ClientProfileEditor,
   ClientProfileReadiness,
 } from '../../types/client-profile'
+import {
+  loadProfessionalProfile,
+  userProfileStatusForProfessionalProfile,
+} from '../../services/professional-profile.service'
+import type { ProfessionalProfile } from '../../types/professional-profile'
 import { useAuth } from '../auth/use-auth'
 import {
   ProfileContext,
@@ -42,6 +47,7 @@ interface ProfileState {
   profileError: string | null
   clientProfile: ClientProfile | null
   clientProfileReadiness: ClientProfileReadiness | null
+  professionalProfile: ProfessionalProfile | null
 }
 
 const initialState: ProfileState = {
@@ -51,13 +57,17 @@ const initialState: ProfileState = {
   profileError: null,
   clientProfile: null,
   clientProfileReadiness: null,
+  professionalProfile: null,
 }
 
 async function loadProfileState(userId: string): Promise<ProfileState> {
   const profile = await loadUserProfile(userId)
-  const clientState = profile.activeMode === 'client'
-    ? await loadClientProfileState(profile)
-    : null
+  const [clientState, professionalProfile] = await Promise.all([
+    profile.activeMode === 'client' ? loadClientProfileState(profile) : null,
+    profile.activeMode === 'professional'
+      ? loadProfessionalProfile(userId)
+      : null,
+  ])
   return {
     userId,
     status: 'ready',
@@ -65,6 +75,7 @@ async function loadProfileState(userId: string): Promise<ProfileState> {
     profileError: null,
     clientProfile: clientState?.profile ?? null,
     clientProfileReadiness: clientState?.readiness ?? null,
+    professionalProfile,
   }
 }
 
@@ -82,6 +93,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
       profileError: null,
       clientProfile: null,
       clientProfileReadiness: null,
+      professionalProfile: null,
     })
 
     try {
@@ -101,6 +113,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
               : 'Não foi possível carregar seu perfil.',
           clientProfile: null,
           clientProfileReadiness: null,
+          professionalProfile: null,
         })
       }
     }
@@ -129,6 +142,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
                   : 'Não foi possível carregar seu perfil.',
               clientProfile: null,
               clientProfileReadiness: null,
+              professionalProfile: null,
             })
           }
         })
@@ -143,9 +157,12 @@ export function ProfileProvider({ children }: PropsWithChildren) {
     async (choice: OnboardingChoice) => {
       if (!user) throw new Error('Sua sessão não está disponível.')
       const profile = await completeOnboardingProfile(user.uid, choice)
-      const clientState = profile.roles.includes('client')
-        ? await loadClientProfileState(profile)
-        : null
+      const [clientState, professionalProfile] = await Promise.all([
+        profile.activeMode === 'client' ? loadClientProfileState(profile) : null,
+        profile.activeMode === 'professional'
+          ? loadProfessionalProfile(profile.userId)
+          : null,
+      ])
       setState({
         userId: user.uid,
         status: 'ready',
@@ -153,6 +170,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
         profileError: null,
         clientProfile: clientState?.profile ?? null,
         clientProfileReadiness: clientState?.readiness ?? null,
+        professionalProfile,
       })
       return profile
     },
@@ -163,9 +181,12 @@ export function ProfileProvider({ children }: PropsWithChildren) {
     async (mode: UserRole) => {
       if (!state.profile) throw new Error('Seu perfil ainda não está disponível.')
       const profile = await switchActiveMode(state.profile, mode)
-      const clientState = mode === 'client'
-        ? await loadClientProfileState(profile)
-        : null
+      const [clientState, professionalProfile] = await Promise.all([
+        mode === 'client' ? loadClientProfileState(profile) : null,
+        mode === 'professional'
+          ? loadProfessionalProfile(profile.userId)
+          : null,
+      ])
       setState({
         userId: profile.userId,
         status: 'ready',
@@ -174,10 +195,19 @@ export function ProfileProvider({ children }: PropsWithChildren) {
         clientProfile: clientState?.profile ?? state.clientProfile,
         clientProfileReadiness:
           clientState?.readiness ?? state.clientProfileReadiness,
+        professionalProfile:
+          mode === 'professional'
+            ? professionalProfile
+            : state.professionalProfile,
       })
       return profile
     },
-    [state.clientProfile, state.clientProfileReadiness, state.profile],
+    [
+      state.clientProfile,
+      state.clientProfileReadiness,
+      state.professionalProfile,
+      state.profile,
+    ],
   )
 
   const resolveLandingRoute = useCallback(async (profile: UserProfile) => {
@@ -190,6 +220,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
             profile,
             clientProfile: clientState.profile,
             clientProfileReadiness: clientState.readiness,
+            professionalProfile: current.professionalProfile,
           }
         : current,
     )
@@ -224,6 +255,31 @@ export function ProfileProvider({ children }: PropsWithChildren) {
     await loadProfile(user.uid)
   }, [loadProfile, user])
 
+  const syncProfessionalProfile = useCallback(
+    (professionalProfile: ProfessionalProfile) => {
+      setState((current) => {
+        if (
+          !current.profile ||
+          current.profile.userId !== professionalProfile.userId
+        ) {
+          return current
+        }
+        const professionalProfileStatus =
+          professionalProfile.status === 'SUSPENDED'
+            ? current.profile.professionalProfileStatus
+            : userProfileStatusForProfessionalProfile(
+                professionalProfile.status,
+              )
+        return {
+          ...current,
+          profile: { ...current.profile, professionalProfileStatus },
+          professionalProfile,
+        }
+      })
+    },
+    [],
+  )
+
   const syncProfessionalProfileStatus = useCallback(
     (professionalProfileStatus: ProfessionalProfileStatus) => {
       setState((current) =>
@@ -252,6 +308,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
               profileError: null,
               clientProfile: null,
               clientProfileReadiness: null,
+              professionalProfile: null,
             }
         : initialState,
     [currentUserId, state],
@@ -264,10 +321,12 @@ export function ProfileProvider({ children }: PropsWithChildren) {
       profileError: visibleState.profileError,
       clientProfile: visibleState.clientProfile,
       clientProfileReadiness: visibleState.clientProfileReadiness,
+      professionalProfile: visibleState.professionalProfile,
       completeOnboarding,
       switchMode,
       resolveLandingRoute,
       syncClientProfile,
+      syncProfessionalProfile,
       syncProfessionalProfileStatus,
       retryProfile,
     }),
@@ -277,6 +336,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
       resolveLandingRoute,
       switchMode,
       syncClientProfile,
+      syncProfessionalProfile,
       syncProfessionalProfileStatus,
       visibleState,
     ],

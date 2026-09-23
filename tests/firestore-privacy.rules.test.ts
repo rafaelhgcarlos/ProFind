@@ -491,4 +491,23 @@ describe('Firestore privacy rules for professional profiles', () => {
       }),
     )
   })
+
+  it('blocks another user from replacing the professional avatar', async () => {
+    await seedProfiles()
+    const otherUser = testEnvironment
+      .authenticatedContext(otherUserId)
+      .firestore()
+
+    await assertFails(
+      updateDoc(doc(otherUser, 'professionalProfiles', ownerId), {
+        profileImage: {
+          ...publicProfile.profileImage,
+          providerId: 'attacker-replacement',
+          url: 'https://images.example/attacker.webp',
+          updatedAt: 1_796_000_000_000,
+        },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
 })

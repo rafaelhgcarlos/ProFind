@@ -30,6 +30,7 @@ import { Skeleton } from '../../../components/ui/skeleton'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { getImageProvider } from '../../../providers/image-provider.factory'
 import {
+  prepareImageRemoval,
   removeImageReference,
   uploadImageReference,
   validateProfessionalImageFile,
@@ -269,8 +270,8 @@ export function ClientProfilePage() {
     setRemovingAvatar(true)
     setCleanupError(null)
     try {
-      if (isUnsavedUpload) {
-        await removeImageReference(
+      if (!isUnsavedUpload && reference.provider !== 'LEGACY') {
+        await prepareImageRemoval(
           imageProvider,
           reference,
           editor.userId,
@@ -307,7 +308,9 @@ export function ClientProfilePage() {
       setCleanupError(null)
     } catch {
       setCleanupError(
-        'A foto nova continua salva, mas a anterior ainda não pôde ser removida do provedor.',
+        editor?.profileImage
+          ? 'A foto nova continua salva, mas a anterior ainda não pôde ser removida do provedor.'
+          : 'O perfil continua sem foto, mas o arquivo ainda não pôde ser removido do provedor.',
       )
     } finally {
       setRemovingAvatar(false)
@@ -354,7 +357,9 @@ export function ClientProfilePage() {
       if (
         previousImage &&
         previousImage.providerId !== saved.profileImage?.providerId &&
-        previousImage.provider === saved.profileImage?.provider
+        previousImage.provider !== 'LEGACY' &&
+        (!saved.profileImage ||
+          previousImage.provider === saved.profileImage.provider)
       ) {
         try {
           await removeImageReference(
@@ -367,7 +372,9 @@ export function ClientProfilePage() {
         } catch {
           setPendingCleanup(previousImage)
           setCleanupError(
-            'O perfil foi salvo, mas a foto anterior não pôde ser removida do provedor.',
+            saved.profileImage
+              ? 'O perfil foi salvo, mas a foto anterior não pôde ser removida do provedor.'
+              : 'O perfil foi salvo sem a foto, mas o arquivo ainda não pôde ser removido do provedor.',
           )
         }
       }

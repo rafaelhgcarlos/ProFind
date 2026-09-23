@@ -127,6 +127,11 @@ A referência registra `provider`, `ownerId` e `purpose`. Uma URL de portfólio
 nunca é promovida a avatar. Assim, uma conta com os dois papéis mantém avatares
 independentes.
 
+Os layouts autenticados seguem o modo ativo: o header do Cliente lê somente
+`CLIENT_AVATAR`, e o header Profissional lê somente `PROFESSIONAL_AVATAR`. O
+perfil profissional é recarregado ao entrar nesse modo e sincronizado no
+contexto logo após uma gravação bem-sucedida.
+
 ## Validação, transformação e persistência
 
 Frontend e Worker aceitam JPEG, PNG ou WebP e limitam cada arquivo a 5 MB. O
@@ -173,16 +178,25 @@ Após salvar a nova referência, esse grant autoriza apagar somente o arquivo
 anterior. Uma falha de limpeza preserva a nova referência e permite retry sem
 desfazer a imagem já salva.
 
-Remoções comuns relêem a referência pelo Firestore REST com o Firebase ID Token
-do próprio usuário. O Worker só chama `files.delete(fileId)` quando a referência
-persistida tem `provider: IMAGEKIT`, o mesmo UID, finalidade e `providerId`. O
-frontend não consegue escolher outro proprietário.
+Na remoção explícita dos avatares de cliente e profissional, o fluxo também é
+transacional em duas etapas. `prepareRemoval` pede ao Worker um grant curto
+enquanto a referência ainda está no Firestore; o formulário salva `null` e só
+então `remove` apaga o arquivo no ImageKit. Se a persistência falhar, o arquivo e
+a referência anterior permanecem intactos. Se apenas a exclusão no provedor
+falhar, a interface mantém uma recuperação com retry.
+
+O Worker relê a referência pelo Firestore REST com o Firebase ID Token do
+próprio usuário antes de emitir o grant. Ele só autoriza `files.delete(fileId)`
+quando a referência persistida tem `provider: IMAGEKIT`, o mesmo UID, finalidade
+e `providerId`. O frontend não consegue escolher outro proprietário, e grants de
+`CLIENT_AVATAR` e `PROFESSIONAL_AVATAR` não são intercambiáveis.
 
 ## Adapter backend genérico
 
 O adapter `backend` preservado espera:
 
 - `POST {baseUrl}/images` em `multipart/form-data`;
+- `POST {baseUrl}/images/{providerId}/removal-authorization`;
 - `DELETE {baseUrl}/images/{providerId}`.
 
 Um backend desse tipo deve repetir autenticação e validações. A integração

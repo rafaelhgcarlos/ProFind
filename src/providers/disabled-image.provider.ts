@@ -19,6 +19,10 @@ export class DisabledImageProvider implements ImageProvider {
     throw notConfiguredError()
   }
 
+  async prepareRemoval(): Promise<never> {
+    throw notConfiguredError()
+  }
+
   async remove(): Promise<never> {
     throw notConfiguredError()
   }

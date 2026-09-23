@@ -260,6 +260,39 @@ describe('ImageKitImageProvider', () => {
     })
   })
 
+  it('prepara a remocao persistida e usa o grant somente na exclusao definitiva', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          deletionGrant: 'prepared-delete',
+          deletionProviderId: 'persisted-file',
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const provider = new ImageKitImageProvider(config, {
+      fetcher,
+      getIdToken: async () => 'firebase-id-token',
+    })
+    const removal = {
+      ownerId,
+      purpose: 'PROFESSIONAL_AVATAR' as const,
+      providerId: 'persisted-file',
+    }
+
+    await provider.prepareRemoval(removal)
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({
+      purpose: 'PROFESSIONAL_AVATAR',
+      prepareOnly: true,
+    })
+
+    await provider.remove(removal)
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({
+      purpose: 'PROFESSIONAL_AVATAR',
+      deletionGrant: 'prepared-delete',
+    })
+  })
+
   it('não tenta pré-autorizar a remoção de uma referência legada', async () => {
     const xhr = new UploadRequestStub()
     const fetcher = vi.fn(

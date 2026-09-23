@@ -48,5 +48,6 @@ export interface ImageProvider {
   readonly configured: boolean
   upload(request: ImageUploadRequest): Promise<ImageUploadResult>
   retry(request: ImageUploadRequest): Promise<ImageUploadResult>
+  prepareRemoval(request: ImageRemovalRequest): Promise<void>
   remove(request: ImageRemovalRequest): Promise<void>
 }

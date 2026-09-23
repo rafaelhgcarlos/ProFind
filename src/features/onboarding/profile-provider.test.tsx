@@ -12,9 +12,11 @@ import {
   switchActiveMode,
 } from '../../services/onboarding.service'
 import { loadClientProfileState } from '../../services/client-profile.service'
+import { loadProfessionalProfile } from '../../services/professional-profile.service'
 import { ProfileProvider } from './profile-provider'
 import { useProfile } from './use-profile'
 import type { UserProfile } from './user-role'
+import type { ProfessionalProfile } from '../../types/professional-profile'
 
 vi.mock('../../services/onboarding.service', () => ({
   loadUserProfile: vi.fn(),
@@ -25,6 +27,13 @@ vi.mock('../../services/onboarding.service', () => ({
 vi.mock('../../services/client-profile.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/client-profile.service')>()
   return { ...actual, loadClientProfileState: vi.fn() }
+})
+
+vi.mock('../../services/professional-profile.service', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../services/professional-profile.service')
+  >()
+  return { ...actual, loadProfessionalProfile: vi.fn() }
 })
 
 const profile: UserProfile = {
@@ -44,6 +53,39 @@ const auth: AuthenticationContextValue = {
   logout: vi.fn(),
   requestPasswordReset: vi.fn(),
   retrySession: vi.fn(),
+}
+
+const professionalAvatar = {
+  provider: 'IMAGEKIT' as const,
+  ownerId: 'user-123',
+  purpose: 'PROFESSIONAL_AVATAR' as const,
+  url: 'https://images.example/professional.webp',
+  providerId: 'professional-avatar-1',
+  createdAt: 200,
+  updatedAt: 200,
+  order: 0,
+  altText: 'Marina em atendimento',
+}
+
+const professionalProfile: ProfessionalProfile = {
+  userId: 'user-123',
+  publicName: 'Marina Profissional',
+  headline: '',
+  bio: '',
+  categoryIds: [],
+  specialtyIds: [],
+  experienceYears: null,
+  baseLocation: { city: '', stateCode: '', ibgeCode: '' },
+  serviceMode: 'CITY_ONLY',
+  serviceRadiusKm: null,
+  selectedCities: [],
+  availability: 'AVAILABLE',
+  phone: '',
+  contactVisibility: 'PRIVATE',
+  privateLocation: { postalCode: '' },
+  profileImage: professionalAvatar,
+  portfolioImages: [],
+  status: 'DRAFT',
 }
 
 function ProfileProbe() {
@@ -229,5 +271,144 @@ describe('ProfileProvider', () => {
     expect(
       await screen.findByText('https://images.example/persisted-client.webp'),
     ).toBeInTheDocument()
+  })
+
+  it('restaura o avatar profissional persistido em remount ou novo login', async () => {
+    const professionalUser = {
+      ...profile,
+      roles: ['client', 'professional'] as UserProfile['roles'],
+      activeMode: 'professional' as const,
+      professionalProfileStatus: 'incomplete' as const,
+    }
+    vi.mocked(loadUserProfile).mockResolvedValue(professionalUser)
+    vi.mocked(loadProfessionalProfile).mockResolvedValue(professionalProfile)
+
+    function ProfessionalAvatarProbe() {
+      const context = useProfile()
+      return (
+        <p>
+          {context.professionalProfile?.profileImage?.url ?? context.status}
+        </p>
+      )
+    }
+
+    render(
+      <AuthenticationContext.Provider value={auth}>
+        <ProfileProvider>
+          <ProfessionalAvatarProbe />
+        </ProfileProvider>
+      </AuthenticationContext.Provider>,
+    )
+
+    expect(
+      await screen.findByText(professionalAvatar.url),
+    ).toBeInTheDocument()
+    expect(loadProfessionalProfile).toHaveBeenCalledWith('user-123')
+  })
+
+  it('mantém avatares isolados ao trocar de Cliente para Profissional', async () => {
+    const clientAvatar = {
+      provider: 'IMAGEKIT' as const,
+      ownerId: 'user-123',
+      purpose: 'CLIENT_AVATAR' as const,
+      url: 'https://images.example/client-mode.webp',
+      providerId: 'client-mode-avatar',
+      createdAt: 100,
+      updatedAt: 100,
+    }
+    const clientUser = {
+      ...profile,
+      roles: ['client', 'professional'] as UserProfile['roles'],
+      activeMode: 'client' as const,
+    }
+    const professionalUser = {
+      ...clientUser,
+      activeMode: 'professional' as const,
+    }
+    vi.mocked(loadUserProfile).mockResolvedValue(clientUser)
+    vi.mocked(loadClientProfileState).mockResolvedValue({
+      profile: { userId: 'user-123', phone: '', profileImage: clientAvatar },
+      readiness: { isComplete: true, missingFields: [] },
+    })
+    vi.mocked(switchActiveMode).mockResolvedValue(professionalUser)
+    vi.mocked(loadProfessionalProfile).mockResolvedValue(professionalProfile)
+
+    function ModeAvatarProbe() {
+      const context = useProfile()
+      return (
+        <>
+          <p>{context.profile?.activeMode ?? context.status}</p>
+          <p>{context.clientProfile?.profileImage?.url ?? 'sem-cliente'}</p>
+          <p>
+            {context.professionalProfile?.profileImage?.url ??
+              'sem-profissional'}
+          </p>
+          <button
+            type="button"
+            onClick={() => void context.switchMode('professional')}
+          >
+            Modo profissional
+          </button>
+        </>
+      )
+    }
+
+    render(
+      <AuthenticationContext.Provider value={auth}>
+        <ProfileProvider>
+          <ModeAvatarProbe />
+        </ProfileProvider>
+      </AuthenticationContext.Provider>,
+    )
+
+    expect(await screen.findByText(clientAvatar.url)).toBeInTheDocument()
+    expect(screen.getByText('sem-profissional')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Modo profissional' }))
+
+    expect(await screen.findByText('professional')).toBeInTheDocument()
+    expect(screen.getByText(clientAvatar.url)).toBeInTheDocument()
+    expect(screen.getByText(professionalAvatar.url)).toBeInTheDocument()
+  })
+
+  it('sincroniza imediatamente a referência profissional recém-persistida', async () => {
+    const professionalUser = {
+      ...profile,
+      roles: ['professional'] as UserProfile['roles'],
+      activeMode: 'professional' as const,
+      professionalProfileStatus: 'incomplete' as const,
+    }
+    vi.mocked(loadUserProfile).mockResolvedValue(professionalUser)
+    vi.mocked(loadProfessionalProfile).mockResolvedValue(null)
+
+    function SyncProfessionalProbe() {
+      const context = useProfile()
+      return (
+        <>
+          <p>
+            {context.professionalProfile?.profileImage?.url ?? context.status}
+          </p>
+          <button
+            type="button"
+            onClick={() => context.syncProfessionalProfile(professionalProfile)}
+          >
+            Sincronizar profissional
+          </button>
+        </>
+      )
+    }
+
+    render(
+      <AuthenticationContext.Provider value={auth}>
+        <ProfileProvider>
+          <SyncProfessionalProbe />
+        </ProfileProvider>
+      </AuthenticationContext.Provider>,
+    )
+
+    expect(await screen.findByText('ready')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Sincronizar profissional' }),
+    )
+    expect(screen.getByText(professionalAvatar.url)).toBeInTheDocument()
   })
 })

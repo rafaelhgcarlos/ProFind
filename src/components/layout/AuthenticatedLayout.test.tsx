@@ -109,10 +109,12 @@ describe('layouts autenticados', () => {
         },
       },
       clientProfileReadiness: { isComplete: true, missingFields: [] },
+      professionalProfile: null,
       completeOnboarding: vi.fn(),
       switchMode: vi.fn(),
       resolveLandingRoute: vi.fn(),
       syncClientProfile: vi.fn(),
+      syncProfessionalProfile: vi.fn(),
       syncProfessionalProfileStatus: vi.fn(),
       retryProfile: vi.fn(),
     }
@@ -124,5 +126,91 @@ describe('layouts autenticados', () => {
     )
 
     expect(view.container.querySelector(`img[src="${imageUrl}"]`)).toBeInTheDocument()
+  })
+
+  it('renderiza no header somente o avatar do modo Profissional ativo', () => {
+    const professionalImageUrl =
+      'https://images.example/professional-header.webp'
+    const context: ProfileContextValue = {
+      status: 'ready',
+      profile: {
+        userId: 'user-123',
+        name: 'Marina Souza',
+        email: 'marina@example.com',
+        roles: ['client', 'professional'],
+        activeMode: 'professional',
+        professionalProfileStatus: 'complete',
+      },
+      profileError: null,
+      clientProfile: {
+        userId: 'user-123',
+        phone: '',
+        profileImage: {
+          provider: 'IMAGEKIT',
+          ownerId: 'user-123',
+          purpose: 'CLIENT_AVATAR',
+          url: 'https://images.example/client-isolated.webp',
+          providerId: 'client-avatar',
+          createdAt: 100,
+          updatedAt: 100,
+        },
+      },
+      clientProfileReadiness: { isComplete: true, missingFields: [] },
+      professionalProfile: {
+        userId: 'user-123',
+        publicName: 'Marina Eletricista',
+        headline: '',
+        bio: '',
+        categoryIds: [],
+        specialtyIds: [],
+        experienceYears: null,
+        baseLocation: { city: '', stateCode: '', ibgeCode: '' },
+        serviceMode: 'CITY_ONLY',
+        serviceRadiusKm: null,
+        selectedCities: [],
+        availability: 'AVAILABLE',
+        phone: '',
+        contactVisibility: 'PRIVATE',
+        privateLocation: { postalCode: '' },
+        profileImage: {
+          provider: 'IMAGEKIT',
+          ownerId: 'user-123',
+          purpose: 'PROFESSIONAL_AVATAR',
+          url: professionalImageUrl,
+          providerId: 'professional-avatar',
+          createdAt: 200,
+          updatedAt: 200,
+          order: 0,
+          altText: 'Marina em atendimento',
+        },
+        portfolioImages: [],
+        status: 'PUBLISHED',
+      },
+      completeOnboarding: vi.fn(),
+      switchMode: vi.fn(),
+      resolveLandingRoute: vi.fn(),
+      syncClientProfile: vi.fn(),
+      syncProfessionalProfile: vi.fn(),
+      syncProfessionalProfileStatus: vi.fn(),
+      retryProfile: vi.fn(),
+    }
+
+    const view = renderLayout(
+      '/profissional',
+      <ProfileContext.Provider value={context}>
+        <ProfessionalLayout pageTitle="Início">
+          Conteúdo profissional
+        </ProfessionalLayout>
+      </ProfileContext.Provider>,
+    )
+
+    expect(
+      view.container.querySelector(`img[src="${professionalImageUrl}"]`),
+    ).toBeInTheDocument()
+    expect(
+      view.container.querySelector(
+        'img[src="https://images.example/client-isolated.webp"]',
+      ),
+    ).not.toBeInTheDocument()
   })
 })

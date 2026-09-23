@@ -16,10 +16,12 @@ const mocks = vi.hoisted(() => ({
   listAvailableCatalog: vi.fn(),
   listMunicipalitiesByState: vi.fn(),
   syncProfessionalProfileStatus: vi.fn(),
+  syncProfessionalProfile: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   imageUpload: vi.fn(),
   imageRetry: vi.fn(),
+  imagePrepareRemoval: vi.fn(),
   imageRemove: vi.fn(),
 }))
 
@@ -38,6 +40,7 @@ vi.mock('../../auth/use-auth', () => ({
 vi.mock('../../onboarding/use-profile', () => ({
   useProfile: () => ({
     profile: { name: 'Marina Souza' },
+    syncProfessionalProfile: mocks.syncProfessionalProfile,
     syncProfessionalProfileStatus: mocks.syncProfessionalProfileStatus,
   }),
 }))
@@ -83,6 +86,7 @@ vi.mock('../../../providers/image-provider.factory', () => ({
     configured: true,
     upload: mocks.imageUpload,
     retry: mocks.imageRetry,
+    prepareRemoval: mocks.imagePrepareRemoval,
     remove: mocks.imageRemove,
   }),
 }))
@@ -124,6 +128,18 @@ const publishedProfile: ProfessionalProfile = {
   status: 'PUBLISHED',
 }
 
+const persistedProfessionalAvatar = {
+  provider: 'IMAGEKIT' as const,
+  ownerId: 'user-123',
+  purpose: 'PROFESSIONAL_AVATAR' as const,
+  url: 'https://images.example/professional-previous.webp',
+  providerId: 'professional-avatar-previous',
+  createdAt: 100,
+  updatedAt: 100,
+  order: 0,
+  altText: 'Profissional em atendimento',
+}
+
 describe('ProfessionalProfilePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -153,6 +169,7 @@ describe('ProfessionalProfilePage', () => {
       url: 'https://images.example/profile.webp',
       providerId: 'profile-123',
     })
+    mocks.imagePrepareRemoval.mockResolvedValue(undefined)
     mocks.imageRemove.mockResolvedValue(undefined)
   })
 
@@ -319,6 +336,271 @@ describe('ProfessionalProfilePage', () => {
     const savedInput = mocks.saveProfessionalProfile.mock.calls.at(-1)?.[1]
     expect(savedInput).not.toHaveProperty('file')
     expect(JSON.stringify(savedInput)).not.toMatch(/base64|data:image/i)
+    expect(mocks.syncProfessionalProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileImage: expect.objectContaining({
+          purpose: 'PROFESSIONAL_AVATAR',
+          url: 'https://images.example/profile.webp',
+        }),
+      }),
+    )
+  })
+
+  it('restaura a URL HTTPS persistida após remount', async () => {
+    mocks.loadProfessionalProfile.mockResolvedValue({
+      ...publishedProfile,
+      profileImage: persistedProfessionalAvatar,
+    })
+
+    const firstView = render(
+      <MemoryRouter>
+        <ProfessionalProfilePage />
+      </MemoryRouter>,
+    )
+
+    expect(
+      await screen.findByRole('img', {
+        name: persistedProfessionalAvatar.altText,
+      }),
+    ).toHaveAttribute('src', persistedProfessionalAvatar.url)
+
+    firstView.unmount()
+    render(
+      <MemoryRouter>
+        <ProfessionalProfilePage />
+      </MemoryRouter>,
+    )
+
+    expect(
+      await screen.findByRole('img', {
+        name: persistedProfessionalAvatar.altText,
+      }),
+    ).toHaveAttribute('src', persistedProfessionalAvatar.url)
+  })
+
+  it('substitui o avatar somente depois de persistir a nova referência', async () => {
+    const currentProfile = {
+      ...publishedProfile,
+      profileImage: persistedProfessionalAvatar,
+    }
+    mocks.loadProfessionalProfile.mockResolvedValue(currentProfile)
+    mocks.saveProfessionalProfile.mockImplementation(
+      async (_userId, input, status) => ({
+        ...currentProfile,
+        ...input,
+        status,
+      }),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <ProfessionalProfilePage />
+      </MemoryRouter>,
+    )
+
+    await user.upload(
+      await screen.findByLabelText(/trocar foto de perfil/i),
+      new File(['new-image'], 'nova-foto.png', { type: 'image/png' }),
+    )
+
+    expect(mocks.imageUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: 'user-123',
+        purpose: 'PROFESSIONAL_AVATAR',
+        previousReference: persistedProfessionalAvatar,
+      }),
+    )
+    expect(mocks.imageRemove).not.toHaveBeenCalled()
+    expect(
+      await screen.findByRole('img', {
+        name: persistedProfessionalAvatar.altText,
+      }),
+    ).toHaveAttribute('src', 'https://images.example/profile.webp')
+
+    await user.click(
+      screen.getByRole('button', { name: 'Voltar para rascunho' }),
+    )
+
+    expect(mocks.syncProfessionalProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileImage: expect.objectContaining({
+          providerId: 'profile-123',
+          purpose: 'PROFESSIONAL_AVATAR',
+        }),
+      }),
+    )
+    expect(mocks.imageRemove).toHaveBeenCalledWith({
+      ownerId: 'user-123',
+      purpose: 'PROFESSIONAL_AVATAR',
+      providerId: persistedProfessionalAvatar.providerId,
+    })
+    expect(
+      mocks.saveProfessionalProfile.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.imageRemove.mock.invocationCallOrder[0])
+  })
+
+  it('preserva o avatar persistido quando a gravação da substituição falha', async () => {
+    const currentProfile = {
+      ...publishedProfile,
+      profileImage: persistedProfessionalAvatar,
+    }
+    mocks.loadProfessionalProfile.mockResolvedValue(currentProfile)
+    mocks.saveProfessionalProfile.mockRejectedValue(
+      new ProfessionalProfileError(
+        'network-error',
+        'Não foi possível salvar o perfil.',
+      ),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <ProfessionalProfilePage />
+      </MemoryRouter>,
+    )
+
+    await user.upload(
+      await screen.findByLabelText(/trocar foto de perfil/i),
+      new File(['new-image'], 'nova-foto.png', { type: 'image/png' }),
+    )
+    await screen.findByLabelText('Texto alternativo')
+    await user.click(
+      screen.getByRole('button', { name: 'Voltar para rascunho' }),
+    )
+
+    expect(
+      (await screen.findAllByText('Não foi possível salvar o perfil.')).length,
+    ).toBeGreaterThan(0)
+    expect(mocks.imageRemove).not.toHaveBeenCalled()
+    expect(mocks.syncProfessionalProfile).not.toHaveBeenCalled()
+    expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
+      'user-123',
+      expect.objectContaining({
+        profileImage: expect.objectContaining({ providerId: 'profile-123' }),
+      }),
+      'DRAFT',
+      catalog,
+      currentProfile,
+    )
+  })
+
+  it('mantém a nova foto salva e permite repetir a limpeza da anterior', async () => {
+    const currentProfile = {
+      ...publishedProfile,
+      profileImage: persistedProfessionalAvatar,
+    }
+    mocks.loadProfessionalProfile.mockResolvedValue(currentProfile)
+    mocks.saveProfessionalProfile.mockImplementation(
+      async (_userId, input, status) => ({
+        ...currentProfile,
+        ...input,
+        status,
+      }),
+    )
+    mocks.imageRemove.mockRejectedValueOnce(new Error('provider offline'))
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <ProfessionalProfilePage />
+      </MemoryRouter>,
+    )
+
+    await user.upload(
+      await screen.findByLabelText(/trocar foto de perfil/i),
+      new File(['new-image'], 'nova-foto.png', { type: 'image/png' }),
+    )
+    await screen.findByLabelText('Texto alternativo')
+    await user.click(
+      screen.getByRole('button', { name: 'Voltar para rascunho' }),
+    )
+
+    expect(
+      await screen.findByText(/perfil foi salvo com a nova foto/i),
+    ).toBeInTheDocument()
+    expect(mocks.syncProfessionalProfile).toHaveBeenCalled()
+    await user.click(
+      screen.getByRole('button', { name: /tentar limpeza novamente/i }),
+    )
+    expect(mocks.imageRemove).toHaveBeenCalledTimes(2)
+  })
+
+  it('remove o avatar profissional sem afetar os demais dados', async () => {
+    const currentProfile = {
+      ...publishedProfile,
+      profileImage: persistedProfessionalAvatar,
+    }
+    mocks.loadProfessionalProfile.mockResolvedValue(currentProfile)
+    mocks.saveProfessionalProfile.mockImplementation(
+      async (_userId, input, status) => ({
+        ...currentProfile,
+        ...input,
+        status,
+      }),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <ProfessionalProfilePage />
+      </MemoryRouter>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: /remover foto/i }))
+    expect(mocks.imagePrepareRemoval).toHaveBeenCalledWith({
+      ownerId: 'user-123',
+      purpose: 'PROFESSIONAL_AVATAR',
+      providerId: persistedProfessionalAvatar.providerId,
+    })
+    expect(mocks.imageRemove).not.toHaveBeenCalled()
+    expect(screen.getByText(/nenhuma foto de perfil adicionada/i)).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Voltar para rascunho' }),
+    )
+    expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
+      'user-123',
+      expect.objectContaining({
+        publicName: publishedProfile.publicName,
+        profileImage: null,
+      }),
+      'DRAFT',
+      catalog,
+      currentProfile,
+    )
+    expect(mocks.syncProfessionalProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ profileImage: null }),
+    )
+    expect(mocks.imageRemove).toHaveBeenCalledWith({
+      ownerId: 'user-123',
+      purpose: 'PROFESSIONAL_AVATAR',
+      providerId: persistedProfessionalAvatar.providerId,
+    })
+    expect(
+      mocks.saveProfessionalProfile.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.imageRemove.mock.invocationCallOrder[0])
+  })
+
+  it('preserva o avatar profissional remoto quando salvar a remocao falha', async () => {
+    const currentProfile = {
+      ...publishedProfile,
+      profileImage: persistedProfessionalAvatar,
+    }
+    mocks.loadProfessionalProfile.mockResolvedValue(currentProfile)
+    mocks.saveProfessionalProfile.mockRejectedValueOnce(new Error('Falha ao salvar'))
+    const user = userEvent.setup()
+
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    await user.click(await screen.findByRole('button', { name: /remover foto/i }))
+    await user.click(screen.getByRole('button', { name: 'Voltar para rascunho' }))
+
+    expect(
+      await screen.findByRole('heading', { name: /salvar o perfil/i }),
+    ).toBeInTheDocument()
+    expect(mocks.imagePrepareRemoval).toHaveBeenCalledOnce()
+    expect(mocks.imageRemove).not.toHaveBeenCalled()
   })
 
   it('carrega os dados para edição e oferece pausar um perfil publicado', async () => {

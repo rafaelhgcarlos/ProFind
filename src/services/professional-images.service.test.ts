@@ -5,6 +5,7 @@ import { IMAGE_PURPOSES, type ImageReference } from '../types/image'
 import {
   PROFESSIONAL_IMAGE_MAX_SIZE_BYTES,
   ProfessionalImageError,
+  prepareImageRemoval,
   removeImageReference,
   replaceImageReference,
   uploadImageReference,
@@ -34,6 +35,7 @@ function provider(): ImageProvider {
       url: 'https://images.example/retry.webp',
       providerId: 'image-retry',
     }),
+    prepareRemoval: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -100,6 +102,12 @@ describe('professional images service', () => {
         retry: true,
         now: () => 300,
       })
+      await prepareImageRemoval(
+        imageProvider,
+        uploaded,
+        'owner-1',
+        purpose,
+      )
       await removeImageReference(
         imageProvider,
         uploaded,
@@ -133,6 +141,11 @@ describe('professional images service', () => {
         createdAt: 400,
       })
       expect(imageProvider.retry).toHaveBeenCalledWith(request)
+      expect(imageProvider.prepareRemoval).toHaveBeenCalledWith({
+        ownerId: 'owner-1',
+        purpose,
+        providerId: 'image-upload',
+      })
       expect(imageProvider.remove).toHaveBeenCalledWith({
         ownerId: 'owner-1',
         purpose,

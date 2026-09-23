@@ -105,6 +105,34 @@ describe('professionalProfileRepository', () => {
     })
   })
 
+  it('descarta avatar profissional com URL não HTTPS ou identificador vazio', async () => {
+    const invalidAvatar = {
+      provider: 'IMAGEKIT',
+      ownerId: 'user-123',
+      purpose: 'PROFESSIONAL_AVATAR',
+      url: 'blob:preview-local',
+      providerId: '',
+      createdAt: 100,
+      updatedAt: 100,
+      order: 0,
+      altText: 'Prévia local',
+    }
+    firebaseMocks.getDoc
+      .mockResolvedValueOnce({
+        exists: () => true,
+        data: () => ({
+          ...profileInput,
+          profileImage: invalidAvatar,
+          status: 'DRAFT',
+        }),
+      })
+      .mockResolvedValueOnce({ exists: () => false })
+
+    await expect(
+      professionalProfileRepository.findByOwnerId('user-123'),
+    ).resolves.toMatchObject({ profileImage: null })
+  })
+
   it('mantém o perfil público acessível durante a migração das regras privadas', async () => {
     firebaseMocks.getDoc
       .mockResolvedValueOnce({

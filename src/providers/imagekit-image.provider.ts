@@ -25,6 +25,11 @@ interface UploadAuthorization {
   deletionProviderId?: string
 }
 
+interface RemovalAuthorization {
+  deletionGrant: string
+  deletionProviderId: string
+}
+
 const IMAGEKIT_UPLOAD_ENDPOINT =
   'https://upload.imagekit.io/api/v2/files/upload'
 
@@ -108,6 +113,33 @@ function parseUploadResponse(
     provider: 'IMAGEKIT',
     providerId: response.fileId.trim(),
     url: response.url,
+  }
+}
+
+function parseRemovalAuthorization(
+  value: unknown,
+  expectedProviderId: string,
+): RemovalAuthorization {
+  if (typeof value !== 'object' || value === null) {
+    throw new ImageProviderError(
+      'invalid-response',
+      'O backend do ImageKit retornou autorização de remoção inválida.',
+    )
+  }
+  const response = value as Record<string, unknown>
+  if (
+    typeof response.deletionGrant !== 'string' ||
+    !response.deletionGrant.trim() ||
+    response.deletionProviderId !== expectedProviderId
+  ) {
+    throw new ImageProviderError(
+      'invalid-response',
+      'O backend do ImageKit retornou autorização de remoção incompatível.',
+    )
+  }
+  return {
+    deletionGrant: response.deletionGrant,
+    deletionProviderId: expectedProviderId,
   }
 }
 
@@ -275,6 +307,52 @@ export class ImageKitImageProvider implements ImageProvider {
 
   retry(request: ImageUploadRequest) {
     return this.performUpload(request)
+  }
+
+  async prepareRemoval({ purpose, providerId }: ImageRemovalRequest) {
+    const idToken = await this.dependencies.getIdToken()
+    if (!idToken) {
+      throw new ImageProviderError(
+        'not-configured',
+        'Sua sessão não está disponível para autorizar a remoção da imagem.',
+      )
+    }
+
+    try {
+      const response = await this.fetcher(
+        deletionEndpoint(this.config.authEndpoint, providerId),
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ purpose, prepareOnly: true }),
+        },
+      )
+      if (!response.ok) {
+        throw new ImageProviderError(
+          response.status === 401 || response.status === 403
+            ? 'scope-mismatch'
+            : 'removal-failed',
+          response.status === 401 || response.status === 403
+            ? 'A imagem não pertence à sua conta e à finalidade informada.'
+            : 'O backend não conseguiu autorizar a remoção da imagem do ImageKit.',
+        )
+      }
+      const authorization = parseRemovalAuthorization(
+        await response.json(),
+        providerId,
+      )
+      this.deletionGrants.set(providerId, authorization.deletionGrant)
+    } catch (error) {
+      if (error instanceof ImageProviderError) throw error
+      throw new ImageProviderError(
+        'network-error',
+        'Não foi possível acessar a autorização de remoção do ImageKit.',
+        { cause: error },
+      )
+    }
   }
 
   async remove({ purpose, providerId }: ImageRemovalRequest) {

@@ -19,6 +19,7 @@ import {
   saveClientProfile,
 } from '../../../services/client-profile.service'
 import {
+  prepareImageRemoval,
   removeImageReference,
   uploadImageReference,
   validateProfessionalImageFile,
@@ -35,6 +36,7 @@ vi.mock('../../../services/client-profile.service', async (importOriginal) => {
 })
 
 vi.mock('../../../services/professional-images.service', () => ({
+  prepareImageRemoval: vi.fn(),
   removeImageReference: vi.fn(),
   uploadImageReference: vi.fn(),
   validateProfessionalImageFile: vi.fn(),
@@ -115,10 +117,12 @@ function renderPage(overrides: Partial<ProfileContextValue> = {}) {
       isComplete: false,
       missingFields: ['clientProfile'],
     },
+    professionalProfile: null,
     completeOnboarding: vi.fn(),
     switchMode: vi.fn(),
     resolveLandingRoute: vi.fn().mockResolvedValue('/cliente/perfil'),
     syncClientProfile: vi.fn(),
+    syncProfessionalProfile: vi.fn(),
     syncProfessionalProfileStatus: vi.fn(),
     retryProfile: vi.fn(),
     ...overrides,
@@ -154,6 +158,7 @@ describe('ClientProfilePage', () => {
       exists: true,
     }))
     vi.mocked(removeImageReference).mockResolvedValue(undefined)
+    vi.mocked(prepareImageRemoval).mockResolvedValue(undefined)
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:client-avatar'),
@@ -311,6 +316,62 @@ describe('ClientProfilePage', () => {
       uploadedAvatar.url,
     )
     expect(loadClientProfileEditor).toHaveBeenCalledTimes(2)
+  })
+
+  it('remove a foto persistida do ImageKit somente depois de salvar o perfil sem ela', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadClientProfileEditor).mockResolvedValue({
+      ...editor,
+      profileImage: previousAvatar,
+      exists: true,
+    })
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /remover foto/i }))
+
+    expect(prepareImageRemoval).toHaveBeenCalledWith(
+      expect.anything(),
+      previousAvatar,
+      editor.userId,
+      'CLIENT_AVATAR',
+    )
+    expect(removeImageReference).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Salvar perfil' }))
+
+    await waitFor(() =>
+      expect(removeImageReference).toHaveBeenCalledWith(
+        expect.anything(),
+        previousAvatar,
+        editor.userId,
+        'CLIENT_AVATAR',
+      ),
+    )
+    expect(saveClientProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ profileImage: previousAvatar }),
+      expect.objectContaining({ profileImage: null }),
+    )
+    expect(
+      vi.mocked(saveClientProfile).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(removeImageReference).mock.invocationCallOrder[0])
+  })
+
+  it('preserva a foto remota quando salvar sua remocao falha', async () => {
+    const user = userEvent.setup()
+    vi.mocked(loadClientProfileEditor).mockResolvedValue({
+      ...editor,
+      profileImage: previousAvatar,
+      exists: true,
+    })
+    vi.mocked(saveClientProfile).mockRejectedValueOnce(new Error('Falha ao salvar.'))
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /remover foto/i }))
+    await user.click(screen.getByRole('button', { name: 'Salvar perfil' }))
+
+    expect(await screen.findByText('Falha ao salvar.')).toBeInTheDocument()
+    expect(prepareImageRemoval).toHaveBeenCalledOnce()
+    expect(removeImageReference).not.toHaveBeenCalled()
   })
 
   it('preserva a referência anterior até a substituição ser persistida', async () => {

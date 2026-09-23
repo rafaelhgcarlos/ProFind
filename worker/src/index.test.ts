@@ -52,13 +52,14 @@ function dependencies(firestoreOwner = 'owner-1') {
       return { sub: 'owner-1', auth_time: 1 }
     }),
     deleteImage: vi.fn(async () => undefined),
-    fetcher: vi.fn(async () =>
-      Response.json({
+    fetcher: vi.fn(async (input: RequestInfo | URL) => {
+      const professional = String(input).includes('/professionalProfiles/')
+      return Response.json({
         fields: {
           profileImage: firestoreImage(
             firestoreOwner,
-            'CLIENT_AVATAR',
-            'client-file',
+            professional ? 'PROFESSIONAL_AVATAR' : 'CLIENT_AVATAR',
+            professional ? 'professional-file' : 'client-file',
           ),
           portfolioImages: {
             arrayValue: {
@@ -72,8 +73,8 @@ function dependencies(firestoreOwner = 'owner-1') {
             },
           },
         },
-      }),
-    ),
+      })
+    }),
     now: () => 1_800_000_000_000,
     randomUUID: vi
       .fn()
@@ -83,6 +84,53 @@ function dependencies(firestoreOwner = 'owner-1') {
 }
 
 describe('ImageKit Cloudflare Worker', () => {
+  it('preserva o binding nativo ao consultar a referência persistida', async () => {
+    const runtimeFetch = vi.fn(function (this: unknown) {
+      if (this !== undefined) {
+        throw new TypeError('Illegal invocation')
+      }
+      return Promise.resolve(
+        Response.json({
+          fields: {
+            profileImage: firestoreImage(
+              'owner-1',
+              'PROFESSIONAL_AVATAR',
+              'professional-file',
+            ),
+          },
+        }),
+      )
+    })
+    vi.stubGlobal('fetch', runtimeFetch)
+    const deleteImage = vi.fn(async () => undefined)
+
+    try {
+      const worker = createImageKitWorker({
+        verifyFirebaseToken: vi.fn(async () => ({
+          sub: 'owner-1',
+          auth_time: 1,
+        })),
+        deleteImage,
+      })
+      const response = await worker.fetch!(
+        request('/api/imagekit/files/professional-file', 'DELETE', {
+          purpose: 'PROFESSIONAL_AVATAR',
+        }),
+        env,
+        {} as ExecutionContext,
+      )
+
+      expect(response.status).toBe(204)
+      expect(runtimeFetch).toHaveBeenCalledOnce()
+      expect(deleteImage).toHaveBeenCalledWith(
+        env.IMAGEKIT_PRIVATE_KEY,
+        'professional-file',
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('recusa autenticação ausente ou Firebase ID token inválido', async () => {
     const deps = dependencies()
     const worker = createImageKitWorker(deps)
@@ -215,6 +263,124 @@ describe('ImageKit Cloudflare Worker', () => {
       env.IMAGEKIT_PRIVATE_KEY,
       'client-file',
     )
+  })
+
+  it('prepara a remocao sem excluir e permite concluir depois de limpar o Firestore', async () => {
+    const deps = dependencies()
+    const worker = createImageKitWorker(deps)
+    const prepared = await worker.fetch!(
+      request('/api/imagekit/files/client-file', 'DELETE', {
+        purpose: 'CLIENT_AVATAR',
+        prepareOnly: true,
+      }),
+      env,
+      {} as ExecutionContext,
+    )
+
+    expect(prepared.status).toBe(200)
+    expect(deps.deleteImage).not.toHaveBeenCalled()
+    const authorization = (await prepared.json()) as {
+      deletionGrant: string
+      deletionProviderId: string
+    }
+    expect(authorization.deletionProviderId).toBe('client-file')
+
+    deps.fetcher.mockResolvedValueOnce(new Response(null, { status: 404 }))
+    const removed = await worker.fetch!(
+      request('/api/imagekit/files/client-file', 'DELETE', {
+        purpose: 'CLIENT_AVATAR',
+        deletionGrant: authorization.deletionGrant,
+      }),
+      env,
+      {} as ExecutionContext,
+    )
+
+    expect(removed.status).toBe(204)
+    expect(deps.deleteImage).toHaveBeenCalledWith(
+      env.IMAGEKIT_PRIVATE_KEY,
+      'client-file',
+    )
+  })
+
+  it('recusa preparar a remocao para outro proprietario ou finalidade', async () => {
+    const deps = dependencies('another-user')
+    const worker = createImageKitWorker(deps)
+
+    const response = await worker.fetch!(
+      request('/api/imagekit/files/client-file', 'DELETE', {
+        purpose: 'CLIENT_AVATAR',
+        prepareOnly: true,
+      }),
+      env,
+      {} as ExecutionContext,
+    )
+
+    expect(response.status).toBe(403)
+    expect(deps.deleteImage).not.toHaveBeenCalled()
+  })
+
+  it('isola a remoção do avatar profissional por proprietário e finalidade', async () => {
+    const deps = dependencies()
+    const worker = createImageKitWorker(deps)
+    const allowed = await worker.fetch!(
+      request('/api/imagekit/files/professional-file', 'DELETE', {
+        ownerId: 'another-user',
+        purpose: 'PROFESSIONAL_AVATAR',
+      }),
+      env,
+      {} as ExecutionContext,
+    )
+    expect(allowed.status).toBe(204)
+    expect(deps.deleteImage).toHaveBeenCalledWith(
+      env.IMAGEKIT_PRIVATE_KEY,
+      'professional-file',
+    )
+
+    const wrongPurpose = await worker.fetch!(
+      request('/api/imagekit/files/professional-file', 'DELETE', {
+        purpose: 'CLIENT_AVATAR',
+      }),
+      env,
+      {} as ExecutionContext,
+    )
+    expect(wrongPurpose.status).toBe(403)
+  })
+
+  it('trata como sucesso a remoção de arquivo que já não existe no ImageKit', async () => {
+    const deps = dependencies()
+    deps.deleteImage.mockRejectedValueOnce(
+      Object.assign(new Error('file not found'), { status: 404 }),
+    )
+    const worker = createImageKitWorker(deps)
+
+    const response = await worker.fetch!(
+      request('/api/imagekit/files/professional-file', 'DELETE', {
+        purpose: 'PROFESSIONAL_AVATAR',
+      }),
+      env,
+      {} as ExecutionContext,
+    )
+
+    expect(response.status).toBe(204)
+    expect(deps.deleteImage).toHaveBeenCalledOnce()
+  })
+
+  it('mantém falha real do ImageKit como erro do provedor', async () => {
+    const deps = dependencies()
+    deps.deleteImage.mockRejectedValueOnce(
+      Object.assign(new Error('provider unavailable'), { status: 503 }),
+    )
+    const worker = createImageKitWorker(deps)
+
+    const response = await worker.fetch!(
+      request('/api/imagekit/files/professional-file', 'DELETE', {
+        purpose: 'PROFESSIONAL_AVATAR',
+      }),
+      env,
+      {} as ExecutionContext,
+    )
+
+    expect(response.status).toBe(502)
   })
 
   it('impede excluir arquivo persistido por outro usuário', async () => {

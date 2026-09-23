@@ -191,6 +191,24 @@ export async function removeImageReference(
   }
 }
 
+export async function prepareImageRemoval(
+  provider: ImageProvider,
+  reference: ImageReference,
+  ownerId: string,
+  purpose: ImagePurpose,
+) {
+  assertImageReferenceScope(reference, ownerId, purpose)
+  try {
+    await provider.prepareRemoval({
+      ownerId,
+      purpose,
+      providerId: reference.providerId,
+    })
+  } catch (error) {
+    throw providerError(error, 'remove')
+  }
+}
+
 export async function removeProfessionalImage(
   provider: ImageProvider,
   reference: ProfessionalImageMetadata,

@@ -95,7 +95,11 @@ function professionalImage(
   if (
     !provider ||
     typeof image.url !== 'string' ||
+    !image.url.startsWith('https://') ||
+    image.url.length > 2_048 ||
     typeof image.providerId !== 'string' ||
+    !image.providerId.trim() ||
+    image.providerId.length > 300 ||
     image.ownerId !== ownerId ||
     image.purpose !== purpose ||
     typeof image.createdAt !== 'number' ||
@@ -110,8 +114,8 @@ function professionalImage(
     provider,
     ownerId,
     purpose,
-    url: image.url,
-    providerId: image.providerId,
+    url: image.url.trim(),
+    providerId: image.providerId.trim(),
     createdAt: image.createdAt,
     updatedAt: image.updatedAt,
     order:
