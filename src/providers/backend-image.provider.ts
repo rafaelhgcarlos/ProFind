@@ -35,6 +35,7 @@ function parseUploadResponse(value: unknown): ImageUploadResult {
   }
 
   return {
+    provider: 'BACKEND',
     url: response.url,
     providerId: response.providerId.trim(),
   }

@@ -1,50 +1,95 @@
 # Provedor de imagens
 
-Fotos do perfil e do portfólio usam a interface `ImageProvider`. A feature de
-perfil conhece apenas esse contrato e o service de imagens; ela não importa um
-SDK de armazenamento. Firebase Storage não é usado.
+Fotos de cliente, perfil profissional e portfólio usam a interface
+`ImageProvider`. As features conhecem apenas esse contrato e o service de
+imagens; não importam SDK de armazenamento. Firebase Storage não é usado.
 
 ## Seleção do adapter
 
-O adapter é escolhido pela factory em `src/providers/image-provider.factory.ts`:
+A factory `src/providers/image-provider.factory.ts` oferece:
 
-- `VITE_IMAGE_PROVIDER=mock`: adapter em memória para desenvolvimento e testes;
-- `VITE_IMAGE_PROVIDER=backend`: cliente HTTP para um backend seguro;
-- `VITE_IMAGE_PROVIDER=disabled`: desabilita novos uploads sem impedir a edição
-  dos outros campos do perfil.
+- `VITE_IMAGE_PROVIDER=imagekit`: integração real com ImageKit;
+- `VITE_IMAGE_PROVIDER=mock`: test double, somente para testes ou fallback
+  selecionado explicitamente;
+- `VITE_IMAGE_PROVIDER=backend`: cliente HTTP genérico preservado para outro
+  backend seguro;
+- `VITE_IMAGE_PROVIDER=disabled`: desabilita uploads sem impedir a edição dos
+  demais campos.
 
-O mock é recusado em builds de produção. Para o adapter `backend`, configure
-`VITE_IMAGE_API_BASE_URL` com uma rota relativa, como `/api/media`, ou uma URL
-HTTPS. Uma configuração ausente ou inválida deixa o envio desabilitado e a
-interface informa a indisponibilidade.
+Quando as três variáveis públicas do ImageKit estão presentes, a factory escolhe
+`imagekit` automaticamente. Sem configuração, uploads ficam desabilitados; o
+desenvolvimento não cai silenciosamente no mock nem persiste URLs sintéticas. O
+mock é recusado em produção.
 
-Nenhuma chave secreta pode usar o prefixo `VITE_`: variáveis com esse prefixo
-são incorporadas ao JavaScript entregue ao navegador.
+Nenhuma chave secreta pode usar o prefixo `VITE_`: essas variáveis são
+incorporadas ao JavaScript entregue ao navegador.
 
-## Contrato do backend seguro
+## ImageKit e Upload API V2
 
-O adapter preparado nesta etapa espera autenticação por sessão segura e envia:
+O `ImageKitImageProvider` usa a Upload API V2, que autentica um JWT HS256 sobre
+todo o payload, em vez do fluxo V1 limitado a `token`, `signature` e `expire`.
+O Worker monta e assina `fileName`, `folder`, `useUniqueFileName`, `checks` e
+`transformation`; o navegador acrescenta somente o arquivo e o token ao
+`multipart/form-data`. Cada credencial é única, expira em cinco minutos e nunca
+contém a private key.
 
-- `POST {baseUrl}/images`, como `multipart/form-data`, com `file`, `purpose` e
-  `ownerId`;
-- `DELETE {baseUrl}/images/{providerId}`, com `{ ownerId, purpose }` em JSON.
+O SDK oficial `@imagekit/nodejs` é usado no Worker para a API de administração e
+remoção. A versão atual do SDK oficial de navegador ainda expõe upload V1; por
+isso o adapter envia o formulário diretamente ao endpoint V2 oficial. `jose` é
+usado para validar Firebase ID Tokens e gerar o JWT V2 conforme o contrato
+oficial do ImageKit.
 
-O backend deve autenticar a sessão, validar que o usuário pode operar o
-`ownerId`, repetir as validações de tipo/tamanho e manter credenciais do
-provedor somente no servidor. A resposta do upload deve ser:
+O Worker valida o Firebase ID Token pelo JWKS do Google, exige `aud` igual ao
+projeto e `iss` do Firebase Secure Token, e obtém o UID exclusivamente de `sub`.
+O `ownerId` eventualmente enviado pelo cliente é ignorado. CORS aceita localhost
+e a lista explícita de `ALLOWED_ORIGINS`.
 
-```json
-{
-  "url": "https://cdn.example/image.webp",
-  "providerId": "provider-object-id"
-}
+## Configuração local
+
+As variáveis públicas do frontend são:
+
+```dotenv
+VITE_IMAGE_PROVIDER=imagekit
+VITE_IMAGEKIT_PUBLIC_KEY=...
+VITE_IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/...
+VITE_IMAGEKIT_AUTH_ENDPOINT=http://localhost:8787/api/imagekit/auth
 ```
 
-Trocar de provedor exige somente outro adapter que implemente `upload`, `retry`
-e `remove`, seguido da inclusão correspondente na factory. Nenhuma feature ou
-repository deve importar o SDK desse provedor.
+Copie `worker/.dev.vars.example` para `worker/.dev.vars`, ignorado pelo Git, e
+preencha localmente `IMAGEKIT_PRIVATE_KEY` e `IMAGEKIT_PUBLIC_KEY`. Não use
+`VITE_` na chave privada. O comando de desenvolvimento inicia frontend e Worker
+juntos:
 
-## Finalidade e isolamento
+```sh
+npm run dev
+```
+
+Para depurar somente uma das partes, use `npm run dev:web` ou
+`npm run worker:dev`. Com `VITE_IMAGEKIT_AUTH_ENDPOINT` apontando para
+`localhost:8787`, executar apenas `dev:web` deixa uploads indisponíveis.
+Em desenvolvimento, esse endpoint local é convertido para `/api/imagekit` e o
+proxy do Vite encaminha a requisição para `127.0.0.1:8787`; isso evita diferenças
+de resolução IPv4/IPv6 de `localhost` no navegador.
+O watcher do frontend ignora `worker/.wrangler`, pois o runtime local atualiza
+esse diretório a cada requisição e essas escritas não podem recarregar o
+formulário aberto.
+
+Para um deploy futuro, configure `FIREBASE_PROJECT_ID`, `ALLOWED_ORIGINS` e a
+public key como vars do Worker e cadastre a private key manualmente com:
+
+```sh
+npx wrangler secret put IMAGEKIT_PRIVATE_KEY --config worker/wrangler.jsonc
+```
+
+Esse comando não foi executado nesta implementação. O deploy futuro seria
+`npx wrangler deploy --config worker/wrangler.jsonc`, também não executado.
+
+Para rotacionar a chave, crie uma nova private key no ImageKit, atualize o secret
+do Worker com o mesmo comando, valide upload e remoção e somente então revogue a
+chave anterior. Nunca registre a chave em logs, Firestore ou arquivos
+versionados.
+
+## Finalidade, pastas e isolamento
 
 Toda operação usa uma finalidade da união discriminada `ImagePurpose`:
 
@@ -52,63 +97,107 @@ Toda operação usa uma finalidade da união discriminada `ImagePurpose`:
 - `PROFESSIONAL_AVATAR`: foto do perfil profissional;
 - `PROFESSIONAL_PORTFOLIO`: trabalho do portfólio profissional.
 
-A referência registra `ownerId` e `purpose`. Upload, retry, substituição e
-remoção transportam ambos os valores, e o backend deve compará-los com a sessão
-autenticada e com o objeto armazenado. Uma URL de portfólio nunca é promovida a
-avatar implicitamente. Assim, uma conta com os dois papéis mantém avatares
+As pastas são determinadas pelo Worker a partir do UID validado:
+
+- `/profind/users/{uid}/client-avatar`;
+- `/profind/professionals/{uid}/avatar`;
+- `/profind/professionals/{uid}/portfolio`.
+
+A referência registra `provider`, `ownerId` e `purpose`. Uma URL de portfólio
+nunca é promovida a avatar. Assim, uma conta com os dois papéis mantém avatares
 independentes.
 
-## Validação, estados e persistência
+## Validação, transformação e persistência
 
-Antes do envio, o frontend aceita JPEG, PNG ou WebP, limita cada arquivo a 5 MB
-e o portfólio a três imagens. Cada item mantém preview local, progresso, erro e
-retry independentes. Uma falha não limpa os demais dados do formulário.
+Frontend e Worker aceitam JPEG, PNG ou WebP e limitam cada arquivo a 5 MB. O
+portfólio mantém o limite existente de três imagens. Cada item conserva preview,
+progresso, erro e retry independentes sem limpar os outros dados do formulário.
+
+O payload assinado também contém checks de tipo e tamanho. Avatares recebem
+pré-transformação com orientação automática, WebP, qualidade 80 e limite
+aproximado de 512 × 512. Portfólio usa WebP otimizado e limite maior.
+
+O preview usa `blob:` somente enquanto o arquivo local aguarda upload ou retry.
+Assim que o provider retorna, o preview é revogado e a interface renderiza a URL
+HTTPS real. `blob:`, data URL, `providerId` vazio, provider incompatível e
+timestamps inválidos são recusados antes do repository.
 
 O Firestore recebe somente:
 
 ```ts
 {
+  provider: 'IMAGEKIT'
   ownerId: string
   purpose: ImagePurpose
   url: string
-  providerId: string
+  providerId: string // fileId do ImageKit
   createdAt: number
   updatedAt: number
 }
 ```
 
-As referências profissionais acrescentam os campos de apresentação:
+As referências profissionais acrescentam `order` e `altText`. Arquivos, `Blob`,
+`File`, data URL, base64, tokens e secrets nunca são persistidos. As Firestore
+Rules aceitam somente providers persistíveis, URL HTTPS e o mapa mínimo esperado.
 
-```ts
-{
-  order: number
-  altText: string
-}
-```
+Depois de salvar, o formulário atualiza seu estado-base e o contexto da sessão
+com a mesma referência. O formulário e o header usam a URL real imediatamente;
+repository e converter restauram a referência em remount, refresh e novo login.
 
-Arquivos, `Blob`, `File`, data URL e base64 não são persistidos. As Security
-Rules limitam as chaves do mapa, exigem URL HTTPS, validam ordem e quantidade e
-exigem texto alternativo para publicar. A remoção do provedor só altera o
-formulário após confirmação; o perfil é persistido quando o usuário salva.
+## Substituição e remoção
 
-Na substituição, a referência antiga permanece vigente até a remoção ser
-confirmada. Se a nova imagem for enviada e a remoção anterior falhar, o service
-devolve um erro com `recoveryReference`, permitindo nova tentativa de limpeza
-sem sobrescrever silenciosamente o avatar ou portfólio.
+Na substituição, a referência antiga permanece vigente até o upload e a
+persistência da nova terminarem. Enquanto a antiga ainda está persistida, o
+Worker valida UID, finalidade e `providerId` e emite um grant curto de remoção.
+Após salvar a nova referência, esse grant autoriza apagar somente o arquivo
+anterior. Uma falha de limpeza preserva a nova referência e permite retry sem
+desfazer a imagem já salva.
+
+Remoções comuns relêem a referência pelo Firestore REST com o Firebase ID Token
+do próprio usuário. O Worker só chama `files.delete(fileId)` quando a referência
+persistida tem `provider: IMAGEKIT`, o mesmo UID, finalidade e `providerId`. O
+frontend não consegue escolher outro proprietário.
+
+## Adapter backend genérico
+
+O adapter `backend` preservado espera:
+
+- `POST {baseUrl}/images` em `multipart/form-data`;
+- `DELETE {baseUrl}/images/{providerId}`.
+
+Um backend desse tipo deve repetir autenticação e validações. A integração
+ImageKit não usa esse contrato genérico.
+
+## Limites e custos
+
+Em 23/09/2026, o plano Forever Free publicado pelo ImageKit inclui 20 GB de
+bandwidth mensal e 3 GB de armazenamento DAM. O provedor informa limite de 25 MB
+por imagem no plano gratuito, mas o ProFind impõe 5 MB antes do envio e no check
+assinado. Os limites comerciais podem mudar; consulte a página oficial de planos
+antes da produção.
 
 ## Encerramento da conta
 
-A #47 será responsável por orquestrar a exclusão global. Esse fluxo deverá
-coletar `users/{userId}.clientAvatar`,
-`professionalProfiles/{userId}.profileImage` e os itens de `portfolioImages`,
-agrupá-los por `purpose`, chamar `ImageProvider.remove` com o mesmo `ownerId` e
-finalidade de cada item e remover cada referência do Firestore somente após
-confirmação do provedor. Falhas devem permanecer registradas para retry
-idempotente. Esta issue fornece o contrato e o isolamento necessários, mas não
-implementa nem antecipa essa orquestração.
+A #47 continuará responsável por orquestrar exclusão global e limpeza de órfãos.
+Ela deverá coletar as referências de `clientProfiles/{uid}` e
+`professionalProfiles/{uid}`, agrupá-las por finalidade e executar retry
+idempotente. Esta integração não antecipa esse fluxo.
 
-## Verificação local
+## Verificação
 
-Use `npm test`, `npm run test:rules`, `npm run typecheck`, `npm run lint` e
-`npm run build`. A integração com um provedor real demanda backend e credenciais
-próprios, mas não é necessária para executar a suíte desta etapa.
+Execute:
+
+```sh
+npm test
+npm run test:worker
+npm run test:rules
+npm run typecheck
+npm run lint
+npm run build
+npm run audit:bundle-secrets
+git diff --check
+```
+
+O adapter `mock` não armazena arquivos e sua URL sintética não representa mídia
+durável. Com `imagekit`, somente uma resposta HTTPS no endpoint configurado,
+`fileId` não vazio e `provider: IMAGEKIT` tornam-se persistíveis.

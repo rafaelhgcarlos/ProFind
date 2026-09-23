@@ -1,11 +1,27 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
+import {
+  ProfileContext,
+  type ProfileContextValue,
+} from '../../features/onboarding/profile-context'
 import { ThemeProvider } from '../../providers/theme-provider'
 import { AdminLayout } from './AdminLayout'
 import { ClientLayout } from './ClientLayout'
 import { ProfessionalLayout } from './ProfessionalLayout'
+
+vi.mock('../ui/avatar', () => ({
+  Avatar: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>{children}</div>
+  ),
+  AvatarImage: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+    <img {...props} />
+  ),
+  AvatarFallback: ({ children, ...props }: React.HTMLAttributes<HTMLSpanElement>) => (
+    <span {...props}>{children}</span>
+  ),
+}))
 
 function renderLayout(path: string, layout: React.ReactNode) {
   return render(
@@ -64,5 +80,49 @@ describe('layouts autenticados', () => {
     for (const link of screen.getAllByRole('link', { name: 'Início' })) {
       expect(link).not.toHaveAttribute('aria-current')
     }
+  })
+
+  it('renderiza no header a URL persistida no contexto do cliente', () => {
+    const imageUrl = 'https://images.example/client-header.webp'
+    const context: ProfileContextValue = {
+      status: 'ready',
+      profile: {
+        userId: 'client-123',
+        name: 'Marina Souza',
+        email: 'marina@example.com',
+        roles: ['client'],
+        activeMode: 'client',
+        professionalProfileStatus: 'not-started',
+      },
+      profileError: null,
+      clientProfile: {
+        userId: 'client-123',
+        phone: '',
+        profileImage: {
+          provider: 'IMAGEKIT',
+          ownerId: 'client-123',
+          purpose: 'CLIENT_AVATAR',
+          url: imageUrl,
+          providerId: 'client-avatar-header',
+          createdAt: 100,
+          updatedAt: 100,
+        },
+      },
+      clientProfileReadiness: { isComplete: true, missingFields: [] },
+      completeOnboarding: vi.fn(),
+      switchMode: vi.fn(),
+      resolveLandingRoute: vi.fn(),
+      syncClientProfile: vi.fn(),
+      syncProfessionalProfileStatus: vi.fn(),
+      retryProfile: vi.fn(),
+    }
+    const view = renderLayout(
+      '/cliente',
+      <ProfileContext.Provider value={context}>
+        <ClientLayout pageTitle="Início">Conteúdo do cliente</ClientLayout>
+      </ProfileContext.Provider>,
+    )
+
+    expect(view.container.querySelector(`img[src="${imageUrl}"]`)).toBeInTheDocument()
   })
 })

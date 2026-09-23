@@ -144,10 +144,12 @@ describe('ProfessionalProfilePage', () => {
       },
     })
     mocks.imageUpload.mockResolvedValue({
+      provider: 'IMAGEKIT',
       url: 'https://images.example/profile.webp',
       providerId: 'profile-123',
     })
     mocks.imageRetry.mockResolvedValue({
+      provider: 'IMAGEKIT',
       url: 'https://images.example/profile.webp',
       providerId: 'profile-123',
     })
@@ -299,6 +301,7 @@ describe('ProfessionalProfilePage', () => {
       expect.objectContaining({
         publicName: 'Nome preservado',
         profileImage: expect.objectContaining({
+          provider: 'IMAGEKIT',
           ownerId: 'user-123',
           purpose: 'PROFESSIONAL_AVATAR',
           url: 'https://images.example/profile.webp',

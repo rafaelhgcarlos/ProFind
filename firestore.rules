@@ -72,6 +72,14 @@ service cloud.firestore {
         ).data.roles;
     }
 
+    function hasClientRole(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.roles is list
+        && 'client' in get(
+          /databases/$(database)/documents/users/$(userId)
+        ).data.roles;
+    }
+
     function hasValidProfessionalProfileSummary(userId) {
       let currentStatus = resource.data.get('professionalProfileStatus', 'not-started');
       let nextStatus = request.resource.data.professionalProfileStatus;
@@ -88,10 +96,12 @@ service cloud.firestore {
     }
 
     function hasValidClientAvatar(image, userId) {
-      return image.keys().size() == 6
+      return image.keys().size() == 7
         && image.keys().hasOnly([
-          'ownerId', 'purpose', 'url', 'providerId', 'createdAt', 'updatedAt'
+          'provider', 'ownerId', 'purpose', 'url', 'providerId',
+          'createdAt', 'updatedAt'
         ])
+        && image.provider in ['IMAGEKIT', 'BACKEND']
         && image.ownerId == userId
         && image.purpose == 'CLIENT_AVATAR'
         && image.url.matches('^https://.+')
@@ -99,6 +109,22 @@ service cloud.firestore {
         && image.providerId.matches('^.{1,300}$')
         && image.createdAt > 0
         && image.updatedAt >= image.createdAt;
+    }
+
+    function hasValidClientProfile(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'phone', 'profileImage', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'phone', 'profileImage', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId == userId
+        && data.phone is string
+        && (data.phone == '' || data.phone.matches('^[0-9]{10,11}$'))
+        && (data.profileImage == null
+          || hasValidClientAvatar(data.profileImage, userId))
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
     }
 
     function hasValidProfessionalProfileFields() {
@@ -323,11 +349,12 @@ service cloud.firestore {
     }
 
     function hasValidProfessionalImage(image, ownerId, purpose) {
-      return image.keys().size() == 8
+      return image.keys().size() == 9
         && image.keys().hasOnly([
-          'ownerId', 'purpose', 'url', 'providerId',
+          'provider', 'ownerId', 'purpose', 'url', 'providerId',
           'createdAt', 'updatedAt', 'order', 'altText'
         ])
+        && image.provider in ['IMAGEKIT', 'BACKEND']
         && image.ownerId == ownerId
         && image.purpose == purpose
         && image.url.matches('^https://.+')
@@ -444,20 +471,18 @@ service cloud.firestore {
       allow read: if isDocumentOwner(userId);
       allow update: if isDocumentOwner(userId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name',
           'roles',
           'activeMode',
           'professionalProfileStatus',
-          'clientAvatar',
           'updatedAt'
         ])
         && request.resource.data.updatedAt == request.time
         && (!request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['clientAvatar'])
-          || (!('clientAvatar' in request.resource.data)
-            || hasValidClientAvatar(
-              request.resource.data.clientAvatar,
-              userId
-            )))
+            .hasAny(['name'])
+          || (request.resource.data.name is string
+            && request.resource.data.name.size() >= 2
+            && request.resource.data.name.size() <= 120))
         && hasValidRoleConfiguration()
         && hasValidProfessionalProfileSummary(userId)
         && (hasNoConfiguredRoles()
@@ -483,6 +508,29 @@ service cloud.firestore {
     match /specialties/{specialtyId} {
       allow read: if true;
       allow write: if false;
+    }
+
+    // O perfil do cliente não é público. Nome e e-mail permanecem na identidade
+    // users/{userId}; aqui ficam somente dados específicos e privados do cliente.
+    match /clientProfiles/{userId} {
+      allow read: if isDocumentOwner(userId);
+
+      allow create: if isDocumentOwner(userId)
+        && hasClientRole(userId)
+        && hasValidClientProfile(request.resource.data, userId)
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if isDocumentOwner(userId)
+        && hasClientRole(userId)
+        && resource.data.ownerId == userId
+        && request.resource.data.ownerId == userId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'phone', 'profileImage', 'updatedAt'
+        ])
+        && hasValidClientProfile(request.resource.data, userId);
+
+      allow delete: if false;
     }
 
     match /professionalProfiles/{userId} {

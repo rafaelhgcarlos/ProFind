@@ -1,9 +1,14 @@
-import type { ImagePurpose } from '../types/image'
+import type {
+  ImageProviderId,
+  ImagePurpose,
+  ImageReference,
+} from '../types/image'
 
 export interface ImageUploadRequest {
   ownerId: string
   file: File
   purpose: ImagePurpose
+  previousReference?: ImageReference | null
   onProgress?(progress: number): void
 }
 
@@ -14,6 +19,7 @@ export interface ImageRemovalRequest {
 }
 
 export interface ImageUploadResult {
+  provider: ImageProviderId
   url: string
   providerId: string
 }

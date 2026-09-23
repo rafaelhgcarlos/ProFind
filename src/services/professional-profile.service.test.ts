@@ -55,6 +55,7 @@ const publishableInput: ProfessionalProfileInput = {
 }
 
 const imageReferenceBase = {
+  provider: 'IMAGEKIT' as const,
   ownerId: 'user-123',
   createdAt: 100,
   updatedAt: 100,

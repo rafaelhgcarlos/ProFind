@@ -262,6 +262,7 @@ describe('professionalProfileRepository', () => {
 
   it('persiste apenas os metadados necessários das imagens', async () => {
     const imageMetadata = {
+      provider: 'IMAGEKIT' as const,
       ownerId: 'user-123',
       purpose: 'PROFESSIONAL_AVATAR' as const,
       url: 'https://images.example/profile.webp',

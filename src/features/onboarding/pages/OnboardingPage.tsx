@@ -20,10 +20,7 @@ import { RadioGroup, RadioGroupItem } from '../../../components/ui/radio-group'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { cn } from '../../../utils/cn'
 import { useAuth } from '../../auth/use-auth'
-import {
-  roleHomeRoutes,
-  type OnboardingChoice,
-} from '../user-role'
+import { type OnboardingChoice } from '../user-role'
 import { useProfile } from '../use-profile'
 
 const choices = [
@@ -56,7 +53,7 @@ export function OnboardingPage() {
   useDocumentTitle('Escolha como usar o ProFind')
   const navigate = useNavigate()
   const { logout } = useAuth()
-  const { completeOnboarding } = useProfile()
+  const { completeOnboarding, resolveLandingRoute } = useProfile()
   const [choice, setChoice] = useState<OnboardingChoice | ''>('')
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [submissionError, setSubmissionError] = useState<string | null>(null)
@@ -99,8 +96,9 @@ export function OnboardingPage() {
     try {
       const profile = await completeOnboarding(choice)
       if (!profile.activeMode) throw new Error('O modo inicial não foi definido.')
+      const destination = await resolveLandingRoute(profile)
       toast.success('Preferências salvas. Sua área está pronta.')
-      navigate(roleHomeRoutes[profile.activeMode], { replace: true })
+      navigate(destination, { replace: true })
     } catch (error) {
       setSubmissionError(
         error instanceof Error

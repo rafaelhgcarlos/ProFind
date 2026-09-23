@@ -1,5 +1,3 @@
-import type { ImageReference } from '../../types/image'
-
 export const USER_ROLES = ['client', 'professional'] as const
 
 export type UserRole = (typeof USER_ROLES)[number]
@@ -16,7 +14,6 @@ export interface UserProfile {
   roles: UserRole[]
   activeMode: UserRole | null
   professionalProfileStatus: ProfessionalProfileStatus
-  clientAvatar?: ImageReference | null
 }
 
 export const roleLabels: Record<UserRole, string> = {

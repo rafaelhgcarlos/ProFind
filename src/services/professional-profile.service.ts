@@ -202,6 +202,7 @@ function normalizeImage(
   order: number,
 ): ProfessionalImageMetadata {
   return {
+    provider: image.provider,
     ownerId: image.ownerId.trim(),
     purpose: image.purpose,
     url: image.url.trim(),
@@ -220,6 +221,9 @@ function imageMetadataError(
 ) {
   if (image.purpose !== purpose || (ownerId && image.ownerId !== ownerId)) {
     return 'A imagem não pertence ao proprietário e à finalidade esperados.'
+  }
+  if (image.provider === 'MOCK') {
+    return 'A imagem não possui um provedor persistível.'
   }
   if (!image.url.startsWith('https://') || image.url.length > 2_048) {
     return 'A imagem não possui uma URL HTTPS válida.'

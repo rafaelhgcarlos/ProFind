@@ -12,6 +12,16 @@ import {
   loadUserProfile,
   switchActiveMode,
 } from '../../services/onboarding.service'
+import {
+  clientLandingRoute,
+  deriveClientProfileReadiness,
+  loadClientProfileState,
+} from '../../services/client-profile.service'
+import type {
+  ClientProfile,
+  ClientProfileEditor,
+  ClientProfileReadiness,
+} from '../../types/client-profile'
 import { useAuth } from '../auth/use-auth'
 import {
   ProfileContext,
@@ -30,6 +40,8 @@ interface ProfileState {
   status: ProfileStatus
   profile: UserProfile | null
   profileError: string | null
+  clientProfile: ClientProfile | null
+  clientProfileReadiness: ClientProfileReadiness | null
 }
 
 const initialState: ProfileState = {
@@ -37,6 +49,23 @@ const initialState: ProfileState = {
   status: 'idle',
   profile: null,
   profileError: null,
+  clientProfile: null,
+  clientProfileReadiness: null,
+}
+
+async function loadProfileState(userId: string): Promise<ProfileState> {
+  const profile = await loadUserProfile(userId)
+  const clientState = profile.activeMode === 'client'
+    ? await loadClientProfileState(profile)
+    : null
+  return {
+    userId,
+    status: 'ready',
+    profile,
+    profileError: null,
+    clientProfile: clientState?.profile ?? null,
+    clientProfileReadiness: clientState?.readiness ?? null,
+  }
 }
 
 export function ProfileProvider({ children }: PropsWithChildren) {
@@ -46,12 +75,19 @@ export function ProfileProvider({ children }: PropsWithChildren) {
 
   const loadProfile = useCallback(async (userId: string) => {
     const sequence = ++requestSequence.current
-    setState({ userId, status: 'loading', profile: null, profileError: null })
+    setState({
+      userId,
+      status: 'loading',
+      profile: null,
+      profileError: null,
+      clientProfile: null,
+      clientProfileReadiness: null,
+    })
 
     try {
-      const profile = await loadUserProfile(userId)
+      const nextState = await loadProfileState(userId)
       if (sequence === requestSequence.current) {
-        setState({ userId, status: 'ready', profile, profileError: null })
+        setState(nextState)
       }
     } catch (error) {
       if (sequence === requestSequence.current) {
@@ -63,6 +99,8 @@ export function ProfileProvider({ children }: PropsWithChildren) {
             error instanceof Error
               ? error.message
               : 'Não foi possível carregar seu perfil.',
+          clientProfile: null,
+          clientProfileReadiness: null,
         })
       }
     }
@@ -73,10 +111,10 @@ export function ProfileProvider({ children }: PropsWithChildren) {
       const sequence = ++requestSequence.current
       const userId = user.uid
 
-      void loadUserProfile(userId)
-        .then((profile) => {
+      void loadProfileState(userId)
+        .then((nextState) => {
           if (sequence === requestSequence.current) {
-            setState({ userId, status: 'ready', profile, profileError: null })
+            setState(nextState)
           }
         })
         .catch((error: unknown) => {
@@ -89,6 +127,8 @@ export function ProfileProvider({ children }: PropsWithChildren) {
                 error instanceof Error
                   ? error.message
                   : 'Não foi possível carregar seu perfil.',
+              clientProfile: null,
+              clientProfileReadiness: null,
             })
           }
         })
@@ -103,7 +143,17 @@ export function ProfileProvider({ children }: PropsWithChildren) {
     async (choice: OnboardingChoice) => {
       if (!user) throw new Error('Sua sessão não está disponível.')
       const profile = await completeOnboardingProfile(user.uid, choice)
-      setState({ userId: user.uid, status: 'ready', profile, profileError: null })
+      const clientState = profile.roles.includes('client')
+        ? await loadClientProfileState(profile)
+        : null
+      setState({
+        userId: user.uid,
+        status: 'ready',
+        profile,
+        profileError: null,
+        clientProfile: clientState?.profile ?? null,
+        clientProfileReadiness: clientState?.readiness ?? null,
+      })
       return profile
     },
     [user],
@@ -113,16 +163,61 @@ export function ProfileProvider({ children }: PropsWithChildren) {
     async (mode: UserRole) => {
       if (!state.profile) throw new Error('Seu perfil ainda não está disponível.')
       const profile = await switchActiveMode(state.profile, mode)
+      const clientState = mode === 'client'
+        ? await loadClientProfileState(profile)
+        : null
       setState({
         userId: profile.userId,
         status: 'ready',
         profile,
         profileError: null,
+        clientProfile: clientState?.profile ?? state.clientProfile,
+        clientProfileReadiness:
+          clientState?.readiness ?? state.clientProfileReadiness,
       })
       return profile
     },
-    [state.profile],
+    [state.clientProfile, state.clientProfileReadiness, state.profile],
   )
+
+  const resolveLandingRoute = useCallback(async (profile: UserProfile) => {
+    if (profile.activeMode !== 'client') return '/profissional'
+    const clientState = await loadClientProfileState(profile)
+    setState((current) =>
+      current.userId === profile.userId
+        ? {
+            ...current,
+            profile,
+            clientProfile: clientState.profile,
+            clientProfileReadiness: clientState.readiness,
+          }
+        : current,
+    )
+    return clientLandingRoute(clientState.readiness)
+  }, [])
+
+  const syncClientProfile = useCallback((editor: ClientProfileEditor) => {
+    setState((current) => {
+      if (!current.profile || current.profile.userId !== editor.userId) {
+        return current
+      }
+      const profile = { ...current.profile, name: editor.name }
+      const clientProfile: ClientProfile = {
+        userId: editor.userId,
+        phone: editor.phone,
+        profileImage: editor.profileImage,
+      }
+      return {
+        ...current,
+        profile,
+        clientProfile,
+        clientProfileReadiness: deriveClientProfileReadiness(
+          profile,
+          clientProfile,
+        ),
+      }
+    })
+  }, [])
 
   const retryProfile = useCallback(async () => {
     if (!user) return
@@ -155,6 +250,8 @@ export function ProfileProvider({ children }: PropsWithChildren) {
               status: 'loading',
               profile: null,
               profileError: null,
+              clientProfile: null,
+              clientProfileReadiness: null,
             }
         : initialState,
     [currentUserId, state],
@@ -165,15 +262,21 @@ export function ProfileProvider({ children }: PropsWithChildren) {
       status: visibleState.status,
       profile: visibleState.profile,
       profileError: visibleState.profileError,
+      clientProfile: visibleState.clientProfile,
+      clientProfileReadiness: visibleState.clientProfileReadiness,
       completeOnboarding,
       switchMode,
+      resolveLandingRoute,
+      syncClientProfile,
       syncProfessionalProfileStatus,
       retryProfile,
     }),
     [
       completeOnboarding,
       retryProfile,
+      resolveLandingRoute,
       switchMode,
+      syncClientProfile,
       syncProfessionalProfileStatus,
       visibleState,
     ],

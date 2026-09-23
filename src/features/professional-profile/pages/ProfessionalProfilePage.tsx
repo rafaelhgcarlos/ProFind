@@ -128,7 +128,7 @@ interface ImageUploadTask {
   file: File
   purpose: ProfessionalImagePurpose
   order: number
-  previewUrl: string
+  previewUrl: string | null
   progress: number
   status: ImageUploadStatus
   error?: string
@@ -617,7 +617,7 @@ export function ProfessionalProfilePage() {
     )
   }
 
-  function releasePreview(previewUrl: string) {
+  function releasePreview(previewUrl: string | null) {
     if (!previewUrl) return
     URL.revokeObjectURL(previewUrl)
     previewUrls.current.delete(previewUrl)
@@ -687,12 +687,14 @@ export function ProfessionalProfilePage() {
           undefined,
         form: undefined,
       }))
+      releasePreview(task.previewUrl)
       setImageTasks((current) =>
         current.map((item) =>
           item.id === task.id
             ? {
                 ...item,
                 status: 'success',
+                previewUrl: null,
                 progress: 100,
                 providerId: metadata.providerId,
                 error: undefined,
@@ -800,7 +802,9 @@ export function ProfessionalProfilePage() {
     }))
 
     try {
-      await removeProfessionalImage(imageProvider, image, userId, purpose)
+      if (image.provider !== 'LEGACY') {
+        await removeProfessionalImage(imageProvider, image, userId, purpose)
+      }
       setForm((current) =>
         purpose === 'PROFESSIONAL_AVATAR'
           ? { ...current, profileImage: null }
@@ -872,7 +876,7 @@ export function ProfessionalProfilePage() {
   function previewFor(image: ProfessionalImageMetadata) {
     return (
       imageTasks.find((task) => task.providerId === image.providerId)
-        ?.previewUrl || image.url
+        ?.previewUrl ?? image.url
     )
   }
 

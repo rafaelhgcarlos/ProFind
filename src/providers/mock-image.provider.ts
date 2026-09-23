@@ -55,6 +55,7 @@ export class MockImageProvider implements ImageProvider {
     request.onProgress?.(100)
 
     return {
+      provider: 'MOCK',
       providerId,
       url: `https://mock-images.profind.invalid/${encodeURIComponent(request.ownerId)}/${encodeURIComponent(providerId)}`,
     }

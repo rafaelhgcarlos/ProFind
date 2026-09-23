@@ -8,8 +8,11 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_APP_ID?: string
   readonly VITE_FIREBASE_MESSAGING_SENDER_ID?: string
   readonly VITE_FIREBASE_MEASUREMENT_ID?: string
-  readonly VITE_IMAGE_PROVIDER?: 'mock' | 'backend' | 'disabled'
+  readonly VITE_IMAGE_PROVIDER?: 'imagekit' | 'mock' | 'backend' | 'disabled'
   readonly VITE_IMAGE_API_BASE_URL?: string
+  readonly VITE_IMAGEKIT_PUBLIC_KEY?: string
+  readonly VITE_IMAGEKIT_URL_ENDPOINT?: string
+  readonly VITE_IMAGEKIT_AUTH_ENDPOINT?: string
 }
 
 interface ImportMeta {

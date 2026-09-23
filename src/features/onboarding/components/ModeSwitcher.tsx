@@ -14,7 +14,6 @@ import {
 } from '../../../components/ui/dropdown-menu'
 import {
   isUserRole,
-  roleHomeRoutes,
   roleLabels,
   type UserRole,
 } from '../user-role'
@@ -27,7 +26,7 @@ const roleIcons = {
 
 export function ModeSwitcher() {
   const navigate = useNavigate()
-  const { profile, switchMode } = useProfile()
+  const { profile, resolveLandingRoute, switchMode } = useProfile()
   const [isSwitching, setIsSwitching] = useState(false)
 
   if (!profile?.activeMode) return null
@@ -41,8 +40,9 @@ export function ModeSwitcher() {
     setIsSwitching(true)
     try {
       const updatedProfile = await switchMode(value)
+      const destination = await resolveLandingRoute(updatedProfile)
       toast.success(`Modo ${roleLabels[value]} ativado.`)
-      navigate(roleHomeRoutes[updatedProfile.activeMode ?? value], { replace: true })
+      navigate(destination, { replace: true })
     } catch (error) {
       toast.error(
         error instanceof Error

@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore'
 
 import { getFirebaseFirestore } from '../lib/firebase'
-import type { ImagePurpose } from '../types/image'
+import type { ImageProviderId, ImagePurpose } from '../types/image'
 import type { ProfessionalProfileStatus as UserProfessionalProfileStatus } from '../features/onboarding/user-role'
 import {
   isProfessionalAvailability,
@@ -86,7 +86,14 @@ function professionalImage(
   if (typeof value !== 'object' || value === null) return null
 
   const image = value as Record<string, unknown>
+  const provider: ImageProviderId | null =
+    image.provider === undefined
+      ? 'LEGACY'
+      : image.provider === 'IMAGEKIT' || image.provider === 'BACKEND'
+        ? image.provider
+        : null
   if (
+    !provider ||
     typeof image.url !== 'string' ||
     typeof image.providerId !== 'string' ||
     image.ownerId !== ownerId ||
@@ -100,6 +107,7 @@ function professionalImage(
   }
 
   return {
+    provider,
     ownerId,
     purpose,
     url: image.url,
@@ -111,6 +119,20 @@ function professionalImage(
         ? image.order
         : fallbackOrder,
     altText: typeof image.altText === 'string' ? image.altText : '',
+  }
+}
+
+function persistedProfessionalImage(image: ProfessionalImageMetadata | null) {
+  if (!image || image.provider !== 'LEGACY') return image
+  return {
+    ownerId: image.ownerId,
+    purpose: image.purpose,
+    url: image.url,
+    providerId: image.providerId,
+    createdAt: image.createdAt,
+    updatedAt: image.updatedAt,
+    order: image.order,
+    altText: image.altText,
   }
 }
 
@@ -257,6 +279,10 @@ export const professionalProfileRepository = {
     const profileData = {
       ownerId: userId,
       ...publicProfile,
+      profileImage: persistedProfessionalImage(publicProfile.profileImage),
+      portfolioImages: publicProfile.portfolioImages.map((image) =>
+        persistedProfessionalImage(image),
+      ),
       selectedCityIbgeCodes: profile.selectedCities.map(
         (location) => location.ibgeCode,
       ),

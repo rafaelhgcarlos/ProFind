@@ -39,8 +39,14 @@ function createProfileContext(
     status: 'ready',
     profile,
     profileError: null,
+    clientProfile: null,
+    clientProfileReadiness: null,
     completeOnboarding: vi.fn().mockResolvedValue(profile),
     switchMode: vi.fn().mockResolvedValue(profile),
+    resolveLandingRoute: vi.fn().mockImplementation(async (nextProfile: UserProfile) =>
+      nextProfile.activeMode === 'professional' ? '/profissional' : '/cliente',
+    ),
+    syncClientProfile: vi.fn(),
     syncProfessionalProfileStatus: vi.fn(),
     retryProfile: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -107,7 +113,7 @@ describe('onboarding de papéis', () => {
     expect(context.completeOnboarding).not.toHaveBeenCalled()
   })
 
-  it('persiste a escolha Ambos e redireciona para o modo inicial', async () => {
+  it('persiste a escolha Ambos e direciona o novo cliente ao perfil', async () => {
     const user = userEvent.setup()
     const configuredProfile: UserProfile = {
       ...incompleteProfile,
@@ -115,14 +121,18 @@ describe('onboarding de papéis', () => {
       activeMode: 'client',
     }
     const completeOnboarding = vi.fn().mockResolvedValue(configuredProfile)
-    const context = createProfileContext(incompleteProfile, { completeOnboarding })
+    const resolveLandingRoute = vi.fn().mockResolvedValue('/cliente/perfil')
+    const context = createProfileContext(incompleteProfile, {
+      completeOnboarding,
+      resolveLandingRoute,
+    })
 
     render(
       <TestProviders context={context}>
         <MemoryRouter initialEntries={['/onboarding']}>
           <Routes>
             <Route path="/onboarding" element={<OnboardingPage />} />
-            <Route path="/cliente" element={<h1>Área do cliente</h1>} />
+            <Route path="/cliente/perfil" element={<h1>Perfil do cliente</h1>} />
           </Routes>
         </MemoryRouter>
       </TestProviders>,
@@ -132,7 +142,8 @@ describe('onboarding de papéis', () => {
     await user.click(screen.getByRole('button', { name: 'Continuar' }))
 
     expect(completeOnboarding).toHaveBeenCalledWith('both')
-    expect(await screen.findByRole('heading', { name: 'Área do cliente' })).toBeInTheDocument()
+    expect(resolveLandingRoute).toHaveBeenCalledWith(configuredProfile)
+    expect(await screen.findByRole('heading', { name: 'Perfil do cliente' })).toBeInTheDocument()
   })
 
   it('preserva a escolha quando a gravação falha', async () => {
@@ -266,6 +277,44 @@ describe('onboarding de papéis', () => {
 
     expect(switchMode).toHaveBeenCalledWith('professional')
     expect(await screen.findByText('Modo profissional ativo')).toBeInTheDocument()
+  })
+
+  it('consulta a prontidão ao trocar para Cliente e direciona o incompleto ao perfil', async () => {
+    const user = userEvent.setup()
+    const currentProfile: UserProfile = {
+      ...incompleteProfile,
+      roles: ['client', 'professional'],
+      activeMode: 'professional',
+    }
+    const clientModeProfile = { ...currentProfile, activeMode: 'client' as const }
+    const switchMode = vi.fn().mockResolvedValue(clientModeProfile)
+    const resolveLandingRoute = vi.fn().mockResolvedValue('/cliente/perfil')
+    const context = createProfileContext(currentProfile, {
+      switchMode,
+      resolveLandingRoute,
+    })
+
+    render(
+      <TestProviders context={context}>
+        <MemoryRouter initialEntries={['/profissional']}>
+          <Routes>
+            <Route path="/profissional" element={<ModeSwitcher />} />
+            <Route path="/cliente/perfil" element={<p>Complete o perfil do cliente</p>} />
+          </Routes>
+        </MemoryRouter>
+      </TestProviders>,
+    )
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Modo atual: Profissional. Alternar modo',
+      }),
+    )
+    await user.click(screen.getByRole('menuitemradio', { name: 'Cliente' }))
+
+    expect(switchMode).toHaveBeenCalledWith('client')
+    expect(resolveLandingRoute).toHaveBeenCalledWith(clientModeProfile)
+    expect(await screen.findByText('Complete o perfil do cliente')).toBeInTheDocument()
   })
 
   it('não apresenta o papel Profissional como perfil já publicável', () => {

@@ -134,12 +134,22 @@ export async function uploadImageReference(
     const result = options.retry
       ? await provider.retry(request)
       : await provider.upload(request)
+    if (
+      !result.url.startsWith('https://') ||
+      !result.providerId.trim()
+    ) {
+      throw new ProfessionalImageError(
+        'upload-failed',
+        'O provedor não retornou uma URL HTTPS e um identificador válidos.',
+      )
+    }
     const timestamp = (options.now ?? Date.now)()
     return {
+      provider: result.provider,
       ownerId: request.ownerId,
       purpose: request.purpose,
       url: result.url,
-      providerId: result.providerId,
+      providerId: result.providerId.trim(),
       createdAt: timestamp,
       updatedAt: timestamp,
     }
@@ -194,10 +204,30 @@ export async function replaceImageReference(
   provider: ImageProvider,
   previous: ImageReference,
   request: ImageUploadRequest,
-  options: { retry?: boolean; now?: () => number } = {},
+  options: {
+    persistReplacement(reference: ImageReference): Promise<void>
+    retry?: boolean
+    now?: () => number
+  },
 ) {
   assertImageReferenceScope(previous, request.ownerId, request.purpose)
-  const replacement = await uploadImageReference(provider, request, options)
+  const replacement = await uploadImageReference(
+    provider,
+    { ...request, previousReference: previous },
+    options,
+  )
+
+  try {
+    await options.persistReplacement(replacement)
+  } catch (error) {
+    throw new ProfessionalImageError(
+      'replacement-failed',
+      'A nova imagem foi enviada, mas não pôde ser persistida. A imagem anterior foi preservada.',
+      { cause: error, recoveryReference: replacement },
+    )
+  }
+
+  if (previous.provider !== replacement.provider) return replacement
 
   try {
     await removeImageReference(

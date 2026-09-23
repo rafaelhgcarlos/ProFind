@@ -72,6 +72,16 @@ alternam somente o `activeMode`, preservando a mesma identidade. O serviço e as
 regras do Firestore rejeitam modos que não estejam em `roles`. No MVP, o papel
 Profissional representa exclusivamente pessoa física.
 
+Contas com o papel Cliente criam e editam seus dados básicos em
+`/cliente/perfil`. O nome continua canônico em `users/{uid}`, enquanto telefone
+e referência `CLIENT_AVATAR` ficam no documento privado
+`clientProfiles/{uid}`. A prontidão é derivada pelo service a partir do nome
+válido e da existência desse documento, sem um campo `profileComplete`
+editável. Onboarding e troca de modo direcionam perfis incompletos para essa
+rota; acessos posteriores continuam permitidos com um aviso para completar o
+perfil. A arquitetura e os limites de privacidade estão documentados em
+[`docs/client-profile.md`](docs/client-profile.md).
+
 As regras para criação, leitura do próprio documento e atualização controlada
 de `roles`/`activeMode` estão versionadas em `firestore.rules`. Depois do
 onboarding, papéis nunca podem ser removidos e só podem ser adicionados de forma
@@ -138,7 +148,9 @@ Os limites entre dados públicos e privados do perfil, incluindo as coleções
 Foto de perfil e portfólio usam uma abstração substituível, sem Firebase
 Storage nem SDK de provedor dentro das features. A configuração dos adapters,
 o contrato do backend seguro e os metadados persistidos estão documentados em
-[`docs/image-provider.md`](docs/image-provider.md).
+[`docs/image-provider.md`](docs/image-provider.md). A integração real usa
+ImageKit com upload V2 assinado por um Cloudflare Worker local na porta `8787`;
+o mock permanece apenas para testes ou fallback explícito.
 
 ## Design system
 

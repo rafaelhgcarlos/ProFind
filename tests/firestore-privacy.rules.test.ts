@@ -42,6 +42,7 @@ const publicProfile = {
   availability: 'AVAILABLE',
   contactVisibility: 'PRIVATE',
   profileImage: {
+    provider: 'IMAGEKIT',
     ownerId,
     purpose: 'PROFESSIONAL_AVATAR',
     url: 'https://images.example/profile.webp',
@@ -53,6 +54,7 @@ const publicProfile = {
   },
   portfolioImages: [
     {
+      provider: 'IMAGEKIT',
       ownerId,
       purpose: 'PROFESSIONAL_PORTFOLIO',
       url: 'https://images.example/service.webp',
@@ -82,11 +84,15 @@ async function seedProfiles() {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore()
     await setDoc(doc(firestore, 'users', ownerId), {
-      roles: ['professional'],
+      name: 'Marina Souza',
+      email: 'marina@example.com',
+      roles: ['client', 'professional'],
       activeMode: 'professional',
       professionalProfileStatus: 'complete',
     })
     await setDoc(doc(firestore, 'users', otherUserId), {
+      name: 'Outro Usuário',
+      email: 'outro@example.com',
       roles: ['client'],
       activeMode: 'client',
       professionalProfileStatus: 'not-started',
@@ -120,8 +126,9 @@ describe('Firestore privacy rules for professional profiles', () => {
   it('keeps the client avatar isolated by owner and purpose', async () => {
     await seedProfiles()
     const owner = testEnvironment.authenticatedContext(ownerId).firestore()
-    const reference = doc(owner, 'users', ownerId)
+    const reference = doc(owner, 'clientProfiles', ownerId)
     const clientAvatar = {
+      provider: 'IMAGEKIT',
       ownerId,
       purpose: 'CLIENT_AVATAR',
       url: 'https://images.example/client.webp',
@@ -131,23 +138,128 @@ describe('Firestore privacy rules for professional profiles', () => {
     }
 
     await assertSucceeds(
-      updateDoc(reference, {
-        clientAvatar,
+      setDoc(reference, {
+        ownerId,
+        phone: '11999998888',
+        profileImage: clientAvatar,
+        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }),
     )
     await assertFails(
       updateDoc(reference, {
-        clientAvatar: { ...clientAvatar, ownerId: otherUserId },
+        profileImage: { ...clientAvatar, ownerId: otherUserId },
         updatedAt: serverTimestamp(),
       }),
     )
     await assertFails(
       updateDoc(reference, {
-        clientAvatar: {
+        profileImage: {
           ...clientAvatar,
           purpose: 'PROFESSIONAL_AVATAR',
         },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(reference, {
+        profileImage: {
+          ...clientAvatar,
+          createdAt: 200,
+          updatedAt: 100,
+        },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(reference, {
+        profileImage: { ...clientAvatar, provider: 'MOCK' },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('keeps the entire client profile private and owner-only', async () => {
+    await seedProfiles()
+    const owner = testEnvironment.authenticatedContext(ownerId).firestore()
+    const visitor = testEnvironment.unauthenticatedContext().firestore()
+    const other = testEnvironment.authenticatedContext(otherUserId).firestore()
+    const reference = doc(owner, 'clientProfiles', ownerId)
+
+    await assertSucceeds(
+      setDoc(reference, {
+        ownerId,
+        phone: '',
+        profileImage: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertSucceeds(getDoc(reference))
+    await assertFails(getDoc(doc(visitor, 'clientProfiles', ownerId)))
+    await assertFails(getDoc(doc(other, 'clientProfiles', ownerId)))
+    await assertFails(
+      updateDoc(doc(other, 'clientProfiles', ownerId), {
+        phone: '1933334444',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('allows an atomic client profile creation and controlled shared-name update', async () => {
+    await seedProfiles()
+    const owner = testEnvironment.authenticatedContext(ownerId).firestore()
+    const batch = writeBatch(owner)
+    batch.set(doc(owner, 'clientProfiles', ownerId), {
+      ownerId,
+      phone: '11999998888',
+      profileImage: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    batch.update(doc(owner, 'users', ownerId), {
+      name: 'Marina Santos',
+      updatedAt: serverTimestamp(),
+    })
+
+    await assertSucceeds(batch.commit())
+    await assertFails(
+      updateDoc(doc(owner, 'users', ownerId), {
+        email: 'novo@example.com',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('rejects duplicate identity and raw image data in the private client profile', async () => {
+    await seedProfiles()
+    const owner = testEnvironment.authenticatedContext(ownerId).firestore()
+
+    await assertFails(
+      setDoc(doc(owner, 'clientProfiles', ownerId), {
+        ownerId,
+        phone: '',
+        email: 'marina@example.com',
+        profileImage: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      setDoc(doc(owner, 'clientProfiles', ownerId), {
+        ownerId,
+        phone: '',
+        profileImage: {
+          provider: 'IMAGEKIT',
+          ownerId,
+          purpose: 'CLIENT_AVATAR',
+          url: 'data:image/webp;base64,AAAA',
+          providerId: 'unsafe-avatar',
+          createdAt: 1_795_000_000_000,
+          updatedAt: 1_795_000_000_000,
+          base64: 'AAAA',
+        },
+        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }),
     )
@@ -266,6 +378,7 @@ describe('Firestore privacy rules for professional profiles', () => {
       updateDoc(reference, {
         portfolioImages: [
           {
+            provider: 'IMAGEKIT',
             ownerId,
             purpose: 'PROFESSIONAL_PORTFOLIO',
             url: 'https://images.example/new-service.webp',
@@ -290,8 +403,18 @@ describe('Firestore privacy rules for professional profiles', () => {
     )
     await assertFails(
       updateDoc(reference, {
+        profileImage: {
+          ...publicProfile.profileImage,
+          provider: 'MOCK',
+        },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(reference, {
         portfolioImages: [
           {
+            provider: 'IMAGEKIT',
             ownerId,
             purpose: 'PROFESSIONAL_PORTFOLIO',
             url: 'data:image/webp;base64,AAAA',
@@ -328,6 +451,7 @@ describe('Firestore privacy rules for professional profiles', () => {
           ownerId: imageOwnerId,
         },
         portfolioImages: Array.from({ length: 3 }, (_, order) => ({
+          provider: 'IMAGEKIT',
           ownerId: imageOwnerId,
           purpose: 'PROFESSIONAL_PORTFOLIO',
           url: `https://images.example/service-${order}.webp`,

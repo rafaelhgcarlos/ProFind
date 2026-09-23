@@ -71,6 +71,12 @@ const ProfessionalProfilePage = lazy(() =>
   ),
 )
 
+const ClientProfilePage = lazy(() =>
+  import('../features/client-profile/pages/ClientProfilePage').then(
+    (module) => ({ default: module.ClientProfilePage }),
+  ),
+)
+
 function RouteFallback() {
   return (
     <div
@@ -139,6 +145,14 @@ export function AppRouter() {
               element={
                 <Suspense fallback={<RouteFallback />}>
                   <ModeHomePage mode="client" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/cliente/perfil"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ClientProfilePage />
                 </Suspense>
               }
             />

@@ -1,0 +1,2 @@
+IMAGEKIT_PRIVATE_KEY=replace-with-local-secret
+IMAGEKIT_PUBLIC_KEY=replace-with-public-key

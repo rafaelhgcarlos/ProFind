@@ -17,7 +17,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { cn } from '../../utils/cn'
 import { Brand } from '../brand/Brand'
 import { ThemeToggle } from '../theme/ThemeToggle'
-import { Avatar, AvatarFallback } from '../ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu'
 
 export interface LayoutNavigationItem {
@@ -64,6 +64,7 @@ interface AuthenticatedLayoutProps extends PropsWithChildren {
   mode: AuthenticatedMode
   pageTitle: string
   userName?: string
+  userAvatarUrl?: string
   navigation?: LayoutNavigationItem[]
   activeNavigationHref?: string
   contextSwitcher?: ReactNode
@@ -73,6 +74,7 @@ export function AuthenticatedLayout({
   mode,
   pageTitle,
   userName = 'Usuário ProFind',
+  userAvatarUrl,
   navigation = navigationByMode[mode],
   activeNavigationHref,
   contextSwitcher,
@@ -152,7 +154,10 @@ export function AuthenticatedLayout({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button type="button" aria-label={`Abrir menu da conta de ${userName}`} className="rounded-full focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30">
-                    <Avatar className="border border-primary/20"><AvatarFallback>{initials}</AvatarFallback></Avatar>
+                    <Avatar className="border border-primary/20">
+                      {userAvatarUrl ? <AvatarImage src={userAvatarUrl} alt="" /> : null}
+                      <AvatarFallback>{initials}</AvatarFallback>
+                    </Avatar>
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">

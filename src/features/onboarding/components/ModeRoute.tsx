@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom'
 
+import { clientLandingRoute } from '../../../services/client-profile.service'
 import {
   hasCompletedOnboarding,
   roleHomeRoutes,
@@ -12,7 +13,7 @@ interface ModeRouteProps {
 }
 
 export function ModeRoute({ mode }: ModeRouteProps) {
-  const { profile } = useProfile()
+  const { clientProfileReadiness, profile } = useProfile()
 
   if (!profile || !hasCompletedOnboarding(profile)) {
     return <Navigate to="/onboarding" replace />
@@ -20,9 +21,13 @@ export function ModeRoute({ mode }: ModeRouteProps) {
 
   if (profile.activeMode !== mode) {
     const modeIsEnabled = profile.roles.includes(mode)
+    const destination =
+      profile.activeMode === 'client' && clientProfileReadiness
+        ? clientLandingRoute(clientProfileReadiness)
+        : roleHomeRoutes[profile.activeMode]
     return (
       <Navigate
-        to={roleHomeRoutes[profile.activeMode]}
+        to={destination}
         replace
         state={
           modeIsEnabled
