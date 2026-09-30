@@ -21,7 +21,7 @@ export function PublicLayout({ children, navigation = [], showAccountLinks = fal
   const hasNavigation = navigation.length > 0
 
   return (
-    <div className="min-h-dvh bg-background text-foreground">
+    <div className="min-h-dvh w-full min-w-0 max-w-full overflow-x-clip bg-background text-foreground">
       <a
         href="#conteudo-principal"
         className="sr-only z-[100] rounded-md bg-primary px-4 py-3 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -29,7 +29,7 @@ export function PublicLayout({ children, navigation = [], showAccountLinks = fal
         Pular para o conteúdo
       </a>
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:h-18 lg:px-8">
+        <div className="mx-auto flex h-16 w-full min-w-0 max-w-7xl items-center justify-between px-4 sm:px-6 lg:h-18 lg:px-8">
           <Brand />
 
           {hasNavigation ? (
@@ -42,7 +42,7 @@ export function PublicLayout({ children, navigation = [], showAccountLinks = fal
             </nav>
           ) : null}
 
-          <div className="flex items-center gap-1 sm:gap-2">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-2">
             <ThemeToggle />
             {showAccountLinks ? (
               <PublicAccountActions navigation={navigation} />
@@ -52,7 +52,7 @@ export function PublicLayout({ children, navigation = [], showAccountLinks = fal
           </div>
         </div>
       </header>
-      <main id="conteudo-principal">{children}</main>
+      <main id="conteudo-principal" className="w-full min-w-0 max-w-full">{children}</main>
       <footer className="border-t">
         <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-8 text-sm text-muted-foreground sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
           <span>ProFind — serviços e profissionais mais próximos.</span>

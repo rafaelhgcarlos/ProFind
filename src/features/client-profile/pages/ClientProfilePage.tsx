@@ -425,7 +425,7 @@ export function ClientProfilePage() {
         </div>
 
         {loading ? (
-          <div role="status" aria-live="polite" className="grid gap-6 md:grid-cols-[15rem_1fr]">
+          <div role="status" aria-live="polite" className="grid min-w-0 gap-6 md:grid-cols-[15rem_minmax(0,1fr)]">
             <span className="sr-only">Carregando perfil do cliente…</span>
             <Skeleton className="h-64" />
             <Skeleton className="h-96" />

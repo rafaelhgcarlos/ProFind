@@ -10,6 +10,7 @@ import { ThemeProvider } from '../../providers/theme-provider'
 import { AdminLayout } from './AdminLayout'
 import { ClientLayout } from './ClientLayout'
 import { ProfessionalLayout } from './ProfessionalLayout'
+import { ProfileBuilderSection } from '../../features/professional-profile/components/ProfileBuilderSection'
 
 vi.mock('../ui/avatar', () => ({
   Avatar: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
@@ -55,6 +56,39 @@ describe('layouts autenticados', () => {
 
     expect(screen.getAllByRole('link', { name: 'Oportunidades' })).toHaveLength(2)
     expect(screen.getByText('Conteúdo profissional')).toBeInTheDocument()
+  })
+
+  it('mantém a navegação mobile presa à viewport com o portfólio aberto', () => {
+    const view = renderLayout(
+      '/profissional',
+      <ProfessionalLayout pageTitle="Perfil profissional">
+        <ProfileBuilderSection
+          id="portfolio-test"
+          title="Portfólio"
+          description="Conteúdo aberto"
+          summary="Três imagens"
+          open
+          complete
+          onOpenChange={vi.fn()}
+        >
+          <div style={{ height: 2400 }}>Conteúdo expansível do portfólio</div>
+        </ProfileBuilderSection>
+      </ProfessionalLayout>,
+    )
+
+    const mobileNavigation = screen.getByRole('navigation', {
+      name: 'Área profissional — navegação mobile',
+    })
+
+    expect(view.container.contains(mobileNavigation)).toBe(false)
+    expect(document.body).toContainElement(mobileNavigation)
+    expect(mobileNavigation).toHaveClass('fixed', 'right-0', 'bottom-0', 'left-0', 'z-40')
+    expect(mobileNavigation.className).toContain(
+      'pb-[env(safe-area-inset-bottom)]',
+    )
+    expect(view.container.querySelector('#conteudo-principal')?.parentElement).toHaveClass(
+      'pb-[calc(5rem+env(safe-area-inset-bottom))]',
+    )
   })
 
   it('mantém uma estrutura de navegação administrativa separada', () => {

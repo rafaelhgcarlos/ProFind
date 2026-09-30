@@ -6,12 +6,9 @@ import {
   Eye,
   EyeOff,
   Images,
-  MapPin,
   PauseCircle,
-  Phone,
   RotateCcw,
   Save,
-  Send,
   ShieldAlert,
   Trash2,
   Upload,
@@ -22,7 +19,6 @@ import { toast } from 'sonner'
 
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
-import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import {
   Card,
@@ -44,6 +40,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../components/ui/select'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '../../../components/ui/sheet'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { Textarea } from '../../../components/ui/textarea'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
@@ -97,6 +100,9 @@ import { useAuth } from '../../auth/use-auth'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
 import { MunicipalityCombobox } from '../components/MunicipalityCombobox'
+import { ProfileBuilderHeader } from '../components/ProfileBuilderHeader'
+import { ProfileBuilderSection } from '../components/ProfileBuilderSection'
+import { ProfessionalProfilePreview } from '../components/ProfessionalProfilePreview'
 
 interface ProfessionalProfileFormState {
   publicName: string
@@ -118,6 +124,40 @@ interface ProfessionalProfileFormState {
   }
   profileImage: ProfessionalImageMetadata | null
   portfolioImages: ProfessionalImageMetadata[]
+}
+
+type ProfileSectionId =
+  | 'presentation'
+  | 'portfolio'
+  | 'services'
+  | 'contact'
+  | 'service-area'
+
+const profileSectionIds: ProfileSectionId[] = [
+  'presentation',
+  'services',
+  'service-area',
+  'contact',
+  'portfolio',
+]
+
+function profileSectionForField(field: string): ProfileSectionId | null {
+  if (['publicName', 'headline', 'bio', 'experienceYears'].includes(field)) {
+    return 'presentation'
+  }
+  if (['profileImage', 'portfolioImages'].includes(field)) return 'portfolio'
+  if (['categoryIds', 'specialtyIds'].includes(field)) return 'services'
+  if (['phone', 'contactVisibility', 'privateLocation'].includes(field)) {
+    return 'contact'
+  }
+  if (
+    ['baseLocation', 'serviceMode', 'serviceRadiusKm', 'selectedCities', 'availability'].includes(
+      field,
+    )
+  ) {
+    return 'service-area'
+  }
+  return null
 }
 
 type ProfessionalImagePurpose = Exclude<ImagePurpose, 'CLIENT_AVATAR'>
@@ -195,13 +235,6 @@ const statusLabels: Record<ProfessionalProfileStatus, string> = {
   PAUSED: 'Pausado',
   SUSPENDED: 'Suspenso',
 }
-
-const statusVariants = {
-  DRAFT: 'outline',
-  PUBLISHED: 'success',
-  PAUSED: 'warning',
-  SUSPENDED: 'destructive',
-} as const
 
 function emptyForm(publicName: string): ProfessionalProfileFormState {
   return {
@@ -282,7 +315,7 @@ function inputFromForm(form: ProfessionalProfileFormState): ProfessionalProfileI
 
 function FieldError({ id, message }: { id: string; message?: string }) {
   return message ? (
-    <p id={id} className="text-sm text-destructive">
+    <p id={id} className="min-w-0 max-w-full break-words text-sm text-destructive">
       {message}
     </p>
   ) : null
@@ -301,37 +334,37 @@ function ImageUploadStatus({
 
   return (
     <div
-      className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-[5rem_minmax(0,1fr)]"
+      className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-3 overflow-hidden rounded-lg border bg-muted/20 p-3 sm:grid-cols-[5rem_minmax(0,1fr)]"
       aria-live="polite"
     >
       {task.previewUrl ? (
         <img
           src={task.previewUrl}
           alt="Prévia da imagem selecionada"
-          className="aspect-square w-20 rounded-md bg-muted object-cover"
+          className="aspect-square block w-20 max-w-full rounded-md bg-muted object-cover"
         />
       ) : (
-        <div className="flex aspect-square w-20 items-center justify-center rounded-md bg-muted">
+        <div className="flex aspect-square w-20 max-w-full items-center justify-center rounded-md bg-muted">
           <Images className="size-6 text-muted-foreground" aria-hidden="true" />
         </div>
       )}
-      <div className="min-w-0 space-y-2">
-        <p className="truncate text-sm font-medium">{task.file.name}</p>
+      <div className="w-full min-w-0 max-w-full space-y-2">
+        <p className="max-w-full truncate text-sm font-medium">{task.file.name}</p>
         {isUploading ? (
           <>
             <progress
               value={task.progress}
               max={100}
               aria-label={`Enviando ${task.file.name}: ${task.progress}%`}
-              className="h-2 w-full accent-primary"
+              className="block h-2 w-full min-w-0 max-w-full accent-primary"
             />
             <p className="text-xs text-muted-foreground">Enviando… {task.progress}%</p>
           </>
         ) : null}
         {task.status === 'error' ? (
           <>
-            <p role="alert" className="text-sm text-destructive">{task.error}</p>
-            <div className="flex flex-wrap gap-2">
+            <p role="alert" className="min-w-0 max-w-full break-words text-sm text-destructive">{task.error}</p>
+            <div className="flex min-w-0 max-w-full flex-wrap gap-2">
               <Button type="button" variant="outline" size="sm" onClick={onRetry}>
                 <RotateCcw aria-hidden="true" /> Tentar novamente
               </Button>
@@ -399,6 +432,10 @@ export function ProfessionalProfilePage() {
   const [avatarCleanupError, setAvatarCleanupError] = useState<string | null>(
     null,
   )
+  const [openSections, setOpenSections] = useState<Set<ProfileSectionId>>(
+    () => new Set(profileSectionIds),
+  )
+  const [previewOpen, setPreviewOpen] = useState(false)
   const previewUrls = useRef(new Set<string>())
 
   useEffect(
@@ -470,6 +507,71 @@ export function ProfessionalProfilePage() {
   const isImageOperationInProgress =
     imageTasks.some((task) => task.status === 'uploading') ||
     removingImageIds.length > 0
+  const baselineForm = useMemo(
+    () => formFromProfile(professionalProfile, userProfile?.name ?? ''),
+    [professionalProfile, userProfile?.name],
+  )
+  const hasUnsavedChanges = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(baselineForm),
+    [baselineForm, form],
+  )
+  const completionItems = [
+    !publicationErrors.publicName,
+    !publicationErrors.categoryIds && !publicationErrors.specialtyIds,
+    !publicationErrors.phone && !publicationErrors.contactVisibility,
+    !publicationErrors.baseLocation,
+    !publicationErrors.serviceMode &&
+      !publicationErrors.serviceRadiusKm &&
+      !publicationErrors.selectedCities,
+  ]
+  const completion = Math.round(
+    (completionItems.filter(Boolean).length / completionItems.length) * 100,
+  )
+  const categoryNames = (catalog?.categories ?? [])
+    .filter((category) => form.categoryIds.includes(category.id))
+    .map((category) => category.name)
+  const specialtyNames = (catalog?.specialties ?? [])
+    .filter((specialty) => form.specialtyIds.includes(specialty.id))
+    .map((specialty) => specialty.name)
+  const sectionHasError: Record<ProfileSectionId, boolean> = {
+    presentation: Boolean(
+      fieldErrors.publicName ||
+        fieldErrors.headline ||
+        fieldErrors.bio ||
+        fieldErrors.experienceYears,
+    ),
+    portfolio: Boolean(fieldErrors.profileImage || fieldErrors.portfolioImages),
+    services: Boolean(fieldErrors.categoryIds || fieldErrors.specialtyIds),
+    contact: Boolean(
+      fieldErrors.phone || fieldErrors.contactVisibility || fieldErrors.privateLocation,
+    ),
+    'service-area': Boolean(
+      fieldErrors.baseLocation ||
+        fieldErrors.serviceMode ||
+        fieldErrors.serviceRadiusKm ||
+        fieldErrors.selectedCities ||
+        fieldErrors.availability,
+    ),
+  }
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [hasUnsavedChanges])
+
+  function setSectionOpen(section: ProfileSectionId, open: boolean) {
+    setOpenSections((current) => {
+      const next = new Set(current)
+      if (open) next.add(section)
+      else next.delete(section)
+      return next
+    })
+  }
 
   function updateField<Key extends keyof ProfessionalProfileFormState>(
     field: Key,
@@ -1040,17 +1142,24 @@ export function ProfessionalProfilePage() {
           'bio',
           'categoryIds',
           'specialtyIds',
-          'profileImage',
-          'portfolioImages',
-          'phone',
-          'contactVisibility',
-          'privateLocation',
           'baseLocation',
           'serviceMode',
           'serviceRadiusKm',
           'selectedCities',
           'availability',
+          'phone',
+          'contactVisibility',
+          'privateLocation',
+          'profileImage',
+          'portfolioImages',
         ] as const
+        const invalidSections = new Set(
+          fieldOrder
+            .filter((field) => error.fieldErrors[field])
+            .map(profileSectionForField)
+            .filter((section): section is ProfileSectionId => section !== null),
+        )
+        setOpenSections((current) => new Set([...current, ...invalidSections]))
         const firstInvalidField = fieldOrder.find(
           (field) => error.fieldErrors[field],
         )
@@ -1141,9 +1250,44 @@ export function ProfessionalProfilePage() {
     )
   }
 
+  const profilePreview = (
+    <ProfessionalProfilePreview
+      publicName={form.publicName}
+      headline={form.headline}
+      bio={form.bio}
+      categoryNames={categoryNames}
+      specialtyNames={specialtyNames}
+      experienceYears={form.experienceYears}
+      baseLocation={form.baseLocation}
+      serviceMode={form.serviceMode}
+      serviceRadiusKm={form.serviceRadiusKm}
+      selectedCities={form.selectedCities}
+      availability={form.availability}
+      phone={form.phone}
+      contactVisibility={form.contactVisibility}
+      profileImage={form.profileImage}
+      portfolioImages={form.portfolioImages}
+    />
+  )
+
   return layout(
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
-      <form
+    <div className="min-w-0 space-y-6">
+      <ProfileBuilderHeader
+        publicName={form.publicName}
+        headline={form.headline}
+        avatarUrl={form.profileImage ? previewFor(form.profileImage) : undefined}
+        status={currentStatus}
+        completion={completion}
+        dirty={hasUnsavedChanges}
+        saving={savingStatus === 'PUBLISHED'}
+        disabled={isSaving || isImageOperationInProgress || isSuspended}
+        showPrimary={!isSuspended}
+        onPreview={() => setPreviewOpen(true)}
+        onPrimaryAction={() => void handleSave('PUBLISHED')}
+      />
+
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-start">
+        <form
         noValidate
         aria-busy={isSaving || isImageOperationInProgress}
         onSubmit={(event) => event.preventDefault()}
@@ -1185,14 +1329,17 @@ export function ProfessionalProfilePage() {
           </Alert>
         ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Apresentação profissional</CardTitle>
-            <CardDescription>
-              Conte quem você é e como pode ajudar. Campos obrigatórios para publicação estão indicados.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-5">
+        <ProfileBuilderSection
+          id="profile-section-presentation"
+          title="Apresentação"
+          description="Conte quem você é e como pode ajudar. Campos obrigatórios para publicação estão indicados."
+          summary={`${form.publicName.trim() || 'Nome pendente'} · ${form.headline.trim() || 'Título pendente'}`}
+          open={openSections.has('presentation')}
+          complete={!publicationErrors.publicName}
+          hasError={sectionHasError.presentation}
+          onOpenChange={(open) => setSectionOpen('presentation', open)}
+        >
+          <div className="grid min-w-0 gap-5">
             <div className="space-y-2">
               <Label htmlFor="professional-publicName">Nome público <span aria-hidden="true">*</span></Label>
               <Input
@@ -1257,22 +1404,20 @@ export function ProfessionalProfilePage() {
               />
               <FieldError id="professional-experienceYears-error" message={fieldErrors.experienceYears} />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </ProfileBuilderSection>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-start gap-3">
-              <Images className="mt-0.5 size-5 text-primary" aria-hidden="true" />
-              <div>
-                <CardTitle>Foto e portfólio</CardTitle>
-                <CardDescription className="mt-1">
-                  Use imagens JPEG, PNG ou WebP de até 5 MB. O portfólio aceita até {PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-8">
+        <ProfileBuilderSection
+          id="profile-section-portfolio"
+          title="Portfólio"
+          description={`Gerencie a foto profissional e até ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens de trabalhos realizados.`}
+          summary={`${form.profileImage ? 'Foto adicionada' : 'Foto ausente'} · ${form.portfolioImages.length} ${form.portfolioImages.length === 1 ? 'imagem' : 'imagens'} no portfólio`}
+          open={openSections.has('portfolio')}
+          complete={!publicationErrors.profileImage && !publicationErrors.portfolioImages}
+          hasError={sectionHasError.portfolio}
+          onOpenChange={(open) => setSectionOpen('portfolio', open)}
+        >
+          <div className="w-full min-w-0 max-w-full space-y-8">
             {!imageProvider.configured ? (
               <Alert>
                 <CircleAlert aria-hidden="true" />
@@ -1288,18 +1433,18 @@ export function ProfessionalProfilePage() {
               tabIndex={-1}
               aria-invalid={Boolean(fieldErrors.profileImage)}
               aria-describedby={fieldErrors.profileImage ? 'professional-profileImage-error' : undefined}
-              className="space-y-4 rounded-md focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+              className="m-0 w-full min-w-0 max-w-full space-y-4 rounded-md p-0 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
             >
               <legend className="text-sm font-semibold">Foto de perfil</legend>
               {form.profileImage ? (
-                <div className="grid gap-4 rounded-lg border bg-card p-4 sm:grid-cols-[7rem_minmax(0,1fr)]">
+                <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-4 overflow-hidden rounded-lg border bg-card p-4 sm:grid-cols-[7rem_minmax(0,1fr)]">
                   <img
                     src={previewFor(form.profileImage)}
                     alt={form.profileImage.altText || 'Prévia da foto de perfil'}
-                    className="aspect-square w-full rounded-md bg-muted object-cover"
+                    className="aspect-square block w-full min-w-0 max-w-full rounded-md bg-muted object-cover"
                   />
-                  <div className="min-w-0 space-y-3">
-                    <div className="space-y-2">
+                  <div className="w-full min-w-0 max-w-full space-y-3">
+                    <div className="w-full min-w-0 max-w-full space-y-2">
                       <Label htmlFor="professional-profile-image-alt">Texto alternativo</Label>
                       <Input
                         id="professional-profile-image-alt"
@@ -1346,13 +1491,13 @@ export function ProfessionalProfilePage() {
                   Nenhuma foto de perfil adicionada.
                 </p>
               )}
-              <div className="space-y-2">
+              <div className="w-full min-w-0 max-w-full space-y-2">
                 <Label
                   htmlFor="professional-profile-image-file"
                   className={
                     form.profileImage
-                      ? 'inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-md border bg-background px-4 py-2 text-sm font-medium shadow-xs hover:bg-accent'
-                      : 'flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-5 text-center hover:bg-muted/60'
+                      ? 'inline-flex min-h-10 max-w-full cursor-pointer flex-wrap items-center gap-2 rounded-md border bg-background px-4 py-2 text-sm font-medium break-words shadow-xs hover:bg-accent'
+                      : 'flex min-h-24 w-full min-w-0 max-w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-5 text-center break-words hover:bg-muted/60'
                   }
                 >
                   <Upload className="size-5" aria-hidden="true" />
@@ -1433,22 +1578,22 @@ export function ProfessionalProfilePage() {
               tabIndex={-1}
               aria-invalid={Boolean(fieldErrors.portfolioImages)}
               aria-describedby={fieldErrors.portfolioImages ? 'professional-portfolioImages-error' : undefined}
-              className="space-y-4 rounded-md focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+              className="m-0 w-full min-w-0 max-w-full space-y-4 rounded-md p-0 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
             >
               <legend className="text-sm font-semibold">Portfólio</legend>
               <p className="text-xs text-muted-foreground">
                 {form.portfolioImages.length}/{PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens adicionadas
               </p>
               {form.portfolioImages.length > 0 ? (
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-[repeat(2,minmax(0,1fr))]">
                   {form.portfolioImages.map((image, index) => (
-                    <div key={image.providerId} className="min-w-0 space-y-3 rounded-lg border bg-card p-3">
+                    <div key={image.providerId} className="w-full min-w-0 max-w-full space-y-3 overflow-hidden rounded-lg border bg-card p-3">
                       <img
                         src={previewFor(image)}
                         alt={image.altText || `Prévia da imagem ${index + 1} do portfólio`}
-                        className="aspect-[4/3] w-full rounded-md bg-muted object-cover"
+                        className="aspect-[4/3] block w-full min-w-0 max-w-full rounded-md bg-muted object-cover"
                       />
-                      <div className="space-y-2">
+                      <div className="w-full min-w-0 max-w-full space-y-2">
                         <Label htmlFor={`professional-portfolio-alt-${index}`}>
                           Texto alternativo da imagem {index + 1}
                         </Label>
@@ -1484,7 +1629,7 @@ export function ProfessionalProfilePage() {
                         <Trash2 aria-hidden="true" /> Remover imagem
                       </Button>
                       {imageRemovalErrors[image.providerId] ? (
-                        <p role="alert" className="text-sm text-destructive">
+                        <p role="alert" className="min-w-0 max-w-full break-words text-sm text-destructive">
                           {imageRemovalErrors[image.providerId]}
                         </p>
                       ) : null}
@@ -1508,10 +1653,10 @@ export function ProfessionalProfilePage() {
                     onDiscard={() => discardImageTask(task)}
                   />
                 ))}
-              <div className="space-y-2">
+              <div className="w-full min-w-0 max-w-full space-y-2">
                 <Label
                   htmlFor="professional-portfolio-image-files"
-                  className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-md border bg-background px-4 py-2 text-sm font-medium shadow-xs hover:bg-accent"
+                  className="inline-flex min-h-10 max-w-full cursor-pointer flex-wrap items-center gap-2 rounded-md border bg-background px-4 py-2 text-sm font-medium break-words shadow-xs hover:bg-accent"
                 >
                   <Upload className="size-4" aria-hidden="true" /> Adicionar imagens
                 </Label>
@@ -1548,17 +1693,20 @@ export function ProfessionalProfilePage() {
             <PrivacyNotice>
               O arquivo é enviado somente ao provedor configurado. No perfil, salvamos apenas URL, identificador, ordem e texto alternativo — nunca base64 ou o arquivo bruto.
             </PrivacyNotice>
-          </CardContent>
-        </Card>
+          </div>
+        </ProfileBuilderSection>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Serviços oferecidos</CardTitle>
-            <CardDescription>
-              Selecione categorias e depois as especialidades correspondentes. Apenas itens ativos do catálogo aparecem aqui.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
+        <ProfileBuilderSection
+          id="profile-section-services"
+          title="Serviços"
+          description="Selecione categorias e depois as especialidades correspondentes. Apenas itens ativos do catálogo aparecem aqui."
+          summary={[...categoryNames, ...specialtyNames].join(' · ') || 'Categorias e especialidades pendentes'}
+          open={openSections.has('services')}
+          complete={!publicationErrors.categoryIds && !publicationErrors.specialtyIds}
+          hasError={sectionHasError.services}
+          onOpenChange={(open) => setSectionOpen('services', open)}
+        >
+          <div className="min-w-0 space-y-6">
             <fieldset
               id="professional-categoryIds"
               tabIndex={-1}
@@ -1569,14 +1717,14 @@ export function ProfessionalProfilePage() {
               <legend className="text-sm font-semibold">Categorias <span aria-hidden="true">*</span></legend>
               <div className="grid gap-3 sm:grid-cols-2">
                 {catalog.categories.map((category) => (
-                  <label key={category.id} htmlFor={`category-${category.id}`} className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border bg-background p-3 hover:bg-accent/40">
+                  <label key={category.id} htmlFor={`category-${category.id}`} className="flex min-h-12 min-w-0 max-w-full cursor-pointer items-center gap-3 rounded-md border bg-background p-3 hover:bg-accent/40">
                     <Checkbox
                       id={`category-${category.id}`}
                       checked={form.categoryIds.includes(category.id)}
                       disabled={isSaving || isSuspended}
                       onCheckedChange={(checked) => toggleCategory(category.id, checked === true)}
                     />
-                    <span className="text-sm font-medium">{category.name}</span>
+                    <span className="min-w-0 break-words text-sm font-medium">{category.name}</span>
                   </label>
                 ))}
               </div>
@@ -1602,14 +1750,14 @@ export function ProfessionalProfilePage() {
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{category?.name}</p>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {specialties.map((specialty) => (
-                          <label key={specialty.id} htmlFor={`specialty-${specialty.id}`} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/40">
+                          <label key={specialty.id} htmlFor={`specialty-${specialty.id}`} className="flex min-h-11 min-w-0 max-w-full cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/40">
                             <Checkbox
                               id={`specialty-${specialty.id}`}
                               checked={form.specialtyIds.includes(specialty.id)}
                               disabled={isSaving || isSuspended}
                               onCheckedChange={(checked) => toggleSpecialty(specialty.id, checked === true)}
                             />
-                            <span className="text-sm">{specialty.name}</span>
+                            <span className="min-w-0 break-words text-sm">{specialty.name}</span>
                           </label>
                         ))}
                       </div>
@@ -1619,24 +1767,20 @@ export function ProfessionalProfilePage() {
               )}
               <FieldError id="professional-specialtyIds-error" message={fieldErrors.specialtyIds} />
             </fieldset>
-          </CardContent>
-        </Card>
+          </div>
+        </ProfileBuilderSection>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-start gap-3">
-              <div className="rounded-full bg-primary/10 p-2 text-primary">
-                <Phone className="size-4" aria-hidden="true" />
-              </div>
-              <div>
-                <CardTitle>Contato</CardTitle>
-                <CardDescription className="mt-1">
-                  Informe um telefone com DDD e escolha se ele pode aparecer no perfil publicado.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="grid gap-5">
+        <ProfileBuilderSection
+          id="profile-section-contact"
+          title="Contato e privacidade"
+          description="Informe um telefone com DDD e escolha se ele pode aparecer no perfil publicado."
+          summary={form.contactVisibility === 'PUBLIC' ? 'Telefone visível no perfil público' : 'Dados de contato protegidos'}
+          open={openSections.has('contact')}
+          complete={!publicationErrors.phone && !publicationErrors.contactVisibility}
+          hasError={sectionHasError.contact}
+          onOpenChange={(open) => setSectionOpen('contact', open)}
+        >
+          <div className="grid min-w-0 gap-5">
             <div className="space-y-2">
               <Label htmlFor="professional-phone">Telefone com DDD <span aria-hidden="true">*</span></Label>
               <Input
@@ -1700,24 +1844,25 @@ export function ProfessionalProfilePage() {
               </RadioGroup>
               <FieldError id="professional-contactVisibility-error" message={fieldErrors.contactVisibility} />
             </fieldset>
-          </CardContent>
-        </Card>
+          </div>
+        </ProfileBuilderSection>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-start gap-3">
-              <div className="rounded-full bg-primary/10 p-2 text-primary">
-                <MapPin className="size-4" aria-hidden="true" />
-              </div>
-              <div>
-                <CardTitle>Atendimento</CardTitle>
-                <CardDescription className="mt-1">
-                  Use o CEP para preencher a localização ou selecione UF e município manualmente. Só cidade, UF e área atendida ficam públicas.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="grid gap-5 sm:grid-cols-2">
+        <ProfileBuilderSection
+          id="profile-section-service-area"
+          title="Atendimento"
+          description="Use o CEP para preencher a localização ou selecione UF e município manualmente. Só cidade, UF e área atendida ficam públicas."
+          summary={`${form.baseLocation.city || 'Localização pendente'}${form.baseLocation.stateCode ? `, ${form.baseLocation.stateCode}` : ''}${form.serviceMode === 'RADIUS' && form.serviceRadiusKm ? ` · até ${form.serviceRadiusKm} km` : ''}`}
+          open={openSections.has('service-area')}
+          complete={
+            !publicationErrors.baseLocation &&
+            !publicationErrors.serviceMode &&
+            !publicationErrors.serviceRadiusKm &&
+            !publicationErrors.selectedCities
+          }
+          hasError={sectionHasError['service-area']}
+          onOpenChange={(open) => setSectionOpen('service-area', open)}
+        >
+          <div className="grid min-w-0 gap-5 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="professional-postalCode">CEP (privado)</Label>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -1895,9 +2040,9 @@ export function ProfessionalProfilePage() {
                       aria-label={option.label}
                       className="mt-0.5"
                     />
-                    <span>
+                    <span className="min-w-0">
                       <span className="block text-sm font-semibold">{option.label}</span>
-                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">{option.description}</span>
+                      <span className="mt-1 block break-words text-xs leading-5 text-muted-foreground">{option.description}</span>
                     </span>
                   </label>
                 ))}
@@ -1984,11 +2129,11 @@ export function ProfessionalProfilePage() {
                 {form.selectedCities.length > 0 ? (
                   <ul className="col-span-full flex flex-wrap gap-2" aria-label="Municípios selecionados">
                     {form.selectedCities.map((location) => (
-                      <li key={location.ibgeCode} className="flex min-h-10 items-center gap-2 rounded-full border bg-muted px-3 py-1.5 text-sm">
-                        <span>{location.city}, {location.stateCode}</span>
+                      <li key={location.ibgeCode} className="flex min-h-10 min-w-0 max-w-full items-center gap-2 rounded-2xl border bg-muted px-3 py-1.5 text-sm">
+                        <span className="min-w-0 break-words">{location.city}, {location.stateCode}</span>
                         <button
                           type="button"
-                          className="rounded-full p-1 text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+                          className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
                           aria-label={`Remover ${location.city}`}
                           disabled={isSaving || isSuspended}
                           onClick={() => removeSelectedCity(location.ibgeCode)}
@@ -2028,7 +2173,7 @@ export function ProfessionalProfilePage() {
                     className="flex min-h-14 cursor-pointer items-center gap-3 rounded-md border bg-background p-3 hover:bg-accent/40 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
                   >
                     <RadioGroupItem id={`professional-availability-${value}`} value={value} aria-label={label} />
-                    <span className="text-sm font-medium">{label}</span>
+                    <span className="min-w-0 break-words text-sm font-medium">{label}</span>
                   </label>
                 ))}
               </RadioGroup>
@@ -2053,9 +2198,9 @@ export function ProfessionalProfilePage() {
                 </div>
               ) : null}
             </fieldset>
-          </CardContent>
+          </div>
           {!isSuspended ? (
-            <CardFooter className="flex-col items-stretch border-t pt-5 sm:flex-row sm:flex-wrap">
+            <CardFooter className="-mx-5 -mb-5 mt-5 flex-col items-stretch border-t pt-5 sm:-mx-6 sm:-mb-6 sm:flex-row sm:flex-wrap">
               {submissionError ? (
                 <p
                   id="professional-save-feedback"
@@ -2101,29 +2246,16 @@ export function ProfessionalProfilePage() {
                   <Save aria-hidden="true" /> Salvar pausado
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                className="sm:ml-auto"
-                loading={savingStatus === 'PUBLISHED'}
-                loadingLabel={currentStatus === 'PUBLISHED' ? 'Salvando…' : 'Publicando…'}
-                disabled={isSaving || isImageOperationInProgress}
-                onClick={() => void handleSave('PUBLISHED')}
-              >
-                <Send aria-hidden="true" />
-                {currentStatus === 'PUBLISHED' ? 'Salvar perfil publicado' : currentStatus === 'PAUSED' ? 'Republicar perfil' : 'Publicar perfil'}
-              </Button>
             </CardFooter>
           ) : null}
-        </Card>
-      </form>
+        </ProfileBuilderSection>
+        </form>
 
-      <aside className="space-y-5 lg:sticky lg:top-[calc(var(--app-header-height)+2rem)]">
+        <aside className="hidden min-w-0 space-y-5 xl:sticky xl:top-[calc(var(--app-header-height)+2rem)] xl:block">
+        {profilePreview}
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>Status</CardTitle>
-              <Badge variant={statusVariants[currentStatus]}>{statusLabels[currentStatus]}</Badge>
-            </div>
+            <CardTitle>Checklist de publicação</CardTitle>
             <CardDescription>
               Rascunhos ficam privados. Somente perfis publicados podem aparecer para clientes.
             </CardDescription>
@@ -2184,7 +2316,20 @@ export function ProfessionalProfilePage() {
         <PrivacyNotice title="Dados protegidos">
           CEP, bairro e telefone privado ficam em um documento separado, acessível somente por você e pelo backend autorizado. Rua, número e complemento não são coletados.
         </PrivacyNotice>
-      </aside>
+        </aside>
+      </div>
+
+      <Sheet open={previewOpen} onOpenChange={setPreviewOpen}>
+        <SheetContent side="right" className="min-w-0 overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Prévia do perfil</SheetTitle>
+            <SheetDescription>
+              Somente informações permitidas no perfil público são exibidas.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="min-w-0 pb-[env(safe-area-inset-bottom)]">{profilePreview}</div>
+        </SheetContent>
+      </Sheet>
     </div>,
   )
 }

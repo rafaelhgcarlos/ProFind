@@ -39,7 +39,7 @@ export const DropdownMenuSubContent = React.forwardRef<
   <DropdownMenuPrimitive.SubContent
     ref={ref}
     className={cn(
-      'z-50 min-w-40 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-soft',
+      'z-50 min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-soft sm:min-w-40',
       className,
     )}
     {...props}
@@ -56,7 +56,7 @@ export const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'z-50 min-w-44 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-soft data-[state=closed]:animate-out data-[state=open]:animate-in',
+        'z-50 min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-soft data-[state=closed]:animate-out data-[state=open]:animate-in sm:min-w-44',
         className,
       )}
       {...props}
@@ -74,7 +74,7 @@ export const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex min-h-10 cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:focus:bg-transparent data-[disabled]:focus:text-inherit [&>svg]:size-4',
+      'relative flex min-h-10 min-w-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-2 text-sm break-words outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:focus:bg-transparent data-[disabled]:focus:text-inherit [&>svg]:size-4',
       inset && 'pl-8',
       className,
     )}

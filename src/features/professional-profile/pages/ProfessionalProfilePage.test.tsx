@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -140,6 +140,21 @@ const persistedProfessionalAvatar = {
   altText: 'Profissional em atendimento',
 }
 
+const longAlternativeText =
+  'Instalação elétrica residencial completa com revisão do quadro, identificação dos circuitos e acabamento cuidadoso em todos os ambientes'
+
+const persistedPortfolioImages = Array.from({ length: 3 }, (_, index) => ({
+  provider: 'IMAGEKIT' as const,
+  ownerId: 'user-123',
+  purpose: 'PROFESSIONAL_PORTFOLIO' as const,
+  url: `https://images.example/portfolio-${index + 1}.webp`,
+  providerId: `portfolio-${index + 1}`,
+  createdAt: 200 + index,
+  updatedAt: 200 + index,
+  order: index,
+  altText: `${longAlternativeText} ${index + 1}`,
+}))
+
 describe('ProfessionalProfilePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -206,6 +221,121 @@ describe('ProfessionalProfilePage', () => {
     )
     expect(await screen.findByText(/rascunho salvo/i)).toBeInTheDocument()
     expect(mocks.syncProfessionalProfileStatus).toHaveBeenCalledWith('incomplete')
+  })
+
+  it('recolhe seções, exibe o resumo e preserva os valores ao reabrir', async () => {
+    const user = userEvent.setup()
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    const publicName = await screen.findByLabelText('Nome público *')
+    await user.clear(publicName)
+    await user.type(publicName, 'Marina Eletricista')
+    const presentation = screen.getByRole('button', { name: /Apresentação/ })
+
+    await user.click(presentation)
+
+    expect(presentation).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText(/Marina Eletricista · Título pendente/)).toBeInTheDocument()
+    expect(publicName).not.toBeVisible()
+
+    await user.click(presentation)
+
+    expect(presentation).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByLabelText('Nome público *')).toHaveValue('Marina Eletricista')
+  })
+
+  it('preserva imagens e textos longos ao abrir e fechar o portfólio repetidamente', async () => {
+    mocks.loadProfessionalProfile.mockResolvedValue({
+      ...publishedProfile,
+      profileImage: persistedProfessionalAvatar,
+      portfolioImages: persistedPortfolioImages,
+    })
+    const user = userEvent.setup()
+
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    const portfolio = await screen.findByRole('button', { name: /Portfólio/ })
+    const firstAlternativeText = screen.getByLabelText(
+      'Texto alternativo da imagem 1',
+    )
+    const editedAlternativeText = `${longAlternativeText} após a edição`
+
+    fireEvent.change(firstAlternativeText, {
+      target: { value: editedAlternativeText },
+    })
+
+    portfolio.focus()
+    expect(portfolio).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(portfolio).toHaveAttribute('aria-expanded', 'false')
+    await user.keyboard('{Enter}')
+    expect(portfolio).toHaveAttribute('aria-expanded', 'true')
+
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      await user.click(portfolio)
+      expect(portfolio).toHaveAttribute('aria-expanded', 'false')
+      expect(firstAlternativeText).not.toBeVisible()
+
+      await user.click(portfolio)
+      expect(portfolio).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByLabelText('Texto alternativo da imagem 1')).toHaveValue(
+        editedAlternativeText,
+      )
+    }
+
+    const portfolioFieldset = document.getElementById(
+      'professional-portfolioImages',
+    )
+    expect(portfolioFieldset).toHaveClass('w-full', 'min-w-0', 'max-w-full')
+    expect(screen.getAllByLabelText(/Texto alternativo da imagem/)).toHaveLength(3)
+
+    for (const image of within(portfolioFieldset!).getAllByRole('img')) {
+      expect(image).toHaveClass(
+        'block',
+        'w-full',
+        'min-w-0',
+        'max-w-full',
+        'object-cover',
+      )
+    }
+  })
+
+  it('abre a primeira seção inválida e move o foco para o campo correspondente', async () => {
+    mocks.saveProfessionalProfile.mockRejectedValue(
+      new ProfessionalProfileError(
+        'invalid-profile',
+        'Complete os campos obrigatórios antes de publicar o perfil.',
+        { categoryIds: 'Selecione ao menos uma categoria para publicar.' },
+      ),
+    )
+    const user = userEvent.setup()
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    await screen.findByLabelText('Nome público *')
+    const services = screen.getByRole('button', { name: /Serviços/ })
+    await user.click(services)
+    expect(services).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(screen.getByRole('button', { name: 'Publicar perfil' }))
+
+    await screen.findByText('Selecione ao menos uma categoria para publicar.')
+    expect(services).toHaveAttribute('aria-expanded', 'true')
+    await waitFor(() => expect(document.getElementById('professional-categoryIds')).toHaveFocus())
+  })
+
+  it('mantém dados privados fora da prévia pública', async () => {
+    mocks.loadProfessionalProfile.mockResolvedValue(publishedProfile)
+    const user = userEvent.setup()
+    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+
+    await screen.findByLabelText('Nome público *')
+    await user.click(screen.getByRole('button', { name: 'Ver prévia' }))
+
+    const previewDialog = await screen.findByRole('dialog', { name: 'Prévia do perfil' })
+    expect(within(previewDialog).getByText('Marina Souza')).toBeInTheDocument()
+    expect(within(previewDialog).queryByText('(11) 99999-8888')).not.toBeInTheDocument()
+    expect(within(previewDialog).queryByText('13083-852')).not.toBeInTheDocument()
+    expect(within(previewDialog).queryByText('Cidade Universitária')).not.toBeInTheDocument()
   })
 
   it('apresenta erros por campo quando a publicação é inválida', async () => {

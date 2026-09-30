@@ -125,7 +125,7 @@ export function HomePage() {
       </section>
 
       <section className="border-y bg-card">
-        <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[0.75fr_1fr] lg:items-center lg:gap-20 lg:px-8">
+        <div className="mx-auto grid min-w-0 max-w-7xl gap-8 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1fr)] lg:items-center lg:gap-20 lg:px-8">
           <div><Badge variant="secondary"><ShieldCheck className="size-3.5" aria-hidden="true" />Confiança em cada etapa</Badge><h2 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">Uma escolha melhor começa com clareza.</h2><p className="mt-4 leading-7 text-muted-foreground">O ProFind está construindo uma experiência para aproximar necessidades e profissionais, com informações úteis para você decidir no seu tempo.</p></div>
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="border-t pt-5"><LockKeyhole className="size-6 text-primary" aria-hidden="true" /><h3 className="mt-4 font-bold">Sua conta é privada</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Seu acesso é protegido; seus dados de contato não viram um perfil público ao se cadastrar.</p></div>

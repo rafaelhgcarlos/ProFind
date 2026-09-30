@@ -11,7 +11,7 @@ export const SheetTrigger = DialogPrimitive.Trigger
 export const SheetClose = DialogPrimitive.Close
 
 const sheetVariants = cva(
-  'fixed z-50 flex flex-col gap-4 bg-card p-5 text-card-foreground shadow-soft transition data-[state=closed]:animate-out data-[state=open]:animate-in sm:p-6',
+  'fixed z-50 flex min-w-0 max-w-full flex-col gap-4 overflow-x-clip bg-card p-5 text-card-foreground shadow-soft transition data-[state=closed]:animate-out data-[state=open]:animate-in sm:p-6',
   {
     variants: {
       side: {

@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { PropsWithChildren, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 
 import { cn } from '../../utils/cn'
@@ -89,8 +90,36 @@ export function AuthenticatedLayout({
     .join('')
     .toUpperCase()
 
+  const mobileNavigation = (
+    <nav
+      aria-label={`${modeLabels[mode]} — navegação mobile`}
+      className="fixed right-0 bottom-0 left-0 z-40 grid min-h-16 min-w-0 overflow-hidden border-t bg-card/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
+      style={{ gridTemplateColumns: `repeat(${navigation.length}, minmax(0, 1fr))` }}
+    >
+      {navigation.map((item) => {
+        const active = isNavigationItemActive(activePathname, item.href)
+        const Icon = item.icon
+        return (
+          <Link
+            key={item.href}
+            to={item.href}
+            aria-current={active ? 'page' : undefined}
+            className={cn(
+              'relative flex min-h-16 min-w-0 max-w-full cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
+              active && 'bg-accent text-accent-foreground after:absolute after:top-0 after:h-0.5 after:w-8 after:rounded-full after:bg-primary',
+            )}
+          >
+            <Icon className="size-5" aria-hidden="true" />
+            <span className="max-w-full truncate">{item.label}</span>
+          </Link>
+        )
+      })}
+    </nav>
+  )
+
   return (
-    <div className="min-h-dvh bg-background text-foreground lg:grid lg:grid-cols-[16rem_1fr]">
+    <>
+      <div className="min-h-dvh w-full min-w-0 max-w-full overflow-x-clip bg-background text-foreground lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]">
       <a
         href="#conteudo-principal"
         className="sr-only z-[100] rounded-md bg-primary px-4 py-3 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -132,19 +161,19 @@ export function AuthenticatedLayout({
         </nav>
       </aside>
 
-      <div className="min-w-0 pb-20 lg:pb-0">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 backdrop-blur-md sm:px-6 lg:h-18 lg:px-8">
+      <div className="min-w-0 max-w-full pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-0">
+        <header className="sticky top-0 z-30 flex h-16 min-w-0 max-w-full items-center justify-between border-b bg-card/95 px-4 backdrop-blur-md sm:px-6 lg:h-18 lg:px-8">
           <div className="lg:hidden">
             <Brand compact />
           </div>
-          <div className="hidden lg:block">
+          <div className="hidden min-w-0 lg:block">
             <p className="text-xs font-medium text-muted-foreground">{modeLabels[mode]}</p>
-            <h1 className="font-bold">{pageTitle}</h1>
+            <h1 className="break-words font-bold">{pageTitle}</h1>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex min-w-0 items-center gap-2">
             {contextSwitcher}
             <ThemeToggle />
-            <div className="hidden text-right sm:block">
+            <div className="hidden min-w-0 text-right sm:block">
               <p className="max-w-48 truncate text-sm font-semibold">{userName}</p>
               <p className="text-xs text-muted-foreground">Conta ativa</p>
             </div>
@@ -169,36 +198,17 @@ export function AuthenticatedLayout({
           </div>
         </header>
 
-        <main id="conteudo-principal" className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main id="conteudo-principal" className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <h1 className="mb-6 text-2xl font-bold tracking-tight lg:hidden">{pageTitle}</h1>
           {children}
         </main>
       </div>
 
-      <nav
-        aria-label={`${modeLabels[mode]} — navegação mobile`}
-        className="fixed inset-x-0 bottom-0 z-40 grid min-h-16 border-t bg-card/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
-        style={{ gridTemplateColumns: `repeat(${navigation.length}, minmax(0, 1fr))` }}
-      >
-        {navigation.map((item) => {
-          const active = isNavigationItemActive(activePathname, item.href)
-          const Icon = item.icon
-          return (
-            <Link
-              key={item.href}
-              to={item.href}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'relative flex min-h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
-                active && 'bg-accent text-accent-foreground after:absolute after:top-0 after:h-0.5 after:w-8 after:rounded-full after:bg-primary',
-              )}
-            >
-              <Icon className="size-5" aria-hidden="true" />
-              <span className="max-w-full truncate">{item.label}</span>
-            </Link>
-          )
-        })}
-      </nav>
-    </div>
+      </div>
+
+      {typeof document === 'undefined'
+        ? mobileNavigation
+        : createPortal(mobileNavigation, document.body)}
+    </>
   )
 }

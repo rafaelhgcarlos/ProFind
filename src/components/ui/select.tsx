@@ -15,7 +15,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex min-h-11 w-full cursor-pointer items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:outline-none focus:ring-[3px] focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground [&>span]:line-clamp-1',
+      'flex min-h-11 w-full min-w-0 max-w-full cursor-pointer items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:outline-none focus:ring-[3px] focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground [&>span]:min-w-0 [&>span]:line-clamp-1',
       className,
     )}
     {...props}
@@ -36,7 +36,7 @@ export const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'relative z-50 max-h-80 min-w-36 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-soft data-[state=closed]:animate-out data-[state=open]:animate-in',
+        'relative z-50 max-h-80 min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-soft data-[state=closed]:animate-out data-[state=open]:animate-in',
         position === 'popper' &&
           'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
         className,
@@ -51,7 +51,7 @@ export const SelectContent = React.forwardRef<
         className={cn(
           'p-1',
           position === 'popper' &&
-            'w-full min-w-[var(--radix-select-trigger-width)]',
+            'w-full min-w-0 max-w-[calc(100vw-1rem)] sm:min-w-[var(--radix-select-trigger-width)]',
         )}
       >
         {children}
@@ -83,7 +83,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex min-h-10 w-full cursor-pointer select-none items-center rounded-sm py-2 pr-8 pl-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:focus:bg-transparent data-[disabled]:focus:text-inherit',
+      'relative flex min-h-10 w-full min-w-0 cursor-pointer select-none items-center rounded-sm py-2 pr-8 pl-2 text-sm break-words outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:focus:bg-transparent data-[disabled]:focus:text-inherit',
       className,
     )}
     {...props}
