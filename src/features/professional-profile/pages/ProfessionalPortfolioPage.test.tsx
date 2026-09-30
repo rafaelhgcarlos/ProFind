@@ -293,7 +293,7 @@ describe('ProfessionalPortfolioPage', () => {
     })
   })
 
-  it('respeita o limite de três imagens e mantém a grade sem largura rígida', async () => {
+  it('respeita o limite de três imagens e isola a largura intrínseca das imagens', async () => {
     mocks.loadProfessionalProfile.mockResolvedValue({
       ...profile,
       portfolioImages: [portfolioImage(1), portfolioImage(2), portfolioImage(3)],
@@ -306,7 +306,13 @@ describe('ProfessionalPortfolioPage', () => {
     for (const image of screen.getAllByRole('img')) {
       expect(image).toHaveClass('block', 'w-full', 'max-w-full', 'object-cover')
     }
-    const grid = screen.getAllByRole('article')[0].parentElement
-    expect(grid?.className).toContain('grid-cols-[minmax(0,1fr)]')
+    const articles = screen.getAllByRole('article')
+    const grid = articles[0].parentElement
+    expect(grid?.className).toContain(
+      'grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))]',
+    )
+    for (const article of articles) {
+      expect(article.className).toContain('[contain:inline-size]')
+    }
   })
 })

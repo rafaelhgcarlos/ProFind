@@ -144,7 +144,7 @@ export function AuthenticatedLayout({
 
   return (
     <>
-      <div className="min-h-dvh w-full min-w-0 max-w-full overflow-x-clip bg-background text-foreground lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]">
+      <div className="min-h-dvh w-full min-w-0 max-w-full overflow-x-clip bg-background text-foreground lg:grid lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
       <a
         href="#conteudo-principal"
         className="sr-only z-[100] rounded-md bg-primary px-4 py-3 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -206,7 +206,7 @@ export function AuthenticatedLayout({
         ) : null}
       </aside>
 
-      <div className="min-w-0 max-w-full pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-0">
+      <div className="w-full min-w-0 max-w-full pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-0">
         <header className="sticky top-0 z-30 flex h-16 min-w-0 max-w-full items-center justify-between border-b bg-card/95 px-4 backdrop-blur-md sm:px-6 lg:h-18 lg:px-8">
           <div className="lg:hidden">
             <Brand compact />

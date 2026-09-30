@@ -116,6 +116,9 @@ describe('layouts autenticados', () => {
     expect(view.container.querySelector('#conteudo-principal')?.parentElement).toHaveClass(
       'pb-[calc(5rem+env(safe-area-inset-bottom))]',
     )
+    expect(view.container.firstElementChild?.className).toContain(
+      'lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]',
+    )
   })
 
   it.each([

@@ -132,7 +132,7 @@ function UploadTaskStatus({
   onDiscard: () => void
 }) {
   return (
-    <div className="grid w-full min-w-0 max-w-full gap-3 overflow-hidden rounded-lg border bg-muted/20 p-3 sm:grid-cols-[5rem_minmax(0,1fr)]" aria-live="polite">
+    <div className="grid w-full min-w-0 max-w-full gap-3 overflow-hidden rounded-lg border bg-muted/20 p-3 [contain:inline-size] sm:grid-cols-[5rem_minmax(0,1fr)]" aria-live="polite">
       {task.previewUrl ? (
         <img
           src={task.previewUrl}
@@ -670,9 +670,9 @@ export function ProfessionalPortfolioPage() {
               />
             </div>
           ) : (
-            <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-5 md:grid-cols-[repeat(2,minmax(0,1fr))] xl:grid-cols-[repeat(3,minmax(0,1fr))]">
+            <div className="grid w-full min-w-0 max-w-full grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-5">
               {images.map((image, index) => (
-                <article key={image.providerId} className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border bg-card">
+                <article key={image.providerId} className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border bg-card [contain:inline-size]">
                   <img
                     src={previewFor(image)}
                     alt={image.altText || `Prévia da imagem ${index + 1} do portfólio`}
