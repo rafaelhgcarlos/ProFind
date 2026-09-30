@@ -1,7 +1,13 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { User } from 'firebase/auth'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
+import {
+  AuthenticationContext,
+  type AuthenticationContextValue,
+} from '../../features/auth/auth-context'
 import {
   ProfileContext,
   type ProfileContextValue,
@@ -24,11 +30,32 @@ vi.mock('../ui/avatar', () => ({
   ),
 }))
 
-function renderLayout(path: string, layout: React.ReactNode) {
-  return render(
+function renderLayout(
+  path: string,
+  layout: React.ReactNode,
+  authOverrides?: Partial<AuthenticationContextValue>,
+) {
+  const auth: AuthenticationContextValue = {
+    status: 'authenticated',
+    user: { uid: 'user-123', email: 'marina@example.com' } as User,
+    sessionError: null,
+    login: vi.fn(),
+    logout: vi.fn().mockResolvedValue(undefined),
+    requestPasswordReset: vi.fn(),
+    retrySession: vi.fn(),
+    ...authOverrides,
+  }
+  const content = (
     <ThemeProvider>
       <MemoryRouter initialEntries={[path]}>{layout}</MemoryRouter>
-    </ThemeProvider>,
+    </ThemeProvider>
+  )
+  return render(
+    authOverrides ? (
+      <AuthenticationContext.Provider value={auth}>
+        {content}
+      </AuthenticationContext.Provider>
+    ) : content,
   )
 }
 
@@ -89,6 +116,55 @@ describe('layouts autenticados', () => {
     expect(view.container.querySelector('#conteudo-principal')?.parentElement).toHaveClass(
       'pb-[calc(5rem+env(safe-area-inset-bottom))]',
     )
+  })
+
+  it.each([
+    ['Cliente', '/cliente', <ClientLayout pageTitle="Início">Página longa</ClientLayout>],
+    ['Profissional', '/profissional', <ProfessionalLayout pageTitle="Início">Página longa</ProfessionalLayout>],
+    ['Ambos', '/profissional/perfil', <ProfessionalLayout pageTitle="Perfil">Página longa</ProfessionalLayout>],
+  ])('executa logout pela sidebar desktop para conta %s', async (_role, path, layout) => {
+    const logout = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    renderLayout(path, layout, { logout })
+
+    await user.click(screen.getByRole('button', { name: 'Sair' }))
+
+    expect(logout).toHaveBeenCalledOnce()
+  })
+
+  it('executa logout pelo menu da conta mobile e fecha o menu', async () => {
+    const logout = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    renderLayout(
+      '/profissional/portfolio',
+      <ProfessionalLayout pageTitle="Portfólio">Página longa</ProfessionalLayout>,
+      { logout },
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: /Abrir menu da conta/i }),
+    )
+    await user.click(screen.getByRole('menuitem', { name: 'Sair' }))
+
+    expect(logout).toHaveBeenCalledOnce()
+    await waitFor(() =>
+      expect(screen.queryByRole('menuitem', { name: 'Sair' })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('mantém o logout recuperável quando o fluxo existente falha', async () => {
+    const logout = vi.fn().mockRejectedValue(new Error('Falha temporária ao sair.'))
+    const user = userEvent.setup()
+    renderLayout(
+      '/cliente',
+      <ClientLayout pageTitle="Início">Conteúdo</ClientLayout>,
+      { logout },
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Sair' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Falha temporária ao sair.')
+    expect(screen.getByRole('button', { name: 'Sair' })).toBeEnabled()
   })
 
   it('mantém uma estrutura de navegação administrativa separada', () => {

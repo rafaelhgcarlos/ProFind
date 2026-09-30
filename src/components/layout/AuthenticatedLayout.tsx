@@ -3,6 +3,7 @@ import {
   ClipboardList,
   Compass,
   Home,
+  LogOut,
   MessageCircle,
   Search,
   Settings,
@@ -11,14 +12,16 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react'
-import type { PropsWithChildren, ReactNode } from 'react'
+import { useContext, useState, type PropsWithChildren, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 
+import { AuthenticationContext } from '../../features/auth/auth-context'
 import { cn } from '../../utils/cn'
 import { Brand } from '../brand/Brand'
 import { ThemeToggle } from '../theme/ThemeToggle'
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
+import { Button } from '../ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu'
 
 export interface LayoutNavigationItem {
@@ -82,6 +85,10 @@ export function AuthenticatedLayout({
   children,
 }: AuthenticatedLayoutProps) {
   const location = useLocation()
+  const authentication = useContext(AuthenticationContext)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const activePathname = activeNavigationHref ?? location.pathname
   const initials = userName
     .split(' ')
@@ -89,6 +96,24 @@ export function AuthenticatedLayout({
     .map((name) => name[0])
     .join('')
     .toUpperCase()
+
+  async function handleLogout() {
+    if (!authentication || isLoggingOut) return
+    setIsLoggingOut(true)
+    setLogoutError(null)
+    try {
+      await authentication.logout()
+      setAccountMenuOpen(false)
+    } catch (error) {
+      setLogoutError(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível sair agora. Tente novamente.',
+      )
+    } finally {
+      setIsLoggingOut(false)
+    }
+  }
 
   const mobileNavigation = (
     <nav
@@ -159,6 +184,26 @@ export function AuthenticatedLayout({
             )
           })}
         </nav>
+        {authentication?.status === 'authenticated' ? (
+          <div className="mt-auto border-t p-3">
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full justify-start"
+              loading={isLoggingOut}
+              loadingLabel="Saindo…"
+              disabled={isLoggingOut}
+              onClick={() => void handleLogout()}
+            >
+              <LogOut aria-hidden="true" /> Sair
+            </Button>
+            {logoutError ? (
+              <p role="alert" className="mt-2 break-words px-3 text-sm text-destructive">
+                {logoutError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </aside>
 
       <div className="min-w-0 max-w-full pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-0">
@@ -180,7 +225,7 @@ export function AuthenticatedLayout({
             {mode === 'admin' ? (
               <Avatar><AvatarFallback aria-label={userName}>{initials}</AvatarFallback></Avatar>
             ) : (
-              <DropdownMenu>
+              <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <button type="button" aria-label={`Abrir menu da conta de ${userName}`} className="rounded-full focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30">
                     <Avatar className="border border-primary/20">
@@ -192,6 +237,24 @@ export function AuthenticatedLayout({
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel className="max-w-48 truncate">{userName}</DropdownMenuLabel>
                   <DropdownMenuItem asChild><Link to="/conta">Ir para minha área</Link></DropdownMenuItem>
+                  {authentication?.status === 'authenticated' ? (
+                    <DropdownMenuItem
+                      className="min-h-11"
+                      disabled={isLoggingOut}
+                      onSelect={(event) => {
+                        event.preventDefault()
+                        void handleLogout()
+                      }}
+                    >
+                      <LogOut aria-hidden="true" />
+                      {isLoggingOut ? 'Saindo…' : 'Sair'}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {logoutError ? (
+                    <p role="alert" className="max-w-64 break-words px-2 py-2 text-sm text-destructive">
+                      {logoutError}
+                    </p>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}

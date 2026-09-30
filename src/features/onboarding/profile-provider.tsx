@@ -120,6 +120,7 @@ export function ProfileProvider({ children }: PropsWithChildren) {
   }, [])
 
   useEffect(() => {
+    let resetTimer: ReturnType<typeof setTimeout> | undefined
     if (authenticationStatus === 'authenticated' && user) {
       const sequence = ++requestSequence.current
       const userId = user.uid
@@ -146,9 +147,13 @@ export function ProfileProvider({ children }: PropsWithChildren) {
             })
           }
         })
+    } else {
+      requestSequence.current += 1
+      resetTimer = setTimeout(() => setState(initialState), 0)
     }
 
     return () => {
+      if (resetTimer !== undefined) clearTimeout(resetTimer)
       requestSequence.current += 1
     }
   }, [authenticationStatus, user])

@@ -158,6 +158,14 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
+  it('protege a rota exclusiva do portfólio profissional', async () => {
+    renderRoute('/profissional/portfolio')
+
+    expect(
+      await screen.findByRole('heading', { name: /entre no profind/i }),
+    ).toBeInTheDocument()
+  })
+
   it('renderiza o catálogo do design system', async () => {
     renderRoute('/design-system')
 

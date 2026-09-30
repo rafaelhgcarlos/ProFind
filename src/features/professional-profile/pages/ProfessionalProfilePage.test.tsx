@@ -155,6 +155,28 @@ const persistedPortfolioImages = Array.from({ length: 3 }, (_, index) => ({
   altText: `${longAlternativeText} ${index + 1}`,
 }))
 
+async function renderProfile(openSections = true) {
+  const view = render(
+    <MemoryRouter>
+      <ProfessionalProfilePage />
+    </MemoryRouter>,
+  )
+  await screen.findByRole('button', { name: /Apresentação/ })
+  if (openSections) {
+    for (const name of [
+      /Apresentação/,
+      /Foto de perfil/,
+      /Serviços/,
+      /Contato e privacidade/,
+      /Atendimento/,
+    ]) {
+      const trigger = screen.getByRole('button', { name })
+      if (trigger.getAttribute('aria-expanded') === 'false') fireEvent.click(trigger)
+    }
+  }
+  return view
+}
+
 describe('ProfessionalProfilePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -204,7 +226,7 @@ describe('ProfessionalProfilePage', () => {
     })
     const user = userEvent.setup()
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     expect(await screen.findByLabelText('Nome público *')).toHaveValue('Marina Souza')
     expect(screen.getByRole('checkbox', { name: 'Construção Civil' })).toBeInTheDocument()
@@ -225,12 +247,25 @@ describe('ProfessionalProfilePage', () => {
 
   it('recolhe seções, exibe o resumo e preserva os valores ao reabrir', async () => {
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile(false)
 
-    const publicName = await screen.findByLabelText('Nome público *')
+    for (const section of [
+      /Apresentação/,
+      /Foto de perfil/,
+      /Serviços/,
+      /Contato e privacidade/,
+      /Atendimento/,
+    ]) {
+      expect(screen.getByRole('button', { name: section })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      )
+    }
+    const presentation = screen.getByRole('button', { name: /Apresentação/ })
+    await user.click(presentation)
+    const publicName = screen.getByLabelText('Nome público *')
     await user.clear(publicName)
     await user.type(publicName, 'Marina Eletricista')
-    const presentation = screen.getByRole('button', { name: /Apresentação/ })
 
     await user.click(presentation)
 
@@ -244,60 +279,21 @@ describe('ProfessionalProfilePage', () => {
     expect(screen.getByLabelText('Nome público *')).toHaveValue('Marina Eletricista')
   })
 
-  it('preserva imagens e textos longos ao abrir e fechar o portfólio repetidamente', async () => {
+  it('exibe o card compacto do portfólio com a contagem real e navegação', async () => {
     mocks.loadProfessionalProfile.mockResolvedValue({
       ...publishedProfile,
       profileImage: persistedProfessionalAvatar,
       portfolioImages: persistedPortfolioImages,
     })
-    const user = userEvent.setup()
+    await renderProfile(false)
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
-
-    const portfolio = await screen.findByRole('button', { name: /Portfólio/ })
-    const firstAlternativeText = screen.getByLabelText(
-      'Texto alternativo da imagem 1',
+    expect(screen.getByText('3 de 3 imagens')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Portfólio/ })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Texto alternativo da imagem/)).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Gerenciar portfólio' })).toHaveAttribute(
+      'href',
+      '/profissional/portfolio',
     )
-    const editedAlternativeText = `${longAlternativeText} após a edição`
-
-    fireEvent.change(firstAlternativeText, {
-      target: { value: editedAlternativeText },
-    })
-
-    portfolio.focus()
-    expect(portfolio).toHaveFocus()
-    await user.keyboard('{Enter}')
-    expect(portfolio).toHaveAttribute('aria-expanded', 'false')
-    await user.keyboard('{Enter}')
-    expect(portfolio).toHaveAttribute('aria-expanded', 'true')
-
-    for (let cycle = 0; cycle < 2; cycle += 1) {
-      await user.click(portfolio)
-      expect(portfolio).toHaveAttribute('aria-expanded', 'false')
-      expect(firstAlternativeText).not.toBeVisible()
-
-      await user.click(portfolio)
-      expect(portfolio).toHaveAttribute('aria-expanded', 'true')
-      expect(screen.getByLabelText('Texto alternativo da imagem 1')).toHaveValue(
-        editedAlternativeText,
-      )
-    }
-
-    const portfolioFieldset = document.getElementById(
-      'professional-portfolioImages',
-    )
-    expect(portfolioFieldset).toHaveClass('w-full', 'min-w-0', 'max-w-full')
-    expect(screen.getAllByLabelText(/Texto alternativo da imagem/)).toHaveLength(3)
-
-    for (const image of within(portfolioFieldset!).getAllByRole('img')) {
-      expect(image).toHaveClass(
-        'block',
-        'w-full',
-        'min-w-0',
-        'max-w-full',
-        'object-cover',
-      )
-    }
   })
 
   it('abre a primeira seção inválida e move o foco para o campo correspondente', async () => {
@@ -305,28 +301,32 @@ describe('ProfessionalProfilePage', () => {
       new ProfessionalProfileError(
         'invalid-profile',
         'Complete os campos obrigatórios antes de publicar o perfil.',
-        { categoryIds: 'Selecione ao menos uma categoria para publicar.' },
+        {
+          categoryIds: 'Selecione ao menos uma categoria para publicar.',
+          phone: 'Informe um telefone com DDD para publicar.',
+        },
       ),
     )
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile(false)
 
-    await screen.findByLabelText('Nome público *')
     const services = screen.getByRole('button', { name: /Serviços/ })
-    await user.click(services)
+    const contact = screen.getByRole('button', { name: /Contato e privacidade/ })
     expect(services).toHaveAttribute('aria-expanded', 'false')
+    expect(contact).toHaveAttribute('aria-expanded', 'false')
 
     await user.click(screen.getByRole('button', { name: 'Publicar perfil' }))
 
     await screen.findByText('Selecione ao menos uma categoria para publicar.')
     expect(services).toHaveAttribute('aria-expanded', 'true')
+    expect(contact).toHaveAttribute('aria-expanded', 'false')
     await waitFor(() => expect(document.getElementById('professional-categoryIds')).toHaveFocus())
   })
 
   it('mantém dados privados fora da prévia pública', async () => {
     mocks.loadProfessionalProfile.mockResolvedValue(publishedProfile)
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     await screen.findByLabelText('Nome público *')
     await user.click(screen.getByRole('button', { name: 'Ver prévia' }))
@@ -350,7 +350,7 @@ describe('ProfessionalProfilePage', () => {
     )
     const user = userEvent.setup()
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
     await screen.findByLabelText('Nome público *')
     await user.click(screen.getByRole('button', { name: 'Publicar perfil' }))
 
@@ -372,7 +372,7 @@ describe('ProfessionalProfilePage', () => {
     )
     const user = userEvent.setup()
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
     await screen.findByLabelText('Nome público *')
     await user.click(screen.getByRole('button', { name: 'Salvar rascunho' }))
 
@@ -388,7 +388,7 @@ describe('ProfessionalProfilePage', () => {
   })
 
   it('apresenta a descrição como opcional e fora do checklist de publicação', async () => {
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     const description = await screen.findByLabelText('Descrição')
 
@@ -399,7 +399,7 @@ describe('ProfessionalProfilePage', () => {
 
   it('valida a imagem antes do envio sem apagar os outros campos', async () => {
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     const publicName = await screen.findByLabelText('Nome público *')
     fireEvent.change(publicName, { target: { value: 'Nome preservado' } })
@@ -423,7 +423,7 @@ describe('ProfessionalProfilePage', () => {
       }),
     )
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     const publicName = await screen.findByLabelText('Nome público *')
     fireEvent.change(publicName, { target: { value: 'Nome preservado' } })
@@ -482,11 +482,7 @@ describe('ProfessionalProfilePage', () => {
       profileImage: persistedProfessionalAvatar,
     })
 
-    const firstView = render(
-      <MemoryRouter>
-        <ProfessionalProfilePage />
-      </MemoryRouter>,
-    )
+    const firstView = await renderProfile()
 
     expect(
       await screen.findByRole('img', {
@@ -495,11 +491,7 @@ describe('ProfessionalProfilePage', () => {
     ).toHaveAttribute('src', persistedProfessionalAvatar.url)
 
     firstView.unmount()
-    render(
-      <MemoryRouter>
-        <ProfessionalProfilePage />
-      </MemoryRouter>,
-    )
+    await renderProfile()
 
     expect(
       await screen.findByRole('img', {
@@ -523,11 +515,7 @@ describe('ProfessionalProfilePage', () => {
     )
     const user = userEvent.setup()
 
-    render(
-      <MemoryRouter>
-        <ProfessionalProfilePage />
-      </MemoryRouter>,
-    )
+    await renderProfile()
 
     await user.upload(
       await screen.findByLabelText(/trocar foto de perfil/i),
@@ -584,11 +572,7 @@ describe('ProfessionalProfilePage', () => {
     )
     const user = userEvent.setup()
 
-    render(
-      <MemoryRouter>
-        <ProfessionalProfilePage />
-      </MemoryRouter>,
-    )
+    await renderProfile()
 
     await user.upload(
       await screen.findByLabelText(/trocar foto de perfil/i),
@@ -631,11 +615,7 @@ describe('ProfessionalProfilePage', () => {
     mocks.imageRemove.mockRejectedValueOnce(new Error('provider offline'))
     const user = userEvent.setup()
 
-    render(
-      <MemoryRouter>
-        <ProfessionalProfilePage />
-      </MemoryRouter>,
-    )
+    await renderProfile()
 
     await user.upload(
       await screen.findByLabelText(/trocar foto de perfil/i),
@@ -671,11 +651,7 @@ describe('ProfessionalProfilePage', () => {
     )
     const user = userEvent.setup()
 
-    render(
-      <MemoryRouter>
-        <ProfessionalProfilePage />
-      </MemoryRouter>,
-    )
+    await renderProfile()
 
     await user.click(await screen.findByRole('button', { name: /remover foto/i }))
     expect(mocks.imagePrepareRemoval).toHaveBeenCalledWith({
@@ -721,7 +697,7 @@ describe('ProfessionalProfilePage', () => {
     mocks.saveProfessionalProfile.mockRejectedValueOnce(new Error('Falha ao salvar'))
     const user = userEvent.setup()
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     await user.click(await screen.findByRole('button', { name: /remover foto/i }))
     await user.click(screen.getByRole('button', { name: 'Voltar para rascunho' }))
@@ -736,7 +712,7 @@ describe('ProfessionalProfilePage', () => {
   it('carrega os dados para edição e oferece pausar um perfil publicado', async () => {
     mocks.loadProfessionalProfile.mockResolvedValue(publishedProfile)
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     expect(await screen.findByDisplayValue('Eletricista residencial')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Campinas')).toBeInTheDocument()
@@ -754,7 +730,7 @@ describe('ProfessionalProfilePage', () => {
       status: 'SUSPENDED',
     })
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     expect(await screen.findByText('Perfil suspenso')).toBeInTheDocument()
     expect(screen.getByLabelText('Nome público *')).toBeDisabled()
@@ -769,7 +745,7 @@ describe('ProfessionalProfilePage', () => {
     })
     const user = userEvent.setup()
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     await user.click(
       await screen.findByRole('button', { name: 'Voltar para rascunho' }),
@@ -798,7 +774,7 @@ describe('ProfessionalProfilePage', () => {
 
   it('alterna dinamicamente entre raio e atendimento somente na cidade', async () => {
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     await screen.findByLabelText('Nome público *')
     expect(
@@ -825,7 +801,7 @@ describe('ProfessionalProfilePage', () => {
 
   it('consulta o ViaCEP após oito dígitos e permite corrigir a localização', async () => {
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     const postalCode = await screen.findByLabelText('CEP (privado)')
     await user.type(postalCode, '13083852')
@@ -848,7 +824,7 @@ describe('ProfessionalProfilePage', () => {
       ),
     )
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     const postalCode = await screen.findByLabelText('CEP (privado)')
     await user.type(postalCode, '13083852')
@@ -867,7 +843,7 @@ describe('ProfessionalProfilePage', () => {
       availability: 'LIMITED',
     })
     const user = userEvent.setup()
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     await user.click(
       await screen.findByRole('radio', { name: 'Agenda limitada' }),
@@ -894,7 +870,7 @@ describe('ProfessionalProfilePage', () => {
       status: 'DRAFT',
     })
 
-    render(<MemoryRouter><ProfessionalProfilePage /></MemoryRouter>)
+    await renderProfile()
 
     expect(
       await screen.findByText('Escolha uma nova modalidade de atendimento'),

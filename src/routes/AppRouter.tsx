@@ -71,6 +71,12 @@ const ProfessionalProfilePage = lazy(() =>
   ),
 )
 
+const ProfessionalPortfolioPage = lazy(() =>
+  import('../features/professional-profile/pages/ProfessionalPortfolioPage').then(
+    (module) => ({ default: module.ProfessionalPortfolioPage }),
+  ),
+)
+
 const ClientProfilePage = lazy(() =>
   import('../features/client-profile/pages/ClientProfilePage').then(
     (module) => ({ default: module.ClientProfilePage }),
@@ -171,6 +177,14 @@ export function AppRouter() {
               element={
                 <Suspense fallback={<RouteFallback />}>
                   <ProfessionalProfilePage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/profissional/portfolio"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ProfessionalPortfolioPage />
                 </Suspense>
               }
             />

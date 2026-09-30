@@ -132,6 +132,12 @@ Os layouts autenticados seguem o modo ativo: o header do Cliente lê somente
 perfil profissional é recarregado ao entrar nesse modo e sincronizado no
 contexto logo após uma gravação bem-sucedida.
 
+Na interface profissional, `/profissional/perfil` gerencia exclusivamente
+`PROFESSIONAL_AVATAR`. O portfólio é carregado sob demanda pela rota protegida
+`/profissional/portfolio`, que usa exclusivamente `PROFESSIONAL_PORTFOLIO` para
+upload, retry, substituição e remoção. O card de acesso no perfil lê somente a
+quantidade persistida e não monta os controles de upload do portfólio.
+
 ## Validação, transformação e persistência
 
 Frontend e Worker aceitam JPEG, PNG ou WebP e limitam cada arquivo a 5 MB. O
@@ -142,9 +148,10 @@ O payload assinado também contém checks de tipo e tamanho. Avatares recebem
 pré-transformação com orientação automática, WebP, qualidade 80 e limite
 aproximado de 512 × 512. Portfólio usa WebP otimizado e limite maior.
 
-O preview usa `blob:` somente enquanto o arquivo local aguarda upload ou retry.
-Assim que o provider retorna, o preview é revogado e a interface renderiza a URL
-HTTPS real. `blob:`, data URL, `providerId` vazio, provider incompatível e
+O preview usa `blob:` somente enquanto o arquivo local aguarda upload, retry ou
+a confirmação da gravação. Ele é revogado ao salvar, descartar ou desmontar a
+tela; somente a URL HTTPS retornada pelo provider entra no payload persistido.
+`blob:`, data URL, `providerId` vazio, provider incompatível e
 timestamps inválidos são recusados antes do repository.
 
 O Firestore recebe somente:
@@ -177,6 +184,11 @@ Worker valida UID, finalidade e `providerId` e emite um grant curto de remoção
 Após salvar a nova referência, esse grant autoriza apagar somente o arquivo
 anterior. Uma falha de limpeza preserva a nova referência e permite retry sem
 desfazer a imagem já salva.
+
+A página de portfólio aplica a mesma ordem segura: mantém as imagens persistidas
+durante falhas de upload, grava a nova seleção no perfil e só depois solicita a
+remoção dos arquivos substituídos ou excluídos. Falhas de limpeza não desfazem a
+seleção salva e oferecem nova tentativa.
 
 Na remoção explícita dos avatares de cliente e profissional, o fluxo também é
 transacional em duas etapas. `prepareRemoval` pede ao Worker um grant curto

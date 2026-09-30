@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
@@ -128,24 +129,16 @@ interface ProfessionalProfileFormState {
 
 type ProfileSectionId =
   | 'presentation'
-  | 'portfolio'
+  | 'profile-photo'
   | 'services'
   | 'contact'
   | 'service-area'
-
-const profileSectionIds: ProfileSectionId[] = [
-  'presentation',
-  'services',
-  'service-area',
-  'contact',
-  'portfolio',
-]
 
 function profileSectionForField(field: string): ProfileSectionId | null {
   if (['publicName', 'headline', 'bio', 'experienceYears'].includes(field)) {
     return 'presentation'
   }
-  if (['profileImage', 'portfolioImages'].includes(field)) return 'portfolio'
+  if (field === 'profileImage') return 'profile-photo'
   if (['categoryIds', 'specialtyIds'].includes(field)) return 'services'
   if (['phone', 'contactVisibility', 'privateLocation'].includes(field)) {
     return 'contact'
@@ -433,7 +426,7 @@ export function ProfessionalProfilePage() {
     null,
   )
   const [openSections, setOpenSections] = useState<Set<ProfileSectionId>>(
-    () => new Set(profileSectionIds),
+    () => new Set(),
   )
   const [previewOpen, setPreviewOpen] = useState(false)
   const previewUrls = useRef(new Set<string>())
@@ -540,7 +533,7 @@ export function ProfessionalProfilePage() {
         fieldErrors.bio ||
         fieldErrors.experienceYears,
     ),
-    portfolio: Boolean(fieldErrors.profileImage || fieldErrors.portfolioImages),
+    'profile-photo': Boolean(fieldErrors.profileImage),
     services: Boolean(fieldErrors.categoryIds || fieldErrors.specialtyIds),
     contact: Boolean(
       fieldErrors.phone || fieldErrors.contactVisibility || fieldErrors.privateLocation,
@@ -1139,34 +1132,37 @@ export function ProfessionalProfilePage() {
         toast.error(error.message)
         const fieldOrder = [
           'publicName',
+          'headline',
           'bio',
+          'experienceYears',
+          'profileImage',
+          'portfolioImages',
           'categoryIds',
           'specialtyIds',
+          'phone',
+          'contactVisibility',
+          'privateLocation',
           'baseLocation',
           'serviceMode',
           'serviceRadiusKm',
           'selectedCities',
           'availability',
-          'phone',
-          'contactVisibility',
-          'privateLocation',
-          'profileImage',
-          'portfolioImages',
         ] as const
-        const invalidSections = new Set(
-          fieldOrder
-            .filter((field) => error.fieldErrors[field])
-            .map(profileSectionForField)
-            .filter((section): section is ProfileSectionId => section !== null),
-        )
-        setOpenSections((current) => new Set([...current, ...invalidSections]))
         const firstInvalidField = fieldOrder.find(
           (field) => error.fieldErrors[field],
         )
         if (firstInvalidField) {
-          requestAnimationFrame(() =>
-            document.getElementById(`professional-${firstInvalidField}`)?.focus(),
+          const firstInvalidSection = profileSectionForField(firstInvalidField)
+          setOpenSections(
+            firstInvalidSection ? new Set([firstInvalidSection]) : new Set(),
           )
+          requestAnimationFrame(() => {
+            const targetId =
+              firstInvalidField === 'portfolioImages'
+                ? 'professional-portfolio-management'
+                : `professional-${firstInvalidField}`
+            document.getElementById(targetId)?.focus()
+          })
         } else {
           requestAnimationFrame(() =>
             document.getElementById('professional-save-feedback')?.focus(),
@@ -1317,7 +1313,14 @@ export function ProfessionalProfilePage() {
           <Alert variant="destructive">
             <CircleAlert aria-hidden="true" />
             <AlertTitle>Não foi possível salvar o perfil</AlertTitle>
-            <AlertDescription>{submissionError}</AlertDescription>
+            <AlertDescription
+              id="professional-save-feedback"
+              tabIndex={-1}
+              aria-live="assertive"
+              className="focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+            >
+              {submissionError}
+            </AlertDescription>
           </Alert>
         ) : null}
 
@@ -1408,16 +1411,16 @@ export function ProfessionalProfilePage() {
         </ProfileBuilderSection>
 
         <ProfileBuilderSection
-          id="profile-section-portfolio"
-          title="Portfólio"
-          description={`Gerencie a foto profissional e até ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens de trabalhos realizados.`}
-          summary={`${form.profileImage ? 'Foto adicionada' : 'Foto ausente'} · ${form.portfolioImages.length} ${form.portfolioImages.length === 1 ? 'imagem' : 'imagens'} no portfólio`}
-          open={openSections.has('portfolio')}
-          complete={!publicationErrors.profileImage && !publicationErrors.portfolioImages}
-          hasError={sectionHasError.portfolio}
-          onOpenChange={(open) => setSectionOpen('portfolio', open)}
+          id="profile-section-profile-photo"
+          title="Foto de perfil"
+          description="Gerencie a imagem usada para representar seu perfil profissional."
+          summary={form.profileImage ? 'Foto profissional adicionada' : 'Nenhuma foto profissional adicionada'}
+          open={openSections.has('profile-photo')}
+          complete={!publicationErrors.profileImage}
+          hasError={sectionHasError['profile-photo']}
+          onOpenChange={(open) => setSectionOpen('profile-photo', open)}
         >
-          <div className="w-full min-w-0 max-w-full space-y-8">
+          <div className="w-full min-w-0 max-w-full space-y-6">
             {!imageProvider.configured ? (
               <Alert>
                 <CircleAlert aria-hidden="true" />
@@ -1573,118 +1576,6 @@ export function ProfessionalProfilePage() {
               <FieldError id="professional-profileImage-error" message={fieldErrors.profileImage} />
             </fieldset>
 
-            <fieldset
-              id="professional-portfolioImages"
-              tabIndex={-1}
-              aria-invalid={Boolean(fieldErrors.portfolioImages)}
-              aria-describedby={fieldErrors.portfolioImages ? 'professional-portfolioImages-error' : undefined}
-              className="m-0 w-full min-w-0 max-w-full space-y-4 rounded-md p-0 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
-            >
-              <legend className="text-sm font-semibold">Portfólio</legend>
-              <p className="text-xs text-muted-foreground">
-                {form.portfolioImages.length}/{PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens adicionadas
-              </p>
-              {form.portfolioImages.length > 0 ? (
-                <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-[repeat(2,minmax(0,1fr))]">
-                  {form.portfolioImages.map((image, index) => (
-                    <div key={image.providerId} className="w-full min-w-0 max-w-full space-y-3 overflow-hidden rounded-lg border bg-card p-3">
-                      <img
-                        src={previewFor(image)}
-                        alt={image.altText || `Prévia da imagem ${index + 1} do portfólio`}
-                        className="aspect-[4/3] block w-full min-w-0 max-w-full rounded-md bg-muted object-cover"
-                      />
-                      <div className="w-full min-w-0 max-w-full space-y-2">
-                        <Label htmlFor={`professional-portfolio-alt-${index}`}>
-                          Texto alternativo da imagem {index + 1}
-                        </Label>
-                        <Input
-                          id={`professional-portfolio-alt-${index}`}
-                          value={image.altText}
-                          maxLength={PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH}
-                          placeholder="Descreva o serviço mostrado"
-                          disabled={isSaving || isSuspended}
-                          onChange={(event) =>
-                            updateImageAltText(
-                              image,
-                              'PROFESSIONAL_PORTFOLIO',
-                              event.target.value,
-                            )
-                          }
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        loading={removingImageIds.includes(image.providerId)}
-                        loadingLabel="Removendo…"
-                        disabled={isSaving || isSuspended}
-                        onClick={() =>
-                          void handleRemoveImage(
-                            image,
-                            'PROFESSIONAL_PORTFOLIO',
-                          )
-                        }
-                      >
-                        <Trash2 aria-hidden="true" /> Remover imagem
-                      </Button>
-                      {imageRemovalErrors[image.providerId] ? (
-                        <p role="alert" className="min-w-0 max-w-full break-words text-sm text-destructive">
-                          {imageRemovalErrors[image.providerId]}
-                        </p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">Nenhuma imagem adicionada ao portfólio.</p>
-              )}
-              {imageTasks
-                .filter(
-                  (task) =>
-                    task.purpose === 'PROFESSIONAL_PORTFOLIO' &&
-                    task.status !== 'success',
-                )
-                .map((task) => (
-                  <ImageUploadStatus
-                    key={task.id}
-                    task={task}
-                    onRetry={() => void runImageUpload(task, true)}
-                    onDiscard={() => discardImageTask(task)}
-                  />
-                ))}
-              <div className="w-full min-w-0 max-w-full space-y-2">
-                <Label
-                  htmlFor="professional-portfolio-image-files"
-                  className="inline-flex min-h-10 max-w-full cursor-pointer flex-wrap items-center gap-2 rounded-md border bg-background px-4 py-2 text-sm font-medium break-words shadow-xs hover:bg-accent"
-                >
-                  <Upload className="size-4" aria-hidden="true" /> Adicionar imagens
-                </Label>
-                <Input
-                  id="professional-portfolio-image-files"
-                  type="file"
-                  accept={PROFESSIONAL_IMAGE_ACCEPTED_TYPES.join(',')}
-                  multiple
-                  className="sr-only"
-                  disabled={
-                    !imageProvider.configured ||
-                    isSaving ||
-                    isImageOperationInProgress ||
-                    isSuspended ||
-                    form.portfolioImages.length >= PROFESSIONAL_PORTFOLIO_MAX_IMAGES
-                  }
-                  onChange={(event) => {
-                    void handleImageFiles(
-                      event.currentTarget.files,
-                      'PROFESSIONAL_PORTFOLIO',
-                    )
-                    event.currentTarget.value = ''
-                  }}
-                />
-              </div>
-              <FieldError id="professional-portfolioImages-error" message={fieldErrors.portfolioImages} />
-            </fieldset>
-
             {imageSelectionError ? (
               <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {imageSelectionError}
@@ -1695,6 +1586,31 @@ export function ProfessionalProfilePage() {
             </PrivacyNotice>
           </div>
         </ProfileBuilderSection>
+
+        <Card className={fieldErrors.portfolioImages ? 'border-destructive/60' : undefined}>
+          <CardHeader className="gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 space-y-1.5">
+              <CardTitle className="flex min-w-0 items-center gap-2">
+                <Images className="size-5 shrink-0 text-primary" aria-hidden="true" />
+                <span className="min-w-0 break-words">Portfólio</span>
+              </CardTitle>
+              <CardDescription className="break-words">
+                {form.portfolioImages.length === 0
+                  ? 'Nenhuma imagem adicionada'
+                  : `${form.portfolioImages.length} de ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens`}
+              </CardDescription>
+              <FieldError
+                id="professional-portfolioImages-error"
+                message={fieldErrors.portfolioImages}
+              />
+            </div>
+            <Button asChild className="w-full shrink-0 sm:w-auto">
+              <Link id="professional-portfolio-management" to="/profissional/portfolio">
+                Gerenciar portfólio
+              </Link>
+            </Button>
+          </CardHeader>
+        </Card>
 
         <ProfileBuilderSection
           id="profile-section-services"
@@ -2203,8 +2119,6 @@ export function ProfessionalProfilePage() {
             <CardFooter className="-mx-5 -mb-5 mt-5 flex-col items-stretch border-t pt-5 sm:-mx-6 sm:-mb-6 sm:flex-row sm:flex-wrap">
               {submissionError ? (
                 <p
-                  id="professional-save-feedback"
-                  tabIndex={-1}
                   aria-live="assertive"
                   className="w-full rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive focus:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
                 >
