@@ -218,6 +218,22 @@
   }
 }
 
+@media (max-width: 600px) {
+  [data-sonner-toaster][data-x-position='center'] {
+    width: calc(
+      100dvw - var(--mobile-offset-left) - var(--mobile-offset-right)
+    );
+    max-width: calc(
+      100dvw - var(--mobile-offset-left) - var(--mobile-offset-right)
+    );
+  }
+
+  [data-sonner-toaster] [data-sonner-toast] {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { User } from 'firebase/auth'
 import { MemoryRouter } from 'react-router-dom'
@@ -85,6 +85,33 @@ describe('layouts autenticados', () => {
     expect(screen.getByText('Conteúdo profissional')).toBeInTheDocument()
   })
 
+  it('destaca o portfólio somente na sidebar e não mantém Perfil ativo', () => {
+    renderLayout(
+      '/profissional/portfolio',
+      <ProfessionalLayout
+        pageTitle="Portfólio"
+        activeNavigationHref="/profissional/portfolio"
+      >
+        Galeria profissional
+      </ProfessionalLayout>,
+    )
+
+    expect(screen.getByRole('link', { name: 'Portfólio' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    for (const profileLink of screen.getAllByRole('link', { name: 'Perfil' })) {
+      expect(profileLink).not.toHaveAttribute('aria-current')
+    }
+    expect(
+      within(
+        screen.getByRole('navigation', {
+          name: 'Área profissional — navegação mobile',
+        }),
+      ).queryByRole('link', { name: 'Portfólio' }),
+    ).not.toBeInTheDocument()
+  })
+
   it('mantém a navegação mobile presa à viewport com o portfólio aberto', () => {
     const view = renderLayout(
       '/profissional',
@@ -109,9 +136,23 @@ describe('layouts autenticados', () => {
 
     expect(view.container.contains(mobileNavigation)).toBe(false)
     expect(document.body).toContainElement(mobileNavigation)
-    expect(mobileNavigation).toHaveClass('fixed', 'right-0', 'bottom-0', 'left-0', 'z-40')
+    expect(mobileNavigation).toHaveClass(
+      'fixed',
+      'right-auto',
+      'bottom-0',
+      'left-0',
+      'z-40',
+      'w-full',
+      'max-w-full',
+    )
     expect(mobileNavigation.className).toContain(
       'pb-[env(safe-area-inset-bottom)]',
+    )
+    expect(mobileNavigation.getAttribute('style')).toContain(
+      'width: min(100dvw, 100%)',
+    )
+    expect(mobileNavigation.getAttribute('style')).toContain(
+      'max-width: min(100dvw, 100%)',
     )
     expect(view.container.querySelector('#conteudo-principal')?.parentElement).toHaveClass(
       'pb-[calc(5rem+env(safe-area-inset-bottom))]',

@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Images, MapPin, Phone } from 'lucide-react'
+import { BriefcaseBusiness, MapPin, Phone } from 'lucide-react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '../../../components/ui/avatar'
 import { Badge } from '../../../components/ui/badge'
@@ -25,7 +25,6 @@ interface ProfessionalProfilePreviewProps {
   phone: string
   contactVisibility: ProfessionalContactVisibility
   profileImage: ProfessionalImageMetadata | null
-  portfolioImages: ProfessionalImageMetadata[]
 }
 
 const availabilityLabels: Record<ProfessionalAvailability, string> = {
@@ -121,26 +120,6 @@ export function ProfessionalProfilePreview(props: ProfessionalProfilePreviewProp
           ) : null}
         </dl>
 
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Images className="size-4 text-primary" aria-hidden="true" />
-            Portfólio
-          </div>
-          {props.portfolioImages.length > 0 ? (
-            <div className="mt-3 grid min-w-0 grid-cols-[repeat(3,minmax(0,1fr))] gap-2">
-              {props.portfolioImages.slice(0, 6).map((image) => (
-                <img
-                  key={image.providerId}
-                  src={image.url}
-                  alt={image.altText}
-                  className="aspect-square block w-full min-w-0 max-w-full rounded-md bg-muted object-cover"
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="mt-2 text-xs text-muted-foreground">Nenhuma imagem adicionada.</p>
-          )}
-        </div>
       </div>
     </article>
   )

@@ -3,6 +3,7 @@ import {
   ClipboardList,
   Compass,
   Home,
+  Images,
   LogOut,
   MessageCircle,
   Search,
@@ -28,6 +29,7 @@ export interface LayoutNavigationItem {
   label: string
   href: string
   icon: LucideIcon
+  showOnMobile?: boolean
 }
 
 export type AuthenticatedMode = 'client' | 'professional' | 'admin'
@@ -46,6 +48,12 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
     { label: 'Serviços', href: '/profissional/servicos', icon: BriefcaseBusiness },
     { label: 'Mensagens', href: '/profissional/mensagens', icon: MessageCircle },
     { label: 'Perfil', href: '/profissional/perfil', icon: UserRound },
+    {
+      label: 'Portfólio',
+      href: '/profissional/portfolio',
+      icon: Images,
+      showOnMobile: false,
+    },
   ],
   admin: [
     { label: 'Visão geral', href: '/admin', icon: ShieldCheck },
@@ -90,6 +98,9 @@ export function AuthenticatedLayout({
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const activePathname = activeNavigationHref ?? location.pathname
+  const mobileNavigationItems = navigation.filter(
+    (item) => item.showOnMobile !== false,
+  )
   const initials = userName
     .split(' ')
     .slice(0, 2)
@@ -118,10 +129,14 @@ export function AuthenticatedLayout({
   const mobileNavigation = (
     <nav
       aria-label={`${modeLabels[mode]} — navegação mobile`}
-      className="fixed right-0 bottom-0 left-0 z-40 grid min-h-16 min-w-0 overflow-hidden border-t bg-card/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
-      style={{ gridTemplateColumns: `repeat(${navigation.length}, minmax(0, 1fr))` }}
+      className="fixed right-auto bottom-0 left-0 z-40 grid min-h-16 w-full min-w-0 max-w-full overflow-hidden border-t bg-card/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
+      style={{
+        gridTemplateColumns: `repeat(${mobileNavigationItems.length}, minmax(0, 1fr))`,
+        width: 'min(100dvw, 100%)',
+        maxWidth: 'min(100dvw, 100%)',
+      }}
     >
-      {navigation.map((item) => {
+      {mobileNavigationItems.map((item) => {
         const active = isNavigationItemActive(activePathname, item.href)
         const Icon = item.icon
         return (

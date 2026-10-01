@@ -20,8 +20,14 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../components/layout/ProfessionalLayout', () => ({
-  ProfessionalLayout: ({ children }: { children: React.ReactNode }) => (
-    <main>{children}</main>
+  ProfessionalLayout: ({
+    children,
+    activeNavigationHref,
+  }: {
+    children: React.ReactNode
+    activeNavigationHref?: string
+  }) => (
+    <main data-active-navigation-href={activeNavigationHref}>{children}</main>
   ),
 }))
 
@@ -158,15 +164,35 @@ describe('ProfessionalPortfolioPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    expect(
-      await screen.findByRole('heading', { name: 'Seu portfólio ainda está vazio' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Nenhuma imagem adicionada')).toBeInTheDocument()
-    expect(screen.getByText(/JPEG, PNG ou WebP · até 5 MB/i)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Sua galeria' })).toBeInTheDocument()
+    expect(screen.getByText(/seu portfólio ainda está vazio/i)).toBeInTheDocument()
+    expect(screen.getByText('0 de 3 trabalhos adicionados')).toBeInTheDocument()
+    expect(screen.getAllByText('Adicionar trabalho')).toHaveLength(3)
+    expect(screen.getAllByText(/JPEG, PNG ou WebP · até 5 MB/i)).toHaveLength(4)
+    expect(screen.getAllByRole('button', { name: 'Salvar portfólio' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Salvar portfólio' })).toBeDisabled()
+    expect(screen.getByRole('main')).toHaveAttribute(
+      'data-active-navigation-href',
+      '/profissional/portfolio',
+    )
 
     await user.upload(
       screen.getByLabelText('Adicionar primeira foto'),
       new File(['image'], 'primeira.png', { type: 'image/png' }),
+    )
+
+    expect(await screen.findByRole('img', { name: /prévia do trabalho 1/i })).toHaveAttribute(
+      'src',
+      'https://images.example/primeira.png.webp',
+    )
+    expect(screen.getByText('Alterações não salvas')).toBeInTheDocument()
+    const saveButton = screen.getByRole('button', { name: 'Salvar portfólio' })
+    expect(saveButton).toBeEnabled()
+    expect(saveButton.parentElement).toHaveClass(
+      'fixed',
+      'z-[35]',
+      'max-w-[100dvw]',
+      'bottom-[calc(4rem+env(safe-area-inset-bottom))]',
     )
 
     expect(mocks.imageUpload).toHaveBeenCalledWith(
@@ -199,7 +225,7 @@ describe('ProfessionalPortfolioPage', () => {
     fireEvent.change(altText, {
       target: { value: 'Instalação elétrica concluída com acabamento branco' },
     })
-    await user.click(screen.getAllByRole('button', { name: 'Salvar portfólio' })[0])
+    await user.click(screen.getByRole('button', { name: 'Salvar portfólio' }))
 
     expect(mocks.imageRetry).toHaveBeenCalledOnce()
     const savedInput = mocks.saveProfessionalProfile.mock.calls.at(-1)?.[1]
@@ -228,7 +254,7 @@ describe('ProfessionalPortfolioPage', () => {
       await screen.findByRole('img', { name: portfolioImage(1).altText }),
     ).toHaveAttribute('src', portfolioImage(1).url)
     await user.upload(
-      screen.getByLabelText('Adicionar imagens'),
+      screen.getByLabelText('Adicionar trabalho 2'),
       new File(['image'], 'segunda.png', { type: 'image/png' }),
     )
 
@@ -263,8 +289,10 @@ describe('ProfessionalPortfolioPage', () => {
     )
     expect(mocks.imageRemove).not.toHaveBeenCalled()
 
-    await user.click(screen.getAllByRole('button', { name: 'Remover' })[1])
-    await user.click(screen.getAllByRole('button', { name: 'Salvar portfólio' })[0])
+    await user.click(screen.getByRole('button', { name: 'Remover trabalho 2' }))
+    expect(screen.getByRole('heading', { name: 'Remover este trabalho?' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Remover trabalho' }))
+    await user.click(screen.getByRole('button', { name: 'Salvar portfólio' }))
 
     expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
       'user-123',
@@ -300,19 +328,32 @@ describe('ProfessionalPortfolioPage', () => {
     })
     renderPage()
 
-    expect(await screen.findByText('3 de 3 imagens')).toBeInTheDocument()
-    expect(screen.getAllByLabelText(/Texto alternativo da imagem/)).toHaveLength(3)
-    expect(screen.queryByLabelText('Adicionar imagens')).not.toBeInTheDocument()
+    expect(await screen.findByText('3 de 3 trabalhos adicionados')).toBeInTheDocument()
+    const altInputs = screen.getAllByLabelText(/Texto alternativo da imagem/)
+    expect(altInputs).toHaveLength(3)
+    const longAltText = 'Descrição extensa '.repeat(30)
+    fireEvent.change(altInputs[0], {
+      target: { value: longAltText },
+    })
+    expect(altInputs[0]).toHaveValue(longAltText.slice(0, 240))
+    expect(screen.getByText('240/240')).toBeInTheDocument()
+    expect(screen.queryByText('Adicionar trabalho')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Salvar portfólio' })).toHaveLength(1)
     for (const image of screen.getAllByRole('img')) {
       expect(image).toHaveClass('block', 'w-full', 'max-w-full', 'object-cover')
+      expect(image.parentElement).toHaveClass('aspect-[4/3]')
     }
     const articles = screen.getAllByRole('article')
     const grid = articles[0].parentElement
-    expect(grid?.className).toContain(
-      'grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))]',
-    )
+    expect(grid?.className).toContain('grid-cols-[minmax(0,1fr)]')
+    expect(grid?.className).toContain('sm:grid-cols-[repeat(2,minmax(0,1fr))]')
+    expect(grid?.className).toContain('lg:grid-cols-[repeat(3,minmax(0,1fr))]')
     for (const article of articles) {
       expect(article.className).toContain('[contain:inline-size]')
+    }
+    for (const fileInput of document.querySelectorAll('input[type="file"]')) {
+      expect(fileInput).toHaveClass('sr-only')
+      expect(fileInput).not.toHaveClass('w-full', 'min-h-11', 'max-w-full')
     }
   })
 })

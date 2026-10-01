@@ -296,6 +296,47 @@ describe('ProfessionalProfilePage', () => {
     )
   })
 
+  it('preserva o portfólio sem renderizar imagens ou controles de portfólio no perfil', async () => {
+    const currentProfile = {
+      ...publishedProfile,
+      portfolioImages: persistedPortfolioImages,
+    }
+    mocks.loadProfessionalProfile.mockResolvedValue(currentProfile)
+    mocks.saveProfessionalProfile.mockImplementation(
+      async (_userId, input, status) => ({
+        ...currentProfile,
+        ...input,
+        status,
+      }),
+    )
+    const user = userEvent.setup()
+
+    await renderProfile(false)
+
+    for (const image of persistedPortfolioImages) {
+      expect(screen.queryByRole('img', { name: image.altText })).not.toBeInTheDocument()
+    }
+    expect(document.querySelectorAll('input[type="file"]')).toHaveLength(1)
+    const avatarInput = document.querySelector<HTMLInputElement>(
+      '#professional-profile-image-file',
+    )
+    expect(avatarInput).toHaveClass('sr-only')
+    expect(avatarInput).not.toHaveClass('w-full', 'min-h-11', 'max-w-full')
+
+    await user.click(screen.getByRole('button', { name: 'Salvar alterações' }))
+
+    expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
+      'user-123',
+      expect.objectContaining({ portfolioImages: persistedPortfolioImages }),
+      'PUBLISHED',
+      catalog,
+      currentProfile,
+    )
+    expect(mocks.imageUpload).not.toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'PROFESSIONAL_PORTFOLIO' }),
+    )
+  })
+
   it('abre a primeira seção inválida e move o foco para o campo correspondente', async () => {
     mocks.saveProfessionalProfile.mockRejectedValue(
       new ProfessionalProfileError(

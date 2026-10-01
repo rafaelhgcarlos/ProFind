@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   ArrowLeft,
+  CheckCircle2,
   CircleAlert,
   ImagePlus,
   Images,
@@ -16,15 +17,16 @@ import { toast } from 'sonner'
 
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
+import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '../../../components/ui/card'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../../components/ui/dialog'
 import { Input } from '../../../components/ui/input'
 import { Label } from '../../../components/ui/label'
 import { PrivacyNotice } from '../../../components/ui/privacy-notice'
@@ -72,6 +74,11 @@ interface PortfolioUploadTask {
   providerId?: string
   previousReference?: ProfessionalImageMetadata
   altText: string
+}
+
+interface SelectionError {
+  order: number
+  message: string
 }
 
 function taskId() {
@@ -122,7 +129,7 @@ function PortfolioLoading() {
   )
 }
 
-function UploadTaskStatus({
+function UploadTaskFeedback({
   task,
   onRetry,
   onDiscard,
@@ -132,45 +139,48 @@ function UploadTaskStatus({
   onDiscard: () => void
 }) {
   return (
-    <div className="grid w-full min-w-0 max-w-full gap-3 overflow-hidden rounded-lg border bg-muted/20 p-3 [contain:inline-size] sm:grid-cols-[5rem_minmax(0,1fr)]" aria-live="polite">
-      {task.previewUrl ? (
-        <img
-          src={task.previewUrl}
-          alt="Prévia da imagem selecionada"
-          className="aspect-square block w-20 max-w-full rounded-md bg-muted object-cover"
-        />
-      ) : (
-        <div className="flex aspect-square w-20 max-w-full items-center justify-center rounded-md bg-muted">
-          <Images className="size-6 text-muted-foreground" aria-hidden="true" />
-        </div>
-      )}
-      <div className="min-w-0 max-w-full space-y-2">
-        <p className="truncate text-sm font-medium">{task.file.name}</p>
-        {task.status === 'uploading' ? (
-          <>
-            <progress
-              value={task.progress}
-              max={100}
-              aria-label={`Enviando ${task.file.name}: ${task.progress}%`}
-              className="block h-2 w-full min-w-0 max-w-full accent-primary"
-            />
-            <p className="text-xs text-muted-foreground">Enviando… {task.progress}%</p>
-          </>
-        ) : null}
-        {task.status === 'error' ? (
-          <>
-            <p role="alert" className="break-words text-sm text-destructive">{task.error}</p>
-            <div className="flex min-w-0 flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-                <RotateCcw aria-hidden="true" /> Tentar novamente
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={onDiscard}>
-                <X aria-hidden="true" /> Descartar
-              </Button>
-            </div>
-          </>
+    <div
+      className="w-full min-w-0 max-w-full space-y-2 rounded-md bg-muted/40 p-3 [contain:inline-size]"
+      aria-live="polite"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs font-medium" title={task.file.name}>
+          {task.file.name}
+        </p>
+        {task.status === 'success' ? (
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-success">
+            <CheckCircle2 className="size-3.5" aria-hidden="true" /> Enviado
+          </span>
         ) : null}
       </div>
+      {task.status === 'uploading' ? (
+        <>
+          <progress
+            value={task.progress}
+            max={100}
+            aria-label={`Enviando ${task.file.name}: ${task.progress}%`}
+            className="block h-2 w-full min-w-0 max-w-full accent-primary"
+          />
+          <p className="text-xs text-muted-foreground">
+            Enviando… {task.progress}%
+          </p>
+        </>
+      ) : null}
+      {task.status === 'error' ? (
+        <>
+          <p role="alert" className="max-w-full break-words text-xs text-destructive">
+            {task.error}
+          </p>
+          <div className="flex min-w-0 flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+              <RotateCcw aria-hidden="true" /> Tentar novamente
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onDiscard}>
+              <X aria-hidden="true" /> Descartar
+            </Button>
+          </div>
+        </>
+      ) : null}
     </div>
   )
 }
@@ -187,7 +197,7 @@ export function ProfessionalPortfolioPage() {
   const [tasks, setTasks] = useState<PortfolioUploadTask[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [selectionError, setSelectionError] = useState<string | null>(null)
+  const [selectionError, setSelectionError] = useState<SelectionError | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [cleanupErrors, setCleanupErrors] = useState<
     Record<string, string | undefined>
@@ -196,6 +206,8 @@ export function ProfessionalPortfolioPage() {
     ProfessionalImageMetadata[]
   >([])
   const [saving, setSaving] = useState(false)
+  const [imagePendingRemoval, setImagePendingRemoval] =
+    useState<ProfessionalImageMetadata | null>(null)
   const [attempt, setAttempt] = useState(0)
   const previews = useRef(new Set<string>())
 
@@ -245,6 +257,25 @@ export function ProfessionalPortfolioPage() {
   const remainingSlots = Math.max(
     0,
     PROFESSIONAL_PORTFOLIO_MAX_IMAGES - images.length,
+  )
+  const gallerySlots = Array.from(
+    { length: PROFESSIONAL_PORTFOLIO_MAX_IMAGES },
+    (_, order) => {
+      const image = images[order]
+      const task = image
+        ? tasks.find(
+            (item) =>
+              item.status !== 'success' &&
+              item.previousReference?.providerId === image.providerId,
+          ) ?? tasks.find((item) => item.providerId === image.providerId)
+        : tasks.find(
+            (item) =>
+              !item.previousReference &&
+              item.order === order &&
+              item.status !== 'success',
+          )
+      return { order, image, task }
+    },
   )
 
   useEffect(() => {
@@ -312,6 +343,7 @@ export function ProfessionalPortfolioPage() {
           : [...current, uploaded]
         return next.map((image, order) => ({ ...image, order }))
       })
+      releasePreview(task.previewUrl)
       setTasks((current) =>
         current.map((item) =>
           item.id === task.id
@@ -320,6 +352,7 @@ export function ProfessionalPortfolioPage() {
                 status: 'success',
                 progress: 100,
                 providerId: uploaded.providerId,
+                previewUrl: null,
                 error: undefined,
               }
             : item,
@@ -358,10 +391,12 @@ export function ProfessionalPortfolioPage() {
         task.status !== 'success' &&
         !images.some((image) => image.providerId === task.providerId),
     ).length
+    const targetOrder = previousReference?.order ?? images.length + pendingAdds
     if (!previousReference && selected.length > remainingSlots - pendingAdds) {
-      setSelectionError(
-        `Adicione no máximo ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens ao portfólio.`,
-      )
+      setSelectionError({
+        order: Math.min(targetOrder, PROFESSIONAL_PORTFOLIO_MAX_IMAGES - 1),
+        message: `Adicione no máximo ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens ao portfólio.`,
+      })
       return
     }
     try {
@@ -373,11 +408,12 @@ export function ProfessionalPortfolioPage() {
         ),
       )
     } catch (error) {
-      setSelectionError(
-        error instanceof ProfessionalImageError
+      setSelectionError({
+        order: Math.min(targetOrder, PROFESSIONAL_PORTFOLIO_MAX_IMAGES - 1),
+        message: error instanceof ProfessionalImageError
           ? error.message
           : 'Revise as imagens selecionadas.',
-      )
+      })
       return
     }
 
@@ -404,10 +440,14 @@ export function ProfessionalPortfolioPage() {
   }
 
   function updateAltText(image: ProfessionalImageMetadata, altText: string) {
+    const accessibleDescription = altText.slice(
+      0,
+      PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH,
+    )
     setImages((current) =>
       current.map((item) =>
         item.providerId === image.providerId
-          ? { ...item, altText, updatedAt: Date.now() }
+          ? { ...item, altText: accessibleDescription, updatedAt: Date.now() }
           : item,
       ),
     )
@@ -420,14 +460,15 @@ export function ProfessionalPortfolioPage() {
         .filter((item) => item.providerId !== image.providerId)
         .map((item, order) => ({ ...item, order })),
     )
-    setSaveError(null)
-  }
-
-  function previewFor(image: ProfessionalImageMetadata) {
-    return (
-      tasks.find((task) => task.providerId === image.providerId)?.previewUrl ??
-      image.url
+    setTasks((current) =>
+      current.filter(
+        (task) =>
+          task.providerId !== image.providerId &&
+          task.previousReference?.providerId !== image.providerId,
+      ),
     )
+    setImagePendingRemoval(null)
+    setSaveError(null)
   }
 
   async function cleanRemovedImages(
@@ -526,7 +567,7 @@ export function ProfessionalPortfolioPage() {
   const layout = (content: React.ReactNode) => (
     <ProfessionalLayout
       pageTitle="Portfólio"
-      activeNavigationHref="/profissional/perfil"
+      activeNavigationHref="/profissional/portfolio"
       userName={userProfile?.name}
       contextSwitcher={<ModeSwitcher />}
     >
@@ -558,38 +599,65 @@ export function ProfessionalPortfolioPage() {
   }
 
   return layout(
-    <div className="min-w-0 max-w-full space-y-6">
-      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-2">
+    <div
+      className={`min-w-0 max-w-full space-y-6 ${
+        hasUnsavedChanges ? 'pb-24 md:pb-0' : ''
+      }`}
+    >
+      <header className="flex min-w-0 flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0 space-y-3">
           <Button variant="ghost" size="sm" asChild className="-ml-3">
             <Link to="/profissional/perfil">
               <ArrowLeft aria-hidden="true" /> Voltar ao perfil profissional
             </Link>
           </Button>
-          <div>
-            <h2 className="font-display text-2xl font-bold tracking-tight">Trabalhos realizados</h2>
-            <p className="mt-1 max-w-2xl break-words text-sm leading-6 text-muted-foreground">
-              Mostre até {PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens reais do seu trabalho. Use textos alternativos objetivos para tornar o conteúdo acessível.
+          <div className="min-w-0 space-y-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h2 className="font-display text-2xl font-bold tracking-tight">
+                Trabalhos realizados
+              </h2>
+              <Badge variant="outline" className="shrink-0">
+                {images.length} de {PROFESSIONAL_PORTFOLIO_MAX_IMAGES}{' '}
+                trabalhos adicionados
+              </Badge>
+            </div>
+            <p className="max-w-2xl break-words text-sm leading-6 text-muted-foreground">
+              Mostre serviços reais e ajude clientes a conhecer a qualidade do seu trabalho.
             </p>
           </div>
         </div>
-        <Button
-          type="button"
-          className="w-full shrink-0 sm:w-auto"
-          loading={saving}
-          loadingLabel="Salvando…"
-          disabled={!hasUnsavedChanges || isBusy || isSuspended}
-          onClick={() => void savePortfolio()}
+
+        <div
+          className={
+            hasUnsavedChanges
+              ? 'fixed right-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 z-[35] flex w-full min-w-0 max-w-[100dvw] items-center justify-between gap-3 border-t bg-background/95 p-3 shadow-soft backdrop-blur supports-[backdrop-filter]:bg-background/90 md:static md:z-auto md:w-auto md:shrink-0 md:border-0 md:bg-transparent md:p-0 md:shadow-none md:backdrop-blur-none'
+              : 'hidden min-w-0 items-center gap-3 md:flex md:shrink-0'
+          }
+          aria-live="polite"
         >
-          <Save aria-hidden="true" /> Salvar portfólio
-        </Button>
-      </div>
+          <p className="min-w-0 break-words text-xs font-medium text-warning md:text-sm">
+            {hasUnsavedChanges ? 'Alterações não salvas' : 'Tudo salvo'}
+          </p>
+          <Button
+            type="button"
+            className="shrink-0"
+            loading={saving}
+            loadingLabel="Salvando…"
+            disabled={!hasUnsavedChanges || isBusy || isSuspended}
+            onClick={() => void savePortfolio()}
+          >
+            <Save aria-hidden="true" /> Salvar portfólio
+          </Button>
+        </div>
+      </header>
 
       {isSuspended ? (
         <Alert variant="destructive">
           <CircleAlert aria-hidden="true" />
           <AlertTitle>Perfil suspenso</AlertTitle>
-          <AlertDescription>O portfólio não pode ser alterado enquanto a suspensão estiver ativa.</AlertDescription>
+          <AlertDescription>
+            O portfólio não pode ser alterado enquanto a suspensão estiver ativa.
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -597,7 +665,9 @@ export function ProfessionalPortfolioPage() {
         <Alert>
           <CircleAlert aria-hidden="true" />
           <AlertTitle>Envio de imagens indisponível</AlertTitle>
-          <AlertDescription>O provedor de imagens não está configurado.</AlertDescription>
+          <AlertDescription>
+            O provedor de imagens não está configurado.
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -614,7 +684,9 @@ export function ProfessionalPortfolioPage() {
           <CircleAlert aria-hidden="true" />
           <AlertTitle>Portfólio salvo com limpeza pendente</AlertTitle>
           <AlertDescription>
-            <p>A nova seleção está salva, mas um arquivo anterior ainda não pôde ser removido do provedor.</p>
+            <p>
+              A nova seleção está salva, mas um arquivo anterior ainda não pôde ser removido do provedor.
+            </p>
             <Button
               type="button"
               variant="outline"
@@ -629,81 +701,97 @@ export function ProfessionalPortfolioPage() {
         </Alert>
       ) : null}
 
-      <Card>
-        <CardHeader className="gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <section aria-labelledby="portfolio-gallery-title" className="min-w-0 max-w-full space-y-4">
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
           <div className="min-w-0">
-            <CardTitle>Imagens do portfólio</CardTitle>
-            <CardDescription>
+            <h3 id="portfolio-gallery-title" className="text-lg font-bold tracking-tight">
+              Sua galeria
+            </h3>
+            <p className="break-words text-sm text-muted-foreground">
               {images.length === 0
-                ? 'Nenhuma imagem adicionada'
-                : `${images.length} de ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens`}
-            </CardDescription>
+                ? 'Seu portfólio ainda está vazio. Escolha uma posição para adicionar a primeira foto.'
+                : `${remainingSlots} ${remainingSlots === 1 ? 'posição disponível' : 'posições disponíveis'}.`}
+            </p>
           </div>
-          <p className="break-words text-xs text-muted-foreground">
-            JPEG, PNG ou WebP · até {PROFESSIONAL_IMAGE_MAX_SIZE_BYTES / 1024 / 1024} MB por imagem
+          <p className="min-w-0 break-words text-xs text-muted-foreground">
+            JPEG, PNG ou WebP · até {PROFESSIONAL_IMAGE_MAX_SIZE_BYTES / 1024 / 1024} MB
           </p>
-        </CardHeader>
-        <CardContent className="min-w-0 space-y-5">
-          {images.length === 0 && tasks.length === 0 ? (
-            <div className="flex min-w-0 flex-col items-center rounded-lg border border-dashed bg-muted/20 px-4 py-10 text-center">
-              <ImagePlus className="size-10 text-primary" aria-hidden="true" />
-              <h3 className="mt-4 font-semibold">Seu portfólio ainda está vazio</h3>
-              <p className="mt-2 max-w-md break-words text-sm text-muted-foreground">
-                Adicione fotos que ajudem clientes a entender a qualidade e o tipo de serviço realizado.
-              </p>
-              <Label
-                htmlFor="professional-portfolio-empty-file"
-                className="mt-5 inline-flex min-h-11 max-w-full cursor-pointer flex-wrap items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium break-words text-primary-foreground shadow-xs hover:bg-primary/90"
-              >
-                <Upload className="size-4" aria-hidden="true" /> Adicionar primeira foto
-              </Label>
-              <Input
-                id="professional-portfolio-empty-file"
-                type="file"
-                accept={PROFESSIONAL_IMAGE_ACCEPTED_TYPES.join(',')}
-                className="sr-only"
-                disabled={!imageProvider.configured || isBusy || isSuspended}
-                onChange={(event) => {
-                  void selectFiles(event.currentTarget.files)
-                  event.currentTarget.value = ''
-                }}
-              />
-            </div>
-          ) : (
-            <div className="grid w-full min-w-0 max-w-full grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-5">
-              {images.map((image, index) => (
-                <article key={image.providerId} className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border bg-card [contain:inline-size]">
-                  <img
-                    src={previewFor(image)}
-                    alt={image.altText || `Prévia da imagem ${index + 1} do portfólio`}
-                    className="aspect-[4/3] block w-full min-w-0 max-w-full bg-muted object-cover"
-                  />
+        </div>
+
+        <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] items-start gap-5 sm:grid-cols-[repeat(2,minmax(0,1fr))] lg:grid-cols-[repeat(3,minmax(0,1fr))]">
+          {gallerySlots.map(({ order, image, task }) => {
+            const position = order + 1
+            const errorForSlot = selectionError?.order === order ? selectionError.message : null
+
+            if (image) {
+              const helpId = `professional-portfolio-alt-help-${order}`
+              return (
+                <article
+                  key={image.providerId}
+                  className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border bg-card shadow-soft [contain:inline-size]"
+                >
+                  <div className="relative aspect-[4/3] w-full min-w-0 max-w-full overflow-hidden bg-muted">
+                    <img
+                      src={image.url}
+                      alt={image.altText || `Prévia do trabalho ${position} do portfólio`}
+                      className="block h-full w-full min-w-0 max-w-full object-cover"
+                    />
+                    <Badge className="absolute top-3 left-3 shadow-sm">
+                      Trabalho {position}
+                    </Badge>
+                  </div>
                   <div className="flex min-w-0 flex-1 flex-col gap-4 p-4">
                     <div className="min-w-0 space-y-2">
-                      <Label htmlFor={`professional-portfolio-alt-${index}`}>
-                        Texto alternativo da imagem {index + 1}
+                      <Label htmlFor={`professional-portfolio-alt-${order}`}>
+                        Texto alternativo da imagem {position}
                       </Label>
                       <Input
-                        id={`professional-portfolio-alt-${index}`}
+                        id={`professional-portfolio-alt-${order}`}
                         value={image.altText}
                         maxLength={PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH}
-                        placeholder="Descreva o serviço mostrado"
+                        placeholder="Ex.: Cozinha planejada finalizada"
+                        aria-describedby={helpId}
                         disabled={isBusy || isSuspended}
                         onChange={(event) => updateAltText(image, event.target.value)}
                       />
-                      <p className="break-words text-xs text-muted-foreground">
-                        {image.altText.length}/{PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH} caracteres
-                      </p>
-                    </div>
-                    <div className="mt-auto flex min-w-0 flex-wrap gap-2">
-                      <Label
-                        htmlFor={`professional-portfolio-replace-${index}`}
-                        className="inline-flex min-h-11 max-w-full cursor-pointer flex-wrap items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium break-words shadow-xs hover:bg-accent"
+                      <div
+                        id={helpId}
+                        className="flex min-w-0 items-start justify-between gap-3 text-xs text-muted-foreground"
                       >
-                        <Upload className="size-4" aria-hidden="true" /> Substituir
+                        <p className="min-w-0 break-words">
+                          Ajuda pessoas que usam leitores de tela.
+                        </p>
+                        <span className="shrink-0 tabular-nums">
+                          {image.altText.length}/{PROFESSIONAL_IMAGE_ALT_TEXT_MAX_LENGTH}
+                        </span>
+                      </div>
+                    </div>
+
+                    {task ? (
+                      <UploadTaskFeedback
+                        task={task}
+                        onRetry={() => void runUpload(task, true)}
+                        onDiscard={() => discardTask(task)}
+                      />
+                    ) : null}
+                    {errorForSlot ? (
+                      <p
+                        role="alert"
+                        className="max-w-full break-words rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                      >
+                        {errorForSlot}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-auto grid min-w-0 grid-cols-2 gap-2">
+                      <Label
+                        htmlFor={`professional-portfolio-replace-${order}`}
+                        className="inline-flex min-h-11 min-w-0 max-w-full cursor-pointer items-center justify-center gap-2 rounded-md border bg-background px-3 py-2 text-center text-sm font-semibold break-words transition-colors hover:bg-accent"
+                      >
+                        <Upload className="size-4 shrink-0" aria-hidden="true" /> Substituir
                       </Label>
-                      <Input
-                        id={`professional-portfolio-replace-${index}`}
+                      <input
+                        id={`professional-portfolio-replace-${order}`}
                         type="file"
                         accept={PROFESSIONAL_IMAGE_ACCEPTED_TYPES.join(',')}
                         className="sr-only"
@@ -715,84 +803,148 @@ export function ProfessionalPortfolioPage() {
                       />
                       <Button
                         type="button"
-                        variant="outline"
-                        size="sm"
-                        className="min-h-11"
+                        variant="destructive"
+                        className="min-w-0 px-3"
+                        aria-label={`Remover trabalho ${position}`}
                         disabled={isBusy || isSuspended}
-                        onClick={() => removeImage(image)}
+                        onClick={() => setImagePendingRemoval(image)}
                       >
                         <Trash2 aria-hidden="true" /> Remover
                       </Button>
                     </div>
                   </div>
                 </article>
-              ))}
-            </div>
-          )}
+              )
+            }
 
-          {tasks
-            .filter((task) => task.status !== 'success')
-            .map((task) => (
-              <UploadTaskStatus
-                key={task.id}
-                task={task}
-                onRetry={() => void runUpload(task, true)}
-                onDiscard={() => discardTask(task)}
-              />
-            ))}
+            if (task) {
+              return (
+                <article
+                  key={task.id}
+                  className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border bg-card shadow-soft [contain:inline-size]"
+                >
+                  <div className="relative aspect-[4/3] w-full min-w-0 max-w-full overflow-hidden bg-muted">
+                    {task.previewUrl ? (
+                      <img
+                        src={task.previewUrl}
+                        alt={`Prévia temporária do trabalho ${position}`}
+                        className="block h-full w-full min-w-0 max-w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex size-full items-center justify-center">
+                        <Images className="size-8 text-muted-foreground" aria-hidden="true" />
+                      </div>
+                    )}
+                    <Badge className="absolute top-3 left-3 shadow-sm">
+                      Trabalho {position}
+                    </Badge>
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col justify-end gap-3 p-4">
+                    <UploadTaskFeedback
+                      task={task}
+                      onRetry={() => void runUpload(task, true)}
+                      onDiscard={() => discardTask(task)}
+                    />
+                    {errorForSlot ? (
+                      <p
+                        role="alert"
+                        className="max-w-full break-words text-xs text-destructive"
+                      >
+                        {errorForSlot}
+                      </p>
+                    ) : null}
+                  </div>
+                </article>
+              )
+            }
 
-          {selectionError ? (
-            <p role="alert" className="max-w-full break-words rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {selectionError}
-            </p>
-          ) : null}
-
-          {images.length > 0 && remainingSlots > 0 ? (
-            <div className="min-w-0 space-y-2">
-              <Label
-                htmlFor="professional-portfolio-files"
-                className="inline-flex min-h-11 max-w-full cursor-pointer flex-wrap items-center gap-2 rounded-md border bg-background px-4 py-2 text-sm font-medium break-words shadow-xs hover:bg-accent"
+            return (
+              <div
+                key={`empty-${order}`}
+                className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border border-dashed border-primary/40 bg-primary/[0.025] [contain:inline-size]"
               >
-                <Upload className="size-4" aria-hidden="true" /> Adicionar imagens
-              </Label>
-              <Input
-                id="professional-portfolio-files"
-                type="file"
-                accept={PROFESSIONAL_IMAGE_ACCEPTED_TYPES.join(',')}
-                multiple
-                className="sr-only"
-                disabled={!imageProvider.configured || isBusy || isSuspended}
-                onChange={(event) => {
-                  void selectFiles(event.currentTarget.files)
-                  event.currentTarget.value = ''
-                }}
-              />
-              <p className="break-words text-xs text-muted-foreground">
-                {remainingSlots} {remainingSlots === 1 ? 'espaço disponível' : 'espaços disponíveis'}.
-              </p>
-            </div>
-          ) : null}
-        </CardContent>
-        <CardFooter className="flex-col items-stretch gap-3 border-t sm:flex-row sm:items-center sm:justify-between">
-          <p className="min-w-0 break-words text-sm text-muted-foreground">
-            {hasUnsavedChanges ? 'Há alterações ainda não salvas.' : 'Todas as alterações estão salvas.'}
-          </p>
-          <Button
-            type="button"
-            className="w-full sm:w-auto"
-            loading={saving}
-            loadingLabel="Salvando…"
-            disabled={!hasUnsavedChanges || isBusy || isSuspended}
-            onClick={() => void savePortfolio()}
-          >
-            <Save aria-hidden="true" /> Salvar portfólio
-          </Button>
-        </CardFooter>
-      </Card>
+                <Label
+                  htmlFor={`professional-portfolio-add-${order}`}
+                  className="flex aspect-[4/3] min-h-44 w-full min-w-0 max-w-full cursor-pointer flex-col items-center justify-center gap-2 px-5 py-6 text-center transition-colors hover:bg-primary/5 focus-within:ring-[3px] focus-within:ring-ring/25"
+                >
+                  <span className="flex size-11 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
+                    <ImagePlus className="size-5" aria-hidden="true" />
+                  </span>
+                  <span className="font-semibold text-foreground">Adicionar trabalho</span>
+                  <span className="max-w-full break-words text-xs font-normal text-muted-foreground">
+                    JPEG, PNG ou WebP · até {PROFESSIONAL_IMAGE_MAX_SIZE_BYTES / 1024 / 1024} MB
+                  </span>
+                  <input
+                    id={`professional-portfolio-add-${order}`}
+                    type="file"
+                    accept={PROFESSIONAL_IMAGE_ACCEPTED_TYPES.join(',')}
+                    className="sr-only"
+                    aria-label={
+                      images.length === 0 && order === 0
+                        ? 'Adicionar primeira foto'
+                        : `Adicionar trabalho ${position}`
+                    }
+                    disabled={!imageProvider.configured || isBusy || isSuspended}
+                    onChange={(event) => {
+                      void selectFiles(event.currentTarget.files)
+                      event.currentTarget.value = ''
+                    }}
+                  />
+                </Label>
+                {errorForSlot ? (
+                  <p
+                    role="alert"
+                    className="mx-4 mb-4 max-w-full break-words rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                  >
+                    {errorForSlot}
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      </section>
 
-      <PrivacyNotice>
-        O arquivo é enviado somente ao provedor configurado. O perfil armazena apenas URLs HTTPS, identificadores, ordem e texto alternativo — nunca blob, base64 ou o arquivo bruto.
+      <PrivacyNotice
+        title="Privacidade das imagens"
+        className="border-border/70 bg-muted/20 p-3 text-xs"
+      >
+        Enviamos o arquivo apenas ao provedor configurado e salvamos somente a URL HTTPS, o identificador, a ordem e o texto alternativo.
       </PrivacyNotice>
+
+      <Dialog
+        open={Boolean(imagePendingRemoval)}
+        onOpenChange={(open) => {
+          if (!open) setImagePendingRemoval(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remover este trabalho?</DialogTitle>
+            <DialogDescription>
+              A imagem sairá da galeria quando você salvar o portfólio. Esta ação pode ser cancelada antes do salvamento.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setImagePendingRemoval(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                if (imagePendingRemoval) removeImage(imagePendingRemoval)
+              }}
+            >
+              <Trash2 aria-hidden="true" /> Remover trabalho
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>,
   )
 }

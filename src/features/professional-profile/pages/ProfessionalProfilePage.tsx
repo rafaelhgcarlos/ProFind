@@ -52,7 +52,6 @@ import { Skeleton } from '../../../components/ui/skeleton'
 import { Textarea } from '../../../components/ui/textarea'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { getImageProvider } from '../../../providers/image-provider.factory'
-import type { ImagePurpose } from '../../../types/image'
 import { listAvailableCatalog } from '../../../services/catalog.service'
 import { toProfessionalBaseLocation } from '../../../services/ibge-localities.service'
 import {
@@ -124,7 +123,6 @@ interface ProfessionalProfileFormState {
     neighborhood: string
   }
   profileImage: ProfessionalImageMetadata | null
-  portfolioImages: ProfessionalImageMetadata[]
 }
 
 type ProfileSectionId =
@@ -153,15 +151,11 @@ function profileSectionForField(field: string): ProfileSectionId | null {
   return null
 }
 
-type ProfessionalImagePurpose = Exclude<ImagePurpose, 'CLIENT_AVATAR'>
-
 type ImageUploadStatus = 'uploading' | 'success' | 'error'
 
-interface ImageUploadTask {
+interface AvatarUploadTask {
   id: string
   file: File
-  purpose: ProfessionalImagePurpose
-  order: number
   previewUrl: string | null
   progress: number
   status: ImageUploadStatus
@@ -246,7 +240,6 @@ function emptyForm(publicName: string): ProfessionalProfileFormState {
     contactVisibility: 'PRIVATE',
     privateLocation: { postalCode: '', neighborhood: '' },
     profileImage: null,
-    portfolioImages: [],
   }
 }
 
@@ -277,7 +270,6 @@ function formFromProfile(
       neighborhood: profile.privateLocation.neighborhood ?? '',
     },
     profileImage: profile.profileImage ? { ...profile.profileImage } : null,
-    portfolioImages: profile.portfolioImages.map((image) => ({ ...image })),
   }
 }
 
@@ -297,9 +289,13 @@ function formatPhone(value: string) {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
 }
 
-function inputFromForm(form: ProfessionalProfileFormState): ProfessionalProfileInput {
+function inputFromForm(
+  form: ProfessionalProfileFormState,
+  portfolioImages: ProfessionalImageMetadata[],
+): ProfessionalProfileInput {
   return {
     ...form,
+    portfolioImages: portfolioImages.map((image) => ({ ...image })),
     experienceYears: nullableInteger(form.experienceYears),
     serviceMode: form.serviceMode || null,
     serviceRadiusKm: nullableInteger(form.serviceRadiusKm),
@@ -314,12 +310,12 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   ) : null
 }
 
-function ImageUploadStatus({
+function AvatarUploadStatus({
   task,
   onRetry,
   onDiscard,
 }: {
-  task: ImageUploadTask
+  task: AvatarUploadTask
   onRetry: () => void
   onDiscard: () => void
 }) {
@@ -327,17 +323,17 @@ function ImageUploadStatus({
 
   return (
     <div
-      className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-3 overflow-hidden rounded-lg border bg-muted/20 p-3 sm:grid-cols-[5rem_minmax(0,1fr)]"
+      className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-3 overflow-hidden rounded-lg border bg-muted/20 p-3 sm:grid-cols-[4rem_minmax(0,1fr)]"
       aria-live="polite"
     >
       {task.previewUrl ? (
         <img
           src={task.previewUrl}
           alt="Prévia da imagem selecionada"
-          className="aspect-square block w-20 max-w-full rounded-md bg-muted object-cover"
+          className="size-16 max-w-full rounded-md bg-muted object-cover"
         />
       ) : (
-        <div className="flex aspect-square w-20 max-w-full items-center justify-center rounded-md bg-muted">
+        <div className="flex size-16 max-w-full items-center justify-center rounded-md bg-muted">
           <Images className="size-6 text-muted-foreground" aria-hidden="true" />
         </div>
       )}
@@ -414,12 +410,12 @@ export function ProfessionalProfilePage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [selectedCityStateCode, setSelectedCityStateCode] = useState('')
   const [selectedCityPickerKey, setSelectedCityPickerKey] = useState(0)
-  const [imageTasks, setImageTasks] = useState<ImageUploadTask[]>([])
-  const [imageSelectionError, setImageSelectionError] = useState<string | null>(null)
-  const [imageRemovalErrors, setImageRemovalErrors] = useState<
+  const [avatarTasks, setAvatarTasks] = useState<AvatarUploadTask[]>([])
+  const [avatarSelectionError, setAvatarSelectionError] = useState<string | null>(null)
+  const [avatarRemovalErrors, setAvatarRemovalErrors] = useState<
     Record<string, string | undefined>
   >({})
-  const [removingImageIds, setRemovingImageIds] = useState<string[]>([])
+  const [removingAvatarIds, setRemovingAvatarIds] = useState<string[]>([])
   const [pendingAvatarCleanup, setPendingAvatarCleanup] =
     useState<ProfessionalImageMetadata | null>(null)
   const [avatarCleanupError, setAvatarCleanupError] = useState<string | null>(
@@ -472,7 +468,10 @@ export function ProfessionalProfilePage() {
     }
   }, [attempt, userId, userProfile?.name])
 
-  const input = useMemo(() => inputFromForm(form), [form])
+  const input = useMemo(
+    () => inputFromForm(form, professionalProfile?.portfolioImages ?? []),
+    [form, professionalProfile?.portfolioImages],
+  )
   const publicationErrors = useMemo(
     () =>
       catalog
@@ -498,8 +497,8 @@ export function ProfessionalProfilePage() {
   const isSuspended = currentStatus === 'SUSPENDED'
   const isSaving = savingStatus !== null || savingAvailability
   const isImageOperationInProgress =
-    imageTasks.some((task) => task.status === 'uploading') ||
-    removingImageIds.length > 0
+    avatarTasks.some((task) => task.status === 'uploading') ||
+    removingAvatarIds.length > 0
   const baselineForm = useMemo(
     () => formFromProfile(professionalProfile, userProfile?.name ?? ''),
     [professionalProfile, userProfile?.name],
@@ -727,15 +726,15 @@ export function ProfessionalProfilePage() {
     previewUrls.current.delete(previewUrl)
   }
 
-  function discardImageTask(task: ImageUploadTask) {
+  function discardAvatarTask(task: AvatarUploadTask) {
     releasePreview(task.previewUrl)
-    setImageTasks((current) => current.filter((item) => item.id !== task.id))
-    setImageSelectionError(null)
+    setAvatarTasks((current) => current.filter((item) => item.id !== task.id))
+    setAvatarSelectionError(null)
   }
 
-  async function runImageUpload(task: ImageUploadTask, retry = false) {
+  async function runAvatarUpload(task: AvatarUploadTask, retry = false) {
     if (!userId) return
-    setImageTasks((current) =>
+    setAvatarTasks((current) =>
       current.map((item) =>
         item.id === task.id
           ? { ...item, status: 'uploading', progress: 0, error: undefined }
@@ -749,10 +748,10 @@ export function ProfessionalProfilePage() {
         {
           ownerId: userId,
           file: task.file,
-          purpose: task.purpose,
+          purpose: 'PROFESSIONAL_AVATAR',
           previousReference: task.previousReference,
           onProgress: (progress) =>
-            setImageTasks((current) =>
+            setAvatarTasks((current) =>
               current.map((item) =>
                 item.id === task.id ? { ...item, progress } : item,
               ),
@@ -760,41 +759,19 @@ export function ProfessionalProfilePage() {
         },
         {
           retry,
-          order: task.order,
+          order: 0,
           altText: task.altText,
-          currentPortfolioCount: form.portfolioImages.length,
         },
       )
 
-      setForm((current) => {
-        if (task.purpose === 'PROFESSIONAL_AVATAR') {
-          return { ...current, profileImage: metadata }
-        }
-        if (
-          current.portfolioImages.some(
-            (image) => image.providerId === metadata.providerId,
-          )
-        ) {
-          return current
-        }
-        return {
-          ...current,
-          portfolioImages: [...current.portfolioImages, metadata]
-            .map((image, order) => ({
-              ...image,
-              order,
-              updatedAt: image.order === order ? image.updatedAt : Date.now(),
-            })),
-        }
-      })
+      setForm((current) => ({ ...current, profileImage: metadata }))
       setFieldErrors((current) => ({
         ...current,
-        [task.purpose === 'PROFESSIONAL_AVATAR' ? 'profileImage' : 'portfolioImages']:
-          undefined,
+        profileImage: undefined,
         form: undefined,
       }))
       releasePreview(task.previewUrl)
-      setImageTasks((current) =>
+      setAvatarTasks((current) =>
         current.map((item) =>
           item.id === task.id
             ? {
@@ -808,13 +785,13 @@ export function ProfessionalProfilePage() {
             : item,
         ),
       )
-      setImageSelectionError(null)
+      setAvatarSelectionError(null)
     } catch (error) {
       const message =
         error instanceof ProfessionalImageError
           ? error.message
           : 'Não foi possível enviar a imagem. Tente novamente.'
-      setImageTasks((current) =>
+      setAvatarTasks((current) =>
         current.map((item) =>
           item.id === task.id
             ? { ...item, status: 'error', error: message }
@@ -824,44 +801,15 @@ export function ProfessionalProfilePage() {
     }
   }
 
-  async function handleImageFiles(
-    files: FileList | null,
-    purpose: ProfessionalImagePurpose,
-  ) {
+  async function handleAvatarFile(files: FileList | null) {
     if (!files || files.length === 0 || isSuspended) return
-    const selectedFiles =
-      purpose === 'PROFESSIONAL_AVATAR'
-        ? Array.from(files).slice(0, 1)
-        : Array.from(files)
-    setImageSelectionError(null)
-
-    const pendingPortfolioCount = imageTasks.filter(
-      (task) =>
-        task.purpose === 'PROFESSIONAL_PORTFOLIO' && task.status !== 'success',
-    ).length
-    const currentPortfolioCount =
-      form.portfolioImages.length + pendingPortfolioCount
-    if (
-      purpose === 'PROFESSIONAL_PORTFOLIO' &&
-      currentPortfolioCount + selectedFiles.length >
-        PROFESSIONAL_PORTFOLIO_MAX_IMAGES
-    ) {
-      setImageSelectionError(
-        `Adicione no máximo ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens ao portfólio.`,
-      )
-      return
-    }
+    const file = files[0]
+    setAvatarSelectionError(null)
 
     try {
-      selectedFiles.forEach((file, index) =>
-        validateProfessionalImageFile(
-          file,
-          purpose,
-          currentPortfolioCount + index,
-        ),
-      )
+      validateProfessionalImageFile(file, 'PROFESSIONAL_AVATAR')
     } catch (error) {
-      setImageSelectionError(
+      setAvatarSelectionError(
         error instanceof ProfessionalImageError
           ? error.message
           : 'Revise as imagens selecionadas.',
@@ -869,52 +817,31 @@ export function ProfessionalProfilePage() {
       return
     }
 
-    if (purpose === 'PROFESSIONAL_AVATAR') {
-      for (const pendingTask of imageTasks.filter(
-        (task) => task.purpose === 'PROFESSIONAL_AVATAR',
-      )) {
-        releasePreview(pendingTask.previewUrl)
-      }
-      setImageTasks((current) =>
-        current.filter((task) => task.purpose !== 'PROFESSIONAL_AVATAR'),
-      )
+    for (const pendingTask of avatarTasks) {
+      releasePreview(pendingTask.previewUrl)
     }
+    setAvatarTasks([])
 
-    for (const [index, file] of selectedFiles.entries()) {
-      const previewUrl =
-        typeof URL.createObjectURL === 'function'
-          ? URL.createObjectURL(file)
-          : ''
-      if (previewUrl) previewUrls.current.add(previewUrl)
-      const task: ImageUploadTask = {
-        id: uploadTaskId(),
-        file,
-        purpose,
-        order:
-          purpose === 'PROFESSIONAL_AVATAR'
-            ? 0
-            : currentPortfolioCount + index,
-        previewUrl,
-        progress: 0,
-        status: 'uploading',
-        previousReference:
-          purpose === 'PROFESSIONAL_AVATAR'
-            ? professionalProfile?.profileImage
-            : null,
-        altText:
-          purpose === 'PROFESSIONAL_AVATAR'
-            ? form.profileImage?.altText
-            : undefined,
-      }
-      setImageTasks((current) => [...current, task])
-      await runImageUpload(task)
+    const previewUrl =
+      typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : ''
+    if (previewUrl) previewUrls.current.add(previewUrl)
+    const task: AvatarUploadTask = {
+      id: uploadTaskId(),
+      file,
+      previewUrl,
+      progress: 0,
+      status: 'uploading',
+      previousReference: professionalProfile?.profileImage,
+      altText: form.profileImage?.altText,
     }
+    setAvatarTasks([task])
+    await runAvatarUpload(task)
   }
 
   async function retryAvatarCleanup() {
     if (!pendingAvatarCleanup || !userId) return
     const reference = pendingAvatarCleanup
-    setRemovingImageIds((current) => [...current, reference.providerId])
+    setRemovingAvatarIds((current) => [...current, reference.providerId])
     try {
       await removeProfessionalImage(
         imageProvider,
@@ -935,19 +862,15 @@ export function ProfessionalProfilePage() {
           : `O perfil continua sem foto, mas o arquivo ainda não pôde ser removido do provedor. ${detail}`,
       )
     } finally {
-      setRemovingImageIds((current) =>
+      setRemovingAvatarIds((current) =>
         current.filter((providerId) => providerId !== reference.providerId),
       )
     }
   }
 
-  async function handleRemoveImage(
-    image: ProfessionalImageMetadata,
-    purpose: ProfessionalImagePurpose,
-  ) {
-    if (!userId || removingImageIds.includes(image.providerId)) return
+  async function handleRemoveAvatar(image: ProfessionalImageMetadata) {
+    if (!userId || removingAvatarIds.includes(image.providerId)) return
     if (
-      purpose === 'PROFESSIONAL_AVATAR' &&
       image.providerId !== professionalProfile?.profileImage?.providerId
     ) {
       setForm((current) => ({
@@ -956,57 +879,42 @@ export function ProfessionalProfilePage() {
           ? { ...professionalProfile.profileImage }
           : null,
       }))
-      const localTask = imageTasks.find(
+      const localTask = avatarTasks.find(
         (task) => task.providerId === image.providerId,
       )
-      if (localTask) discardImageTask(localTask)
+      if (localTask) discardAvatarTask(localTask)
       setFieldErrors((current) => ({
         ...current,
         profileImage: undefined,
       }))
       return
     }
-    setRemovingImageIds((current) => [...current, image.providerId])
-    setImageRemovalErrors((current) => ({
+    setRemovingAvatarIds((current) => [...current, image.providerId])
+    setAvatarRemovalErrors((current) => ({
       ...current,
       [image.providerId]: undefined,
     }))
 
     try {
-      if (
-        purpose === 'PROFESSIONAL_AVATAR' &&
-        image.provider !== 'LEGACY'
-      ) {
-        await prepareImageRemoval(imageProvider, image, userId, purpose)
-      } else if (image.provider !== 'LEGACY') {
-        await removeProfessionalImage(imageProvider, image, userId, purpose)
+      if (image.provider !== 'LEGACY') {
+        await prepareImageRemoval(
+          imageProvider,
+          image,
+          userId,
+          'PROFESSIONAL_AVATAR',
+        )
       }
-      setForm((current) =>
-        purpose === 'PROFESSIONAL_AVATAR'
-          ? { ...current, profileImage: null }
-          : {
-              ...current,
-              portfolioImages: current.portfolioImages
-                .filter((item) => item.providerId !== image.providerId)
-                .map((item, order) => ({
-                  ...item,
-                  order,
-                  updatedAt:
-                    item.order === order ? item.updatedAt : Date.now(),
-                })),
-            },
-      )
-      const localTask = imageTasks.find(
+      setForm((current) => ({ ...current, profileImage: null }))
+      const localTask = avatarTasks.find(
         (task) => task.providerId === image.providerId,
       )
-      if (localTask) discardImageTask(localTask)
+      if (localTask) discardAvatarTask(localTask)
       setFieldErrors((current) => ({
         ...current,
-        [purpose === 'PROFESSIONAL_AVATAR' ? 'profileImage' : 'portfolioImages']:
-          undefined,
+        profileImage: undefined,
       }))
     } catch (error) {
-      setImageRemovalErrors((current) => ({
+      setAvatarRemovalErrors((current) => ({
         ...current,
         [image.providerId]:
           error instanceof ProfessionalImageError
@@ -1014,44 +922,28 @@ export function ProfessionalProfilePage() {
             : 'Não foi possível remover a imagem. Tente novamente.',
       }))
     } finally {
-      setRemovingImageIds((current) =>
+      setRemovingAvatarIds((current) =>
         current.filter((providerId) => providerId !== image.providerId),
       )
     }
   }
 
-  function updateImageAltText(
-    image: ProfessionalImageMetadata,
-    purpose: ProfessionalImagePurpose,
-    altText: string,
-  ) {
-    setForm((current) =>
-      purpose === 'PROFESSIONAL_AVATAR'
-        ? {
-            ...current,
-            profileImage: current.profileImage
-              ? { ...current.profileImage, altText, updatedAt: Date.now() }
-              : null,
-          }
-        : {
-            ...current,
-            portfolioImages: current.portfolioImages.map((item) =>
-              item.providerId === image.providerId
-                ? { ...item, altText, updatedAt: Date.now() }
-                : item,
-            ),
-          },
-    )
+  function updateAvatarAltText(altText: string) {
+    setForm((current) => ({
+      ...current,
+      profileImage: current.profileImage
+        ? { ...current.profileImage, altText, updatedAt: Date.now() }
+        : null,
+    }))
     setFieldErrors((current) => ({
       ...current,
-      [purpose === 'PROFESSIONAL_AVATAR' ? 'profileImage' : 'portfolioImages']:
-        undefined,
+      profileImage: undefined,
     }))
   }
 
-  function previewFor(image: ProfessionalImageMetadata) {
+  function previewForAvatar(image: ProfessionalImageMetadata) {
     return (
-      imageTasks.find((task) => task.providerId === image.providerId)
+      avatarTasks.find((task) => task.providerId === image.providerId)
         ?.previewUrl ?? image.url
     )
   }
@@ -1081,9 +973,7 @@ export function ProfessionalProfilePage() {
       )
       setProfessionalProfile(savedProfile)
       setForm(formFromProfile(savedProfile, userProfile?.name ?? ''))
-      setImageTasks((current) =>
-        current.filter((task) => task.purpose !== 'PROFESSIONAL_AVATAR'),
-      )
+      setAvatarTasks([])
       syncProfessionalProfile(savedProfile)
       syncProfessionalProfileStatus(
         userProfileStatusForProfessionalProfile(status),
@@ -1262,7 +1152,6 @@ export function ProfessionalProfilePage() {
       phone={form.phone}
       contactVisibility={form.contactVisibility}
       profileImage={form.profileImage}
-      portfolioImages={form.portfolioImages}
     />
   )
 
@@ -1271,7 +1160,7 @@ export function ProfessionalProfilePage() {
       <ProfileBuilderHeader
         publicName={form.publicName}
         headline={form.headline}
-        avatarUrl={form.profileImage ? previewFor(form.profileImage) : undefined}
+        avatarUrl={form.profileImage ? previewForAvatar(form.profileImage) : undefined}
         status={currentStatus}
         completion={completion}
         dirty={hasUnsavedChanges}
@@ -1442,7 +1331,7 @@ export function ProfessionalProfilePage() {
               {form.profileImage ? (
                 <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-4 overflow-hidden rounded-lg border bg-card p-4 sm:grid-cols-[7rem_minmax(0,1fr)]">
                   <img
-                    src={previewFor(form.profileImage)}
+                    src={previewForAvatar(form.profileImage)}
                     alt={form.profileImage.altText || 'Prévia da foto de perfil'}
                     className="aspect-square block w-full min-w-0 max-w-full rounded-md bg-muted object-cover"
                   />
@@ -1457,11 +1346,7 @@ export function ProfessionalProfilePage() {
                         disabled={isSaving || isSuspended}
                         onChange={(event) =>
                           form.profileImage &&
-                          updateImageAltText(
-                            form.profileImage,
-                            'PROFESSIONAL_AVATAR',
-                            event.target.value,
-                          )
+                          updateAvatarAltText(event.target.value)
                         }
                       />
                     </div>
@@ -1469,22 +1354,19 @@ export function ProfessionalProfilePage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      loading={removingImageIds.includes(form.profileImage.providerId)}
+                      loading={removingAvatarIds.includes(form.profileImage.providerId)}
                       loadingLabel="Removendo…"
                       disabled={isSaving || isSuspended}
                       onClick={() =>
                         form.profileImage &&
-                        void handleRemoveImage(
-                          form.profileImage,
-                          'PROFESSIONAL_AVATAR',
-                        )
+                        void handleRemoveAvatar(form.profileImage)
                       }
                     >
                       <Trash2 aria-hidden="true" /> Remover foto
                     </Button>
-                    {imageRemovalErrors[form.profileImage.providerId] ? (
+                    {avatarRemovalErrors[form.profileImage.providerId] ? (
                       <p role="alert" className="text-sm text-destructive">
-                        {imageRemovalErrors[form.profileImage.providerId]}
+                        {avatarRemovalErrors[form.profileImage.providerId]}
                       </p>
                     ) : null}
                   </div>
@@ -1515,7 +1397,7 @@ export function ProfessionalProfilePage() {
                     </span>
                   ) : null}
                 </Label>
-                <Input
+                <input
                   id="professional-profile-image-file"
                   type="file"
                   accept={PROFESSIONAL_IMAGE_ACCEPTED_TYPES.join(',')}
@@ -1527,26 +1409,19 @@ export function ProfessionalProfilePage() {
                     isSuspended
                   }
                   onChange={(event) => {
-                    void handleImageFiles(
-                      event.currentTarget.files,
-                      'PROFESSIONAL_AVATAR',
-                    )
+                    void handleAvatarFile(event.currentTarget.files)
                     event.currentTarget.value = ''
                   }}
                 />
               </div>
-              {imageTasks
-                .filter(
-                  (task) =>
-                    task.purpose === 'PROFESSIONAL_AVATAR' &&
-                    task.status !== 'success',
-                )
+              {avatarTasks
+                .filter((task) => task.status !== 'success')
                 .map((task) => (
-                  <ImageUploadStatus
+                  <AvatarUploadStatus
                     key={task.id}
                     task={task}
-                    onRetry={() => void runImageUpload(task, true)}
-                    onDiscard={() => discardImageTask(task)}
+                    onRetry={() => void runAvatarUpload(task, true)}
+                    onDiscard={() => discardAvatarTask(task)}
                   />
                 ))}
               {avatarCleanupError ? (
@@ -1561,7 +1436,7 @@ export function ProfessionalProfilePage() {
                         variant="outline"
                         size="sm"
                         className="mt-3"
-                        loading={removingImageIds.includes(
+                        loading={removingAvatarIds.includes(
                           pendingAvatarCleanup.providerId,
                         )}
                         loadingLabel="Removendo…"
@@ -1576,9 +1451,9 @@ export function ProfessionalProfilePage() {
               <FieldError id="professional-profileImage-error" message={fieldErrors.profileImage} />
             </fieldset>
 
-            {imageSelectionError ? (
+            {avatarSelectionError ? (
               <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {imageSelectionError}
+                {avatarSelectionError}
               </p>
             ) : null}
             <PrivacyNotice>
@@ -1595,9 +1470,9 @@ export function ProfessionalProfilePage() {
                 <span className="min-w-0 break-words">Portfólio</span>
               </CardTitle>
               <CardDescription className="break-words">
-                {form.portfolioImages.length === 0
+                {(professionalProfile?.portfolioImages.length ?? 0) === 0
                   ? 'Nenhuma imagem adicionada'
-                  : `${form.portfolioImages.length} de ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens`}
+                  : `${professionalProfile?.portfolioImages.length ?? 0} de ${PROFESSIONAL_PORTFOLIO_MAX_IMAGES} imagens`}
               </CardDescription>
               <FieldError
                 id="professional-portfolioImages-error"
