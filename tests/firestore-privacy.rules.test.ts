@@ -7,6 +7,7 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
 import {
+  deleteDoc,
   doc,
   getDoc,
   serverTimestamp,
@@ -509,5 +510,99 @@ describe('Firestore privacy rules for professional profiles', () => {
         updatedAt: serverTimestamp(),
       }),
     )
+  })
+})
+
+describe('Firestore rules for administrative access', () => {
+  const adminId = 'authorized-admin'
+  const commonUserId = 'common-user'
+
+  async function seedAdministrativeDocuments(active = true) {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore()
+      await setDoc(doc(firestore, 'adminAccess', adminId), {
+        active,
+        schemaVersion: 1,
+        provisionedAt: new Date('2026-10-26T12:00:00Z'),
+        provisionedBy: 'bootstrap:firebase-console',
+      })
+      await setDoc(doc(firestore, 'adminData', 'panelStatus'), {
+        ready: true,
+      })
+      await setDoc(doc(firestore, 'users', commonUserId), {
+        name: 'Usuário Comum',
+        email: 'comum@example.com',
+        roles: ['client'],
+        activeMode: 'client',
+        professionalProfileStatus: 'not-started',
+      })
+    })
+  }
+
+  it('permite ao administrador ler somente sua própria credencial', async () => {
+    await seedAdministrativeDocuments()
+    const admin = testEnvironment.authenticatedContext(adminId).firestore()
+    const common = testEnvironment.authenticatedContext(commonUserId).firestore()
+    const visitor = testEnvironment.unauthenticatedContext().firestore()
+
+    const snapshot = await assertSucceeds(
+      getDoc(doc(admin, 'adminAccess', adminId)),
+    )
+    expect(snapshot.data()).toMatchObject({ active: true, schemaVersion: 1 })
+    await assertFails(getDoc(doc(common, 'adminAccess', adminId)))
+    await assertFails(getDoc(doc(visitor, 'adminAccess', adminId)))
+  })
+
+  it('nega criação, alteração e exclusão de credenciais a qualquer cliente web', async () => {
+    await seedAdministrativeDocuments()
+    const admin = testEnvironment.authenticatedContext(adminId).firestore()
+    const common = testEnvironment.authenticatedContext(commonUserId).firestore()
+
+    await assertFails(
+      setDoc(doc(common, 'adminAccess', commonUserId), {
+        active: true,
+        schemaVersion: 1,
+        provisionedAt: serverTimestamp(),
+        provisionedBy: commonUserId,
+      }),
+    )
+    await assertFails(
+      updateDoc(doc(admin, 'adminAccess', adminId), { active: false }),
+    )
+    await assertFails(deleteDoc(doc(admin, 'adminAccess', adminId)))
+  })
+
+  it('impede autopromoção por roles e activeMode no documento público do usuário', async () => {
+    await seedAdministrativeDocuments()
+    const common = testEnvironment.authenticatedContext(commonUserId).firestore()
+
+    await assertFails(
+      updateDoc(doc(common, 'users', commonUserId), {
+        roles: ['client', 'admin'],
+        activeMode: 'admin',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('protege dados administrativos e falha de forma fechada após revogação', async () => {
+    await seedAdministrativeDocuments()
+    const admin = testEnvironment.authenticatedContext(adminId).firestore()
+    const common = testEnvironment.authenticatedContext(commonUserId).firestore()
+    const visitor = testEnvironment.unauthenticatedContext().firestore()
+    const adminDataPath = 'adminData/panelStatus'
+
+    await assertSucceeds(getDoc(doc(admin, adminDataPath)))
+    await assertFails(getDoc(doc(common, adminDataPath)))
+    await assertFails(getDoc(doc(visitor, adminDataPath)))
+    await assertFails(setDoc(doc(admin, 'adminData', 'webWrite'), { ready: true }))
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'adminAccess', adminId), {
+        active: false,
+      })
+    })
+
+    await assertFails(getDoc(doc(admin, adminDataPath)))
   })
 })

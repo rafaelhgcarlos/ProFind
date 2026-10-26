@@ -172,3 +172,28 @@ As [diretrizes globais de UX/UI](docs/ux-ui-guidelines.md) são requisito
 transversal para toda nova interface. Elas definem hierarquia, padrões por
 contexto, privacidade visível, estados de feedback e o checklist de entrega de
 frontend estabelecidos pela Issue #41.
+
+## Acesso administrativo
+
+A rota `/admin` exige uma sessão válida e uma credencial ativa em
+`adminAccess/{uid}`. Essa credencial é observada em tempo real e não pode ser
+criada, alterada ou excluída por nenhum cliente web, inclusive por uma conta já
+autorizada. Papéis públicos, e-mail, `localStorage` e parâmetros de URL não são
+fontes de autorização.
+
+A estrutura do documento, o bootstrap manual pelo Firebase Console, a
+revogação e o roteiro com contas admin/comum estão em
+[`docs/admin-access.md`](docs/admin-access.md). A interface desta etapa prepara
+as áreas futuras sem expor links quebrados, operações ou indicadores fictícios.
+
+## Núcleo de solicitações e distribuição
+
+O contrato transacional de solicitação aberta, aceite exclusivo, reserva de
+agenda, recusa por rodada e cancelamento com reabertura está implementado nas
+camadas de repository/service e protegido pelas Security Rules. A prova usa
+clientes autenticados independentes no emulador e não depende de telas ou de um
+backend novo.
+
+Entidades, estados, períodos no fuso `America/Sao_Paulo`, invariantes,
+privacidade, índice, execução da prova e plano de migração estão documentados em
+[`docs/service-request-domain.md`](docs/service-request-domain.md).

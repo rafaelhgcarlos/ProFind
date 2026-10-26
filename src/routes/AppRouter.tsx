@@ -6,6 +6,7 @@ import { NotFoundPage } from '../features/not-found/pages/NotFoundPage'
 import { Skeleton } from '../components/ui/skeleton'
 import { RegistrationDraftProvider } from '../features/registration/registration-draft-provider'
 import { ProtectedRoute } from '../features/auth/components/ProtectedRoute'
+import { AdminAccessRoute } from '../features/admin/components/AdminAccessRoute'
 import { ModeRoute } from '../features/onboarding/components/ModeRoute'
 import { OnboardingRoute } from '../features/onboarding/components/OnboardingRoute'
 import { ProfileHomeRedirect } from '../features/onboarding/components/ProfileHomeRedirect'
@@ -83,6 +84,12 @@ const ClientProfilePage = lazy(() =>
   ),
 )
 
+const AdminDashboardPage = lazy(() =>
+  import('../features/admin/pages/AdminDashboardPage').then((module) => ({
+    default: module.AdminDashboardPage,
+  })),
+)
+
 function RouteFallback() {
   return (
     <div
@@ -133,6 +140,16 @@ export function AppRouter() {
         }
       />
       <Route element={<ProtectedRoute />}>
+        <Route element={<AdminAccessRoute />}>
+          <Route
+            path="/admin"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminDashboardPage />
+              </Suspense>
+            }
+          />
+        </Route>
         <Route element={<ProfileRoute />}>
           <Route path="/conta" element={<ProfileHomeRedirect />} />
           <Route element={<OnboardingRoute />}>

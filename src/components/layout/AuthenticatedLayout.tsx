@@ -1,5 +1,8 @@
 import {
+  Activity,
+  BookOpenText,
   BriefcaseBusiness,
+  ClipboardCheck,
   ClipboardList,
   Compass,
   Home,
@@ -7,10 +10,8 @@ import {
   LogOut,
   MessageCircle,
   Search,
-  Settings,
   ShieldCheck,
   UserRound,
-  Users,
   type LucideIcon,
 } from 'lucide-react'
 import { useContext, useState, type PropsWithChildren, type ReactNode } from 'react'
@@ -30,6 +31,8 @@ export interface LayoutNavigationItem {
   href: string
   icon: LucideIcon
   showOnMobile?: boolean
+  disabled?: boolean
+  disabledReason?: string
 }
 
 export type AuthenticatedMode = 'client' | 'professional' | 'admin'
@@ -57,8 +60,27 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
   ],
   admin: [
     { label: 'Visão geral', href: '/admin', icon: ShieldCheck },
-    { label: 'Usuários', href: '/admin/usuarios', icon: Users },
-    { label: 'Configurações', href: '/admin/configuracoes', icon: Settings },
+    {
+      label: 'Análise',
+      href: '/admin/profissionais',
+      icon: ClipboardCheck,
+      disabled: true,
+      disabledReason: 'Disponível em breve.',
+    },
+    {
+      label: 'Catálogo',
+      href: '/admin/catalogo',
+      icon: BookOpenText,
+      disabled: true,
+      disabledReason: 'Disponível em breve.',
+    },
+    {
+      label: 'Operação',
+      href: '/admin/operacao',
+      icon: Activity,
+      disabled: true,
+      disabledReason: 'Disponível em breve.',
+    },
   ],
 }
 
@@ -139,6 +161,20 @@ export function AuthenticatedLayout({
       {mobileNavigationItems.map((item) => {
         const active = isNavigationItemActive(activePathname, item.href)
         const Icon = item.icon
+        if (item.disabled) {
+          return (
+            <span
+              key={item.href}
+              aria-disabled="true"
+              title={item.disabledReason}
+              className="relative flex min-h-16 min-w-0 max-w-full cursor-not-allowed flex-col items-center justify-center gap-1 overflow-hidden rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground opacity-55"
+            >
+              <Icon className="size-5" aria-hidden="true" />
+              <span className="max-w-full truncate">{item.label}</span>
+              <span className="sr-only">Em breve</span>
+            </span>
+          )
+        }
         return (
           <Link
             key={item.href}
@@ -183,6 +219,22 @@ export function AuthenticatedLayout({
           {navigation.map((item) => {
             const active = isNavigationItemActive(activePathname, item.href)
             const Icon = item.icon
+            if (item.disabled) {
+              return (
+                <span
+                  key={item.href}
+                  aria-disabled="true"
+                  title={item.disabledReason}
+                  className="flex min-h-11 cursor-not-allowed items-center gap-3 rounded-md border-l-[3px] border-transparent px-3 text-sm font-medium text-muted-foreground opacity-55"
+                >
+                  <Icon className="size-5" aria-hidden="true" />
+                  <span>{item.label}</span>
+                  <span className="ml-auto text-[0.65rem] font-semibold uppercase tracking-wide">
+                    Em breve
+                  </span>
+                </span>
+              )
+            }
             return (
               <Link
                 key={item.href}
@@ -237,10 +289,7 @@ export function AuthenticatedLayout({
               <p className="max-w-48 truncate text-sm font-semibold">{userName}</p>
               <p className="text-xs text-muted-foreground">Conta ativa</p>
             </div>
-            {mode === 'admin' ? (
-              <Avatar><AvatarFallback aria-label={userName}>{initials}</AvatarFallback></Avatar>
-            ) : (
-              <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
+            <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <button type="button" aria-label={`Abrir menu da conta de ${userName}`} className="rounded-full focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30">
                     <Avatar className="border border-primary/20">
@@ -251,7 +300,9 @@ export function AuthenticatedLayout({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel className="max-w-48 truncate">{userName}</DropdownMenuLabel>
-                  <DropdownMenuItem asChild><Link to="/conta">Ir para minha área</Link></DropdownMenuItem>
+                  {mode !== 'admin' ? (
+                    <DropdownMenuItem asChild><Link to="/conta">Ir para minha área</Link></DropdownMenuItem>
+                  ) : null}
                   {authentication?.status === 'authenticated' ? (
                     <DropdownMenuItem
                       className="min-h-11"
@@ -271,8 +322,7 @@ export function AuthenticatedLayout({
                     </p>
                   ) : null}
                 </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            </DropdownMenu>
           </div>
         </header>
 

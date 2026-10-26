@@ -6,6 +6,352 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    function isActiveAdmin() {
+      let accessPath = /databases/$(database)/documents/adminAccess/$(request.auth.uid);
+
+      return request.auth != null
+        && exists(accessPath)
+        && get(accessPath).data.active == true
+        && get(accessPath).data.schemaVersion == 1;
+    }
+
+    function hasApprovedOperationalProfile(professionalId) {
+      let accessPath = /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId);
+      let profilePath = /databases/$(database)/documents/professionalProfiles/$(professionalId);
+      let access = get(accessPath).data;
+      let profile = get(profilePath).data;
+
+      return request.auth != null
+        && request.auth.uid == professionalId
+        && exists(accessPath)
+        && exists(profilePath)
+        && access.professionalId == professionalId
+        && access.reviewStatus == 'APPROVED'
+        && access.active == true
+        && access.profileVersion is int
+        && access.profileVersion > 0
+        && access.approvedVersion == access.profileVersion
+        && access.approvedCategoryIds is list
+        && access.approvedSpecialtyIds is list
+        && access.approvedSelectedCityIbgeCodes is list
+        && access.eligibleCityIbgeCodes is list
+        && profile.ownerId == professionalId
+        && profile.status == 'PUBLISHED'
+        && profile.categoryIds == access.approvedCategoryIds
+        && profile.specialtyIds == access.approvedSpecialtyIds
+        && profile.baseLocation.ibgeCode == access.approvedBaseCityIbgeCode
+        && profile.get('selectedCityIbgeCodes', [])
+          == access.approvedSelectedCityIbgeCodes;
+    }
+
+    function professionalMatchesRequest(summary, professionalId) {
+      let access = get(
+        /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)
+      ).data;
+
+      return hasApprovedOperationalProfile(professionalId)
+        && summary.clientId != professionalId
+        && summary.categoryId in access.approvedCategoryIds
+        && summary.specialtyId in access.approvedSpecialtyIds
+        && summary.cityIbgeCode in access.eligibleCityIbgeCodes
+        && !(professionalId in summary.excludedProfessionalIds);
+    }
+
+    function hasAvailableServiceSlot(summary, professionalId) {
+      let slotId = summary.serviceDate + '_' + summary.period;
+      let availabilityPath = /databases/$(database)/documents/professionalAvailability/$(professionalId)/slots/$(slotId);
+      let availability = get(availabilityPath).data;
+
+      return exists(availabilityPath)
+        && availability.professionalId == professionalId
+        && availability.serviceDate == summary.serviceDate
+        && availability.period == summary.period
+        && availability.available == true;
+    }
+
+    function hasValidAcceptanceDocuments(requestId, professionalId, before, after) {
+      let assignmentPath = /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(after.currentAssignmentId);
+      let assignment = getAfter(assignmentPath).data;
+      let reservationPath = /databases/$(database)/documents/professionalReservations/$(professionalId)/slots/$(assignment.reservationId);
+      let reservation = getAfter(reservationPath).data;
+      let roundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(before.currentRoundId);
+      let round = getAfter(roundPath).data;
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(assignment.acceptedEventId);
+      let event = getAfter(eventPath).data;
+
+      return !exists(assignmentPath)
+        && !exists(reservationPath)
+        && !exists(eventPath)
+        && existsAfter(assignmentPath)
+        && existsAfter(reservationPath)
+        && existsAfter(roundPath)
+        && existsAfter(eventPath)
+        && get(roundPath).data.status == 'OPEN'
+        && round.diff(get(roundPath).data).affectedKeys().hasOnly([
+          'status', 'closedAt', 'closedReason', 'updatedAt'
+        ])
+        && round.status == 'CLOSED'
+        && round.closedAt == request.time
+        && round.closedReason == 'ASSIGNED'
+        && round.updatedAt == request.time
+        && assignment.keys().hasAll([
+          'assignmentId', 'requestId', 'clientId', 'professionalId',
+          'round', 'status', 'serviceDate', 'period', 'reservationId',
+          'acceptedEventId', 'acceptedAt', 'endedAt', 'endReason'
+        ])
+        && assignment.keys().hasOnly([
+          'assignmentId', 'requestId', 'clientId', 'professionalId',
+          'round', 'status', 'serviceDate', 'period', 'reservationId',
+          'acceptedEventId', 'acceptedAt', 'endedAt', 'endReason'
+        ])
+        && assignment.assignmentId == after.currentAssignmentId
+        && assignment.requestId == requestId
+        && assignment.clientId == before.clientId
+        && assignment.professionalId == professionalId
+        && assignment.round == before.round
+        && assignment.status == 'ACTIVE'
+        && assignment.serviceDate == before.serviceDate
+        && assignment.period == before.period
+        && assignment.reservationId == before.serviceDate + '_' + before.period
+        && assignment.acceptedAt == request.time
+        && assignment.endedAt == null
+        && assignment.endReason == null
+        && reservation.keys().hasAll([
+          'reservationId', 'professionalId', 'requestId', 'assignmentId',
+          'serviceDate', 'period', 'round', 'createdAt'
+        ])
+        && reservation.keys().hasOnly([
+          'reservationId', 'professionalId', 'requestId', 'assignmentId',
+          'serviceDate', 'period', 'round', 'createdAt'
+        ])
+        && reservation.reservationId == assignment.reservationId
+        && reservation.professionalId == professionalId
+        && reservation.requestId == requestId
+        && reservation.assignmentId == assignment.assignmentId
+        && reservation.serviceDate == before.serviceDate
+        && reservation.period == before.period
+        && reservation.round == before.round
+        && reservation.createdAt == request.time
+        && event.keys().hasAll([
+          'eventId', 'requestId', 'type', 'actorId', 'actorRole', 'round',
+          'assignmentId', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.keys().hasOnly([
+          'eventId', 'requestId', 'type', 'actorId', 'actorRole', 'round',
+          'assignmentId', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == assignment.acceptedEventId
+        && event.requestId == requestId
+        && event.type == 'REQUEST_ASSIGNED'
+        && event.actorId == professionalId
+        && event.actorRole == 'PROFESSIONAL'
+        && event.round == before.round
+        && event.assignmentId == assignment.assignmentId
+        && event.fromStatus == 'OPEN'
+        && event.toStatus == 'ASSIGNED'
+        && event.createdAt == request.time;
+    }
+
+    function isAcceptanceTransition(requestId, professionalId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+      let refusalPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(before.currentRoundId)/refusals/$(professionalId);
+
+      return request.auth != null
+        && request.auth.uid == professionalId
+        && before.status == 'OPEN'
+        && before.assignedProfessionalId == null
+        && before.currentAssignmentId == null
+        && after.status == 'ASSIGNED'
+        && after.assignedProfessionalId == professionalId
+        && after.currentAssignmentId is string
+        && after.round == before.round
+        && after.currentRoundId == before.currentRoundId
+        && after.updatedAt == request.time
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'assignedProfessionalId', 'currentAssignmentId', 'updatedAt'
+        ])
+        && request.time < before.acceptUntil
+        && professionalMatchesRequest(before, professionalId)
+        && hasAvailableServiceSlot(before, professionalId)
+        && !exists(refusalPath)
+        && hasValidAcceptanceDocuments(
+          requestId,
+          professionalId,
+          before,
+          after
+        );
+    }
+
+    function hasValidCancellationDocuments(requestId, professionalId, before, after) {
+      let assignmentPath = /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(before.currentAssignmentId);
+      let oldAssignment = get(assignmentPath).data;
+      let newAssignment = getAfter(assignmentPath).data;
+      let reservationPath = /databases/$(database)/documents/professionalReservations/$(professionalId)/slots/$(oldAssignment.reservationId);
+      let nextRoundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(after.currentRoundId);
+      let nextRound = getAfter(nextRoundPath).data;
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(newAssignment.endedEventId);
+      let event = getAfter(eventPath).data;
+
+      return exists(assignmentPath)
+        && exists(reservationPath)
+        && !exists(nextRoundPath)
+        && !exists(eventPath)
+        && existsAfter(assignmentPath)
+        && !existsAfter(reservationPath)
+        && existsAfter(nextRoundPath)
+        && existsAfter(eventPath)
+        && oldAssignment.status == 'ACTIVE'
+        && oldAssignment.professionalId == professionalId
+        && oldAssignment.requestId == requestId
+        && newAssignment.diff(oldAssignment).affectedKeys().hasOnly([
+          'status', 'endedAt', 'endReason', 'endedEventId'
+        ])
+        && newAssignment.status == 'CANCELLED'
+        && newAssignment.endedAt == request.time
+        && newAssignment.endReason == 'PROFESSIONAL_CANCELLATION'
+        && newAssignment.endedEventId is string
+        && nextRound.keys().hasAll([
+          'roundId', 'requestId', 'round', 'status', 'reason',
+          'excludedProfessionalIds', 'previousAssignmentId', 'openedAt',
+          'closedAt', 'closedReason', 'updatedAt'
+        ])
+        && nextRound.keys().hasOnly([
+          'roundId', 'requestId', 'round', 'status', 'reason',
+          'excludedProfessionalIds', 'previousAssignmentId', 'openedAt',
+          'closedAt', 'closedReason', 'updatedAt'
+        ])
+        && nextRound.roundId == after.currentRoundId
+        && nextRound.requestId == requestId
+        && nextRound.round == before.round + 1
+        && nextRound.status == 'OPEN'
+        && nextRound.reason == 'PROFESSIONAL_CANCELLATION'
+        && nextRound.excludedProfessionalIds == [professionalId]
+        && nextRound.previousAssignmentId == before.currentAssignmentId
+        && nextRound.openedAt == request.time
+        && nextRound.closedAt == null
+        && nextRound.closedReason == null
+        && nextRound.updatedAt == request.time
+        && event.keys().hasAll([
+          'eventId', 'requestId', 'type', 'actorId', 'actorRole', 'round',
+          'targetRound', 'assignmentId', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.keys().hasOnly([
+          'eventId', 'requestId', 'type', 'actorId', 'actorRole', 'round',
+          'targetRound', 'assignmentId', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == newAssignment.endedEventId
+        && event.requestId == requestId
+        && event.type == 'PROFESSIONAL_CANCELLED_AND_REOPENED'
+        && event.actorId == professionalId
+        && event.actorRole == 'PROFESSIONAL'
+        && event.round == before.round
+        && event.targetRound == before.round + 1
+        && event.assignmentId == before.currentAssignmentId
+        && event.fromStatus == 'ASSIGNED'
+        && event.toStatus == 'OPEN'
+        && event.createdAt == request.time;
+    }
+
+    function isCancellationTransition(requestId, professionalId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == professionalId
+        && before.status == 'ASSIGNED'
+        && before.assignedProfessionalId == professionalId
+        && before.currentAssignmentId is string
+        && request.time < before.periodStartAt
+        && after.status == 'OPEN'
+        && after.round == before.round + 1
+        && after.currentRoundId is string
+        && after.currentRoundId != before.currentRoundId
+        && after.assignedProfessionalId == null
+        && after.currentAssignmentId == null
+        && after.reopenReason == 'PROFESSIONAL_CANCELLATION'
+        && after.excludedProfessionalIds == [professionalId]
+        && after.updatedAt == request.time
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'round', 'currentRoundId', 'assignedProfessionalId',
+          'currentAssignmentId', 'reopenReason', 'excludedProfessionalIds',
+          'updatedAt'
+        ])
+        && hasValidCancellationDocuments(
+          requestId,
+          professionalId,
+          before,
+          after
+        );
+    }
+
+    function isRefusalCreate(requestId, roundId, professionalId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let summary = get(requestPath).data;
+      let refusalPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(roundId)/refusals/$(professionalId);
+      let refusal = getAfter(refusalPath).data;
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(refusal.eventId);
+      let event = getAfter(eventPath).data;
+
+      return request.auth != null
+        && request.auth.uid == professionalId
+        && summary.status == 'OPEN'
+        && summary.currentRoundId == roundId
+        && request.time < summary.acceptUntil
+        && professionalMatchesRequest(summary, professionalId)
+        && !exists(refusalPath)
+        && !exists(eventPath)
+        && get(
+          /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(roundId)
+        ).data.status == 'OPEN'
+        && refusal.keys().hasAll([
+          'requestId', 'roundId', 'round', 'professionalId', 'decision',
+          'eventId', 'createdAt'
+        ])
+        && refusal.keys().hasOnly([
+          'requestId', 'roundId', 'round', 'professionalId', 'decision',
+          'eventId', 'createdAt'
+        ])
+        && refusal.requestId == requestId
+        && refusal.roundId == roundId
+        && refusal.round == summary.round
+        && refusal.professionalId == professionalId
+        && refusal.decision == 'REFUSED'
+        && refusal.createdAt == request.time
+        && event.keys().hasAll([
+          'eventId', 'requestId', 'type', 'actorId', 'actorRole', 'round',
+          'assignmentId', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.keys().hasOnly([
+          'eventId', 'requestId', 'type', 'actorId', 'actorRole', 'round',
+          'assignmentId', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == refusal.eventId
+        && event.requestId == requestId
+        && event.type == 'PROFESSIONAL_REFUSED'
+        && event.actorId == professionalId
+        && event.actorRole == 'PROFESSIONAL'
+        && event.round == summary.round
+        && event.assignmentId == null
+        && event.fromStatus == 'OPEN'
+        && event.toStatus == 'OPEN'
+        && event.createdAt == request.time;
+    }
+
+    function canReadServiceRequest(requestId) {
+      let summary = get(
+        /databases/$(database)/documents/serviceRequests/$(requestId)
+      ).data;
+
+      return request.auth != null
+        && (request.auth.uid == summary.clientId
+          || request.auth.uid == summary.assignedProfessionalId
+          || isActiveAdmin()
+          || hasApprovedOperationalProfile(request.auth.uid));
+    }
+
     function hasValidLegalAcceptances() {
       let acceptances = request.resource.data.legalAcceptances;
 
@@ -496,6 +842,183 @@ service cloud.firestore {
     // Admin SDK. Clientes não podem criá-los, alterá-los ou consultá-los.
     match /roleEnablementGrants/{userId}/roles/{role} {
       allow read, write: if false;
+    }
+
+    // A credencial administrativa é provisionada e revogada somente por um
+    // responsável confiável no Firebase Console. O cliente web pode observar
+    // apenas o documento associado ao próprio UID e nunca pode escrevê-lo.
+    match /adminAccess/{userId} {
+      allow get: if isDocumentOwner(userId);
+      allow list, create, update, delete: if false;
+    }
+
+    // Namespace reservado para dados operacionais das próximas entregas.
+    // Leituras exigem a mesma credencial ativa; nenhuma escrita web é aberta.
+    match /adminData/{document=**} {
+      allow read: if isActiveAdmin();
+      allow write: if false;
+    }
+
+    // Contrato operacional protegido da análise profissional (#43). Nesta
+    // etapa ele é criado apenas por fixtures do emulador ou ambiente confiável.
+    match /professionalOperationalProfiles/{professionalId} {
+      allow get: if isDocumentOwner(professionalId) || isActiveAdmin();
+      allow list, create, update, delete: if false;
+    }
+
+    // Disponibilidade discreta por data/período. A reserva em coleção separada
+    // é a trava única que impede dois atendimentos no mesmo slot.
+    match /professionalAvailability/{professionalId}/slots/{slotId} {
+      allow get: if isDocumentOwner(professionalId) || isActiveAdmin();
+      allow list: if false;
+      allow create, update: if isDocumentOwner(professionalId)
+        && request.resource.data.keys().hasAll([
+          'professionalId', 'serviceDate', 'period', 'available', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'professionalId', 'serviceDate', 'period', 'available', 'updatedAt'
+        ])
+        && request.resource.data.professionalId == professionalId
+        && slotId == request.resource.data.serviceDate
+          + '_' + request.resource.data.period
+        && request.resource.data.serviceDate is string
+        && request.resource.data.period in ['MORNING', 'AFTERNOON', 'EVENING']
+        && request.resource.data.available is bool
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isDocumentOwner(professionalId)
+        && !exists(
+          /databases/$(database)/documents/professionalReservations/$(professionalId)/slots/$(slotId)
+        );
+    }
+
+    match /serviceRequests/{requestId} {
+      // O resumo não contém endereço ou contato. Profissionais aprovados podem
+      // executar queries de oportunidades; matching volta a ser validado no aceite.
+      allow list: if request.auth != null
+        && (isActiveAdmin()
+          || hasApprovedOperationalProfile(request.auth.uid));
+      allow get: if canReadServiceRequest(requestId);
+      allow create, delete: if false;
+      allow update: if request.auth != null
+        && (isAcceptanceTransition(requestId, request.auth.uid)
+          || isCancellationTransition(requestId, request.auth.uid));
+
+      match /rounds/{roundId} {
+        allow get: if canReadServiceRequest(requestId);
+        allow list: if false;
+        allow create: if request.auth != null
+          && isCancellationTransition(requestId, request.auth.uid)
+          && getAfter(
+            /databases/$(database)/documents/serviceRequests/$(requestId)
+          ).data.currentRoundId == roundId;
+        allow update: if request.auth != null
+          && isAcceptanceTransition(requestId, request.auth.uid)
+          && get(
+            /databases/$(database)/documents/serviceRequests/$(requestId)
+          ).data.currentRoundId == roundId;
+        allow delete: if false;
+
+        match /refusals/{professionalId} {
+          allow get: if isDocumentOwner(professionalId) || isActiveAdmin();
+          allow list: if false;
+          allow create: if isRefusalCreate(
+            requestId,
+            roundId,
+            professionalId
+          );
+          allow update, delete: if false;
+        }
+      }
+
+      match /assignments/{assignmentId} {
+        allow get: if request.auth != null
+          && (isActiveAdmin()
+            || (resource != null
+              && (request.auth.uid == resource.data.clientId
+                || request.auth.uid == resource.data.professionalId)));
+        allow list: if false;
+        allow create: if request.auth != null
+          && isAcceptanceTransition(requestId, request.auth.uid)
+          && getAfter(
+            /databases/$(database)/documents/serviceRequests/$(requestId)
+          ).data.currentAssignmentId == assignmentId;
+        allow update: if request.auth != null
+          && isCancellationTransition(requestId, request.auth.uid)
+          && get(
+            /databases/$(database)/documents/serviceRequests/$(requestId)
+          ).data.currentAssignmentId == assignmentId;
+        allow delete: if false;
+      }
+
+      match /events/{eventId} {
+        allow get: if request.auth != null
+          && (isActiveAdmin()
+            || (resource != null
+              && request.auth.uid == resource.data.actorId)
+            || request.auth.uid == get(
+              /databases/$(database)/documents/serviceRequests/$(requestId)
+            ).data.clientId
+            || request.auth.uid == get(
+              /databases/$(database)/documents/serviceRequests/$(requestId)
+            ).data.assignedProfessionalId);
+        allow list: if false;
+        allow create: if request.auth != null
+          && request.resource.data.eventId == eventId
+          && ((request.resource.data.type == 'REQUEST_ASSIGNED'
+              && isAcceptanceTransition(requestId, request.auth.uid))
+            || (request.resource.data.type == 'PROFESSIONAL_REFUSED'
+              && isRefusalCreate(
+                requestId,
+                get(
+                  /databases/$(database)/documents/serviceRequests/$(requestId)
+                ).data.currentRoundId,
+                request.auth.uid
+              ))
+            || (request.resource.data.type
+                == 'PROFESSIONAL_CANCELLED_AND_REOPENED'
+              && isCancellationTransition(requestId, request.auth.uid)));
+        allow update, delete: if false;
+      }
+    }
+
+    // Endereço, contato e observações ficam fora do resumo consultado no feed.
+    // O antigo responsável perde a leitura assim que a solicitação é reaberta.
+    match /serviceRequestPrivate/{requestId} {
+      allow get: if request.auth != null
+        && exists(
+          /databases/$(database)/documents/serviceRequests/$(requestId)
+        )
+        && (request.auth.uid == get(
+            /databases/$(database)/documents/serviceRequests/$(requestId)
+          ).data.clientId
+          || request.auth.uid == get(
+            /databases/$(database)/documents/serviceRequests/$(requestId)
+          ).data.assignedProfessionalId
+          || isActiveAdmin());
+      allow list, write: if false;
+    }
+
+    match /professionalReservations/{professionalId}/slots/{slotId} {
+      allow get: if isDocumentOwner(professionalId)
+        || (request.auth != null
+          && resource != null
+          && request.auth.uid == get(
+            /databases/$(database)/documents/serviceRequests/$(resource.data.requestId)
+          ).data.clientId)
+        || isActiveAdmin();
+      allow list: if false;
+      allow create: if request.auth != null
+        && request.auth.uid == professionalId
+        && request.resource.data.reservationId == slotId
+        && isAcceptanceTransition(
+          request.resource.data.requestId,
+          professionalId
+        );
+      allow update: if false;
+      allow delete: if request.auth != null
+        && request.auth.uid == professionalId
+        && resource.data.reservationId == slotId
+        && isCancellationTransition(resource.data.requestId, professionalId);
     }
 
     // O catálogo é público, mas sua manutenção acontece somente por
