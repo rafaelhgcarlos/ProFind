@@ -19,7 +19,7 @@ professionalReservations/{professionalId}/slots/{date_period}
 
 `serviceRequests` contém apenas campos necessários ao matching e ao estado: cliente, categoria, especialidade, município IBGE, data, período, limites temporais, rodada e ponteiros da atribuição. Endereço, telefone, nome de contato e observações ficam exclusivamente em `serviceRequestPrivate`.
 
-O documento `professionalOperationalProfiles/{uid}` é o contrato protegido com a futura análise da #43. Ele contém `reviewStatus`, `active`, `profileVersion`, `approvedVersion` e o snapshot dos campos de matching aprovados. Clientes web não podem criá-lo ou alterá-lo. As fixtures de teste são inseridas apenas pelo contexto administrativo do emulador; não existe autoaprovação em produção.
+O documento `professionalOperationalProfiles/{uid}` é a fonte única da análise e da elegibilidade implementadas na #43. Ele contém estado, ativação, versões e o snapshot dos campos de matching aprovados. O profissional só pode criá-lo ou atualizá-lo nas transições estritamente derivadas da própria gravação/submissão; decisões e ativação exigem a credencial administrativa da #31. Não existe autoaprovação em produção. O contrato completo está em `docs/professional-review-domain.md`.
 
 ## Períodos e vencimento
 
@@ -67,7 +67,7 @@ O service faz validações legíveis antes de escrever e as Security Rules repet
 - ausência de recusa ou exclusão nessa rodada;
 - profissional diferente do cliente.
 
-Mudanças nos campos de matching do perfil deixam de coincidir com o snapshot aprovado e bloqueiam o aceite. A #43 integrará o incremento de versão e todas as transições de análise ao fluxo de edição; até lá, somente fixtures restritas representam uma aprovação válida.
+Mudanças relevantes no perfil incrementam `profileVersion`, registram um evento e colocam uma aprovação anterior em reanálise na mesma transação. Suspensão, desativação ou reanálise bloqueiam novos aceites, sem apagar atribuições e reservas já confirmadas.
 
 ## Invariantes e imutabilidade
 

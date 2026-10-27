@@ -7,9 +7,13 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
 import {
+  collection,
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -81,6 +85,27 @@ const privateProfile = {
   updatedAt: new Date('2026-09-22T12:00:00Z'),
 }
 
+function operationalReview(professionalId: string) {
+  return {
+    schemaVersion: 1,
+    professionalId,
+    reviewStatus: 'APPROVED',
+    active: true,
+    profileVersion: 1,
+    submittedVersion: 1,
+    approvedVersion: 1,
+    revision: 1,
+    lastEventId: 'review-1',
+    professionalFeedback: null,
+    approvedCategoryIds: publicProfile.categoryIds,
+    approvedSpecialtyIds: publicProfile.specialtyIds,
+    approvedBaseCityIbgeCode: publicProfile.baseLocation.ibgeCode,
+    approvedSelectedCityIbgeCodes: [],
+    eligibleCityIbgeCodes: [publicProfile.baseLocation.ibgeCode],
+    updatedAt: new Date('2026-09-22T12:00:00Z'),
+  }
+}
+
 async function seedProfiles() {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore()
@@ -99,6 +124,10 @@ async function seedProfiles() {
       professionalProfileStatus: 'not-started',
     })
     await setDoc(doc(firestore, 'professionalProfiles', ownerId), publicProfile)
+    await setDoc(
+      doc(firestore, 'professionalOperationalProfiles', ownerId),
+      operationalReview(ownerId),
+    )
     await setDoc(
       doc(firestore, 'professionalPrivateProfiles', ownerId),
       privateProfile,
@@ -375,8 +404,8 @@ describe('Firestore privacy rules for professional profiles', () => {
     const owner = testEnvironment.authenticatedContext(ownerId).firestore()
     const reference = doc(owner, 'professionalProfiles', ownerId)
 
-    await assertSucceeds(
-      updateDoc(reference, {
+    const imageBatch = writeBatch(owner)
+    imageBatch.update(reference, {
         portfolioImages: [
           {
             provider: 'IMAGEKIT',
@@ -391,8 +420,39 @@ describe('Firestore privacy rules for professional profiles', () => {
           },
         ],
         updatedAt: serverTimestamp(),
-      }),
+      })
+    imageBatch.set(
+      doc(owner, 'professionalOperationalProfiles', ownerId),
+      {
+        ...operationalReview(ownerId),
+        reviewStatus: 'UNDER_REVIEW',
+        profileVersion: 2,
+        submittedVersion: 2,
+        revision: 2,
+        lastEventId: 'review-2',
+        updatedAt: serverTimestamp(),
+      },
     )
+    imageBatch.set(
+      doc(owner, 'professionalOperationalProfiles', ownerId, 'events', 'review-2'),
+      {
+        eventId: 'review-2',
+        entityType: 'PROFESSIONAL',
+        entityId: ownerId,
+        professionalId: ownerId,
+        actorId: ownerId,
+        actorRole: 'PROFESSIONAL',
+        action: 'REANALYSIS_REQUIRED',
+        reasonCode: 'PROFILE_DATA_CHANGED',
+        fromStatus: 'APPROVED',
+        toStatus: 'UNDER_REVIEW',
+        profileVersion: 2,
+        reviewedVersion: null,
+        reason: null,
+        createdAt: serverTimestamp(),
+      },
+    )
+    await assertSucceeds(imageBatch.commit())
     await assertFails(
       updateDoc(reference, {
         profileImage: {
@@ -442,8 +502,8 @@ describe('Firestore privacy rules for professional profiles', () => {
     })
     const owner = testEnvironment.authenticatedContext(imageOwnerId).firestore()
 
-    await assertSucceeds(
-      setDoc(doc(owner, 'professionalProfiles', imageOwnerId), {
+    const batch = writeBatch(owner)
+    batch.set(doc(owner, 'professionalProfiles', imageOwnerId), {
         ...publicProfile,
         ownerId: imageOwnerId,
         status: 'DRAFT',
@@ -464,8 +524,48 @@ describe('Firestore privacy rules for professional profiles', () => {
         })),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      }),
+      })
+    batch.set(
+      doc(owner, 'professionalOperationalProfiles', imageOwnerId),
+      {
+        schemaVersion: 1,
+        professionalId: imageOwnerId,
+        reviewStatus: 'DRAFT',
+        active: false,
+        profileVersion: 1,
+        submittedVersion: null,
+        approvedVersion: null,
+        revision: 1,
+        lastEventId: 'review-1',
+        professionalFeedback: null,
+        approvedCategoryIds: [],
+        approvedSpecialtyIds: [],
+        approvedBaseCityIbgeCode: '',
+        approvedSelectedCityIbgeCodes: [],
+        eligibleCityIbgeCodes: [],
+        updatedAt: serverTimestamp(),
+      },
     )
+    batch.set(
+      doc(owner, 'professionalOperationalProfiles', imageOwnerId, 'events', 'review-1'),
+      {
+        eventId: 'review-1',
+        entityType: 'PROFESSIONAL',
+        entityId: imageOwnerId,
+        professionalId: imageOwnerId,
+        actorId: imageOwnerId,
+        actorRole: 'PROFESSIONAL',
+        action: 'PROFILE_UPDATED',
+        reasonCode: 'PROFILE_DATA_CHANGED',
+        fromStatus: 'DRAFT',
+        toStatus: 'DRAFT',
+        profileVersion: 1,
+        reviewedVersion: null,
+        reason: null,
+        createdAt: serverTimestamp(),
+      },
+    )
+    await assertSucceeds(batch.commit())
   })
 
   it('rejects image metadata with another owner or purpose', async () => {
@@ -604,5 +704,181 @@ describe('Firestore rules for administrative access', () => {
     })
 
     await assertFails(getDoc(doc(admin, adminDataPath)))
+  })
+})
+
+describe('consolidated authorization and repository queries', () => {
+  it('allows the first role setup but denies later role expansion without a grant', async () => {
+    const onboardingUserId = 'first-onboarding-user'
+    const existingClientId = 'existing-client-user'
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore()
+      await setDoc(doc(firestore, 'users', onboardingUserId), {
+        name: 'Primeiro Acesso',
+        email: 'primeiro@example.com',
+        roles: [],
+        activeMode: null,
+        professionalProfileStatus: 'not-started',
+      })
+      await setDoc(doc(firestore, 'users', existingClientId), {
+        name: 'Cliente Existente',
+        email: 'cliente@example.com',
+        roles: ['client'],
+        activeMode: 'client',
+        professionalProfileStatus: 'not-started',
+      })
+    })
+    const onboarding = testEnvironment
+      .authenticatedContext(onboardingUserId)
+      .firestore()
+    const existingClient = testEnvironment
+      .authenticatedContext(existingClientId)
+      .firestore()
+
+    await assertSucceeds(
+      updateDoc(doc(onboarding, 'users', onboardingUserId), {
+        roles: ['client', 'professional'],
+        activeMode: 'client',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(doc(existingClient, 'users', existingClientId), {
+        roles: ['client', 'professional'],
+        activeMode: 'professional',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(doc(onboarding, 'users', existingClientId), {
+        activeMode: 'professional',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('executes the real ordered catalog queries but denies every web write', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore()
+      await setDoc(doc(firestore, 'categories', 'repairs'), {
+        name: 'Reparos',
+        active: true,
+        order: 20,
+      })
+      await setDoc(doc(firestore, 'categories', 'cleaning'), {
+        name: 'Limpeza',
+        active: true,
+        order: 10,
+      })
+      await setDoc(doc(firestore, 'specialties', 'electrician'), {
+        categoryId: 'repairs',
+        name: 'Eletricista',
+        active: true,
+        order: 20,
+      })
+      await setDoc(doc(firestore, 'specialties', 'house-cleaning'), {
+        categoryId: 'cleaning',
+        name: 'Limpeza residencial',
+        active: true,
+        order: 10,
+      })
+      await setDoc(doc(firestore, 'adminAccess', 'catalog-admin'), {
+        active: true,
+        schemaVersion: 1,
+      })
+    })
+    const visitor = testEnvironment.unauthenticatedContext().firestore()
+    const admin = testEnvironment.authenticatedContext('catalog-admin').firestore()
+    const categories = await assertSucceeds(
+      getDocs(query(collection(visitor, 'categories'), orderBy('order', 'asc'))),
+    )
+    const specialties = await assertSucceeds(
+      getDocs(
+        query(collection(visitor, 'specialties'), orderBy('order', 'asc')),
+      ),
+    )
+
+    expect(categories.docs.map((snapshot) => snapshot.id)).toEqual([
+      'cleaning',
+      'repairs',
+    ])
+    expect(specialties.docs.map((snapshot) => snapshot.id)).toEqual([
+      'house-cleaning',
+      'electrician',
+    ])
+    await assertFails(
+      setDoc(doc(visitor, 'categories', 'malicious'), {
+        name: 'Injetada',
+        active: true,
+        order: 0,
+      }),
+    )
+    await assertFails(
+      updateDoc(doc(admin, 'categories', 'repairs'), { active: false }),
+    )
+  })
+
+  it('allows the operational list only to an active administrator', async () => {
+    await seedProfiles()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'adminAccess', 'queue-admin'), {
+        active: true,
+        schemaVersion: 1,
+      })
+    })
+    const admin = testEnvironment.authenticatedContext('queue-admin').firestore()
+    const professional = testEnvironment.authenticatedContext(ownerId).firestore()
+    const common = testEnvironment.authenticatedContext(otherUserId).firestore()
+    const visitor = testEnvironment.unauthenticatedContext().firestore()
+
+    await assertSucceeds(
+      getDocs(collection(admin, 'professionalOperationalProfiles')),
+    )
+    await assertFails(
+      getDocs(collection(professional, 'professionalOperationalProfiles')),
+    )
+    await assertFails(
+      getDocs(collection(common, 'professionalOperationalProfiles')),
+    )
+    await assertFails(
+      getDocs(collection(visitor, 'professionalOperationalProfiles')),
+    )
+  })
+
+  it('keeps a dual-role account restricted to its own private documents', async () => {
+    await seedProfiles()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore()
+      await setDoc(doc(firestore, 'clientProfiles', ownerId), {
+        ownerId,
+        phone: '11999998888',
+        profileImage: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      await setDoc(doc(firestore, 'clientProfiles', otherUserId), {
+        ownerId: otherUserId,
+        phone: '21999998888',
+        profileImage: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    })
+    const dual = testEnvironment.authenticatedContext(ownerId).firestore()
+
+    await assertSucceeds(getDoc(doc(dual, 'clientProfiles', ownerId)))
+    await assertSucceeds(
+      getDoc(doc(dual, 'professionalPrivateProfiles', ownerId)),
+    )
+    await assertFails(getDoc(doc(dual, 'clientProfiles', otherUserId)))
+    await assertFails(
+      getDoc(doc(dual, 'professionalPrivateProfiles', otherUserId)),
+    )
+    await assertFails(
+      updateDoc(doc(dual, 'professionalProfiles', ownerId), {
+        ownerId: otherUserId,
+        updatedAt: serverTimestamp(),
+      }),
+    )
   })
 })

@@ -8,20 +8,28 @@ import {
 } from '@firebase/rules-unit-testing'
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
+  query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
   writeBatch,
+  where,
   type Firestore,
 } from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import type { TransactionCoordinator } from '../src/repositories/service-request.repository'
+import { createProfessionalReviewService } from '../src/services/professional-review.service'
 import { createServiceRequestService } from '../src/services/service-request.service'
 import {
+  assignmentEventId,
   getServicePeriodWindow,
   roundDocumentId,
   serviceSlotId,
@@ -94,15 +102,24 @@ function professionalProfile(professionalId: string) {
   return {
     ownerId: professionalId,
     publicName: `Profissional ${professionalId}`,
+    headline: 'Profissional de manutenção residencial',
+    bio: 'Atendimento demonstrativo.',
     categoryIds: [categoryId],
     specialtyIds: [specialtyId],
+    experienceYears: 5,
     baseLocation: {
       city: 'Campinas',
       stateCode: 'SP',
       ibgeCode: cityIbgeCode,
     },
+    serviceMode: 'CITY_ONLY',
+    serviceRadiusKm: null,
+    selectedCities: [],
     selectedCityIbgeCodes: [],
     availability: 'AVAILABLE',
+    contactVisibility: 'PRIVATE',
+    profileImage: null,
+    portfolioImages: [],
     status: 'PUBLISHED',
   }
 }
@@ -112,16 +129,22 @@ function operationalProfile(
   overrides: Record<string, unknown> = {},
 ) {
   return {
+    schemaVersion: 1,
     professionalId,
     reviewStatus: 'APPROVED',
     active: true,
     profileVersion: 1,
+    submittedVersion: 1,
     approvedVersion: 1,
+    revision: 1,
+    lastEventId: 'review-1',
+    professionalFeedback: null,
     approvedCategoryIds: [categoryId],
     approvedSpecialtyIds: [specialtyId],
     approvedBaseCityIbgeCode: cityIbgeCode,
     approvedSelectedCityIbgeCodes: [],
     eligibleCityIbgeCodes: [cityIbgeCode],
+    updatedAt: new Date(),
     ...overrides,
   }
 }
@@ -306,6 +329,67 @@ describe('service request transactional proof', () => {
     )
   })
 
+  it('nega query e leitura direta de oportunidades fora do matching', async () => {
+    await seedScenario()
+    await inspect(async (firestore) => {
+      await updateDoc(doc(firestore, 'professionalProfiles', professionalC), {
+        categoryIds: ['cleaning'],
+        specialtyIds: ['house-cleaning'],
+      })
+      await updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalC),
+        {
+          approvedCategoryIds: ['cleaning'],
+          approvedSpecialtyIds: ['house-cleaning'],
+        },
+      )
+    })
+    const mismatchedFirestore = testEnvironment
+      .authenticatedContext(professionalC)
+      .firestore()
+    const mismatched = serviceFor(mismatchedFirestore, professionalC)
+
+    await expect(
+      mismatched.listOpenOpportunities({
+        categoryId,
+        specialtyId,
+        cityIbgeCode,
+        serviceDate,
+        period: 'MORNING',
+      }),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+  })
+
+  it.each([
+    ['em análise', { reviewStatus: 'UNDER_REVIEW' }],
+    ['rejeitado', { reviewStatus: 'REJECTED' }],
+    ['suspenso', { reviewStatus: 'SUSPENDED', active: false }],
+    ['inativo', { active: false }],
+    ['com versão divergente', { profileVersion: 2, approvedVersion: 1 }],
+  ])('nega a query operacional para profissional %s', async (_label, changes) => {
+    await seedScenario()
+    await inspect((firestore) =>
+      updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalA),
+        changes,
+      ),
+    )
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+
+    await expect(
+      professional.listOpenOpportunities({
+        categoryId,
+        specialtyId,
+        cityIbgeCode,
+        serviceDate,
+        period: 'MORNING',
+      }),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+  })
+
   it('coordena dois profissionais concorrentes e confirma somente um vencedor', async () => {
     await seedScenario()
     const barrier = coordinatedBarrier(2)
@@ -382,6 +466,38 @@ describe('service request transactional proof', () => {
         requests.filter((snapshot) => snapshot.data()?.status === 'ASSIGNED'),
       ).toHaveLength(1)
     })
+  })
+
+  it('isola disponibilidade por UID e impede remover um slot reservado', async () => {
+    await seedScenario()
+    const firstFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const secondFirestore = testEnvironment
+      .authenticatedContext(professionalB)
+      .firestore()
+    const availabilityPath = [
+      'professionalAvailability',
+      professionalA,
+      'slots',
+      slotId,
+    ] as const
+
+    await assertFails(
+      updateDoc(doc(secondFirestore, ...availabilityPath), {
+        available: false,
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertSucceeds(
+      updateDoc(doc(firstFirestore, ...availabilityPath), {
+        available: true,
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    const professional = serviceFor(firstFirestore, professionalA)
+    await professional.acceptRequest({ requestId: 'request-1', expectedRound: 1 })
+    await assertFails(deleteDoc(doc(firstFirestore, ...availabilityPath)))
   })
 
   it('mantém a recusa na rodada, libera a reserva ao cancelar e permite a substituição', async () => {
@@ -598,6 +714,161 @@ describe('service request transactional proof', () => {
     )
   })
 
+  it('mantém eventos operacionais imutáveis e rejeita ator ou papel forjado', async () => {
+    await seedScenario()
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(professionalFirestore, professionalA)
+    await professional.acceptRequest({ requestId: 'request-1', expectedRound: 1 })
+    const eventReference = doc(
+      professionalFirestore,
+      'serviceRequests',
+      'request-1',
+      'events',
+      assignmentEventId(1),
+    )
+
+    await assertFails(
+      updateDoc(eventReference, {
+        actorId: professionalB,
+        actorRole: 'ADMIN',
+      }),
+    )
+    await assertFails(deleteDoc(eventReference))
+    await assertFails(
+      setDoc(
+        doc(
+          professionalFirestore,
+          'serviceRequests',
+          'request-1',
+          'events',
+          'forged-event',
+        ),
+        {
+          eventId: 'forged-event',
+          entityType: 'SERVICE_REQUEST',
+          entityId: 'request-1',
+          requestId: 'request-1',
+          type: 'REQUEST_ASSIGNED',
+          reasonCode: 'PROFESSIONAL_ACCEPTANCE',
+          actorId: professionalB,
+          actorRole: 'ADMIN',
+          round: 1,
+          assignmentId: 'round-1',
+          fromStatus: 'OPEN',
+          toStatus: 'ASSIGNED',
+          createdAt: serverTimestamp(),
+        },
+      ),
+    )
+  })
+
+  it('consulta cronologia limitada por relacionamento sem expor eventos de terceiros', async () => {
+    await seedScenario()
+    const firstFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const secondFirestore = testEnvironment
+      .authenticatedContext(professionalB)
+      .firestore()
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const adminFirestore = testEnvironment.authenticatedContext(adminId).firestore()
+    const unrelatedFirestore = testEnvironment
+      .authenticatedContext(professionalC)
+      .firestore()
+    const first = serviceFor(firstFirestore, professionalA)
+    const second = serviceFor(secondFirestore, professionalB)
+
+    await first.refuseRequest({ requestId: 'request-1', expectedRound: 1 })
+    const accepted = await second.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await second.cancelAssignment({
+      requestId: 'request-1',
+      expectedAssignmentId: accepted.assignmentId,
+    })
+    await first.acceptRequest({ requestId: 'request-1', expectedRound: 2 })
+
+    const [clientHistory, adminHistory, firstHistory, secondHistory] =
+      await Promise.all([
+        serviceFor(clientFirestore, clientId).listRequestHistory({
+          requestId: 'request-1',
+        }),
+        serviceFor(adminFirestore, adminId).listRequestHistory({
+          requestId: 'request-1',
+        }),
+        first.listRequestHistory({
+          requestId: 'request-1',
+          ownEventsOnly: true,
+        }),
+        second.listRequestHistory({
+          requestId: 'request-1',
+          ownEventsOnly: true,
+        }),
+      ])
+
+    expect(clientHistory).toHaveLength(4)
+    expect(adminHistory).toHaveLength(4)
+    expect(firstHistory).toHaveLength(2)
+    expect(secondHistory).toHaveLength(2)
+    expect(firstHistory.every((event) => event.actorId === professionalA)).toBe(true)
+    expect(secondHistory.every((event) => event.actorId === professionalB)).toBe(true)
+    expect(adminHistory.every((event) => (
+      event.entityType === 'SERVICE_REQUEST' &&
+      event.entityId === 'request-1' &&
+      event.requestId === 'request-1' &&
+      event.createdAt instanceof Date
+    ))).toBe(true)
+    expect(adminHistory.map((event) => event.reasonCode)).toEqual(
+      expect.arrayContaining([
+        'PROFESSIONAL_ACCEPTANCE',
+        'PROFESSIONAL_REFUSAL',
+        'PROFESSIONAL_CANCELLATION',
+      ]),
+    )
+
+    await expect(
+      first.listRequestHistory({ requestId: 'request-1' }),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+    await expect(
+      serviceFor(unrelatedFirestore, professionalC).listRequestHistory({
+        requestId: 'request-1',
+        ownEventsOnly: true,
+      }),
+    ).resolves.toEqual([])
+    await assertFails(
+      getDocs(
+        query(
+          collection(
+            unrelatedFirestore,
+            'serviceRequests',
+            'request-1',
+            'events',
+          ),
+          where('actorId', '==', professionalA),
+          orderBy('createdAt', 'desc'),
+          limit(50),
+        ),
+      ),
+    )
+    await assertFails(
+      getDocs(
+        query(
+          collection(
+            adminFirestore,
+            'serviceRequests',
+            'request-1',
+            'events',
+          ),
+          orderBy('createdAt', 'desc'),
+          limit(51),
+        ),
+      ),
+    )
+  })
+
   it('revoga os dados privados do antigo responsável após substituição', async () => {
     await seedScenario()
     const firstFirestore = testEnvironment
@@ -782,5 +1053,244 @@ describe('service request transactional proof', () => {
         expectedAssignmentId: assignment.assignmentId,
       }),
     ).rejects.toMatchObject({ code: 'intervention-required' })
+  })
+
+  it('preserva um atendimento confirmado antes da desativação e bloqueia novos aceites', async () => {
+    await seedScenario(['request-1', 'request-2'])
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(professionalFirestore, professionalA)
+    const admin = createProfessionalReviewService({
+      firestore: testEnvironment.authenticatedContext(adminId).firestore(),
+      getActorId: () => adminId,
+    })
+
+    const accepted = await professional.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await admin.setActive({
+      professionalId: professionalA,
+      expectedVersion: 1,
+      expectedRevision: 1,
+      active: false,
+      reason: 'Desativação administrativa demonstrativa.',
+    })
+
+    await expect(
+      professional.acceptRequest({ requestId: 'request-2', expectedRound: 1 }),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+    await inspect(async (firestore) => {
+      const [request, assignment, reservation] = await Promise.all([
+        getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+        getDoc(
+          doc(
+            firestore,
+            'serviceRequests',
+            'request-1',
+            'assignments',
+            accepted.assignmentId,
+          ),
+        ),
+        getDoc(
+          doc(
+            firestore,
+            'professionalReservations',
+            professionalA,
+            'slots',
+            slotId,
+          ),
+        ),
+      ])
+      expect(request.data()).toMatchObject({
+        status: 'ASSIGNED',
+        assignedProfessionalId: professionalA,
+      })
+      expect(assignment.exists()).toBe(true)
+      expect(reservation.exists()).toBe(true)
+    })
+  })
+
+  it('serializa desativação e aceite concorrentes sem quebrar as invariantes', async () => {
+    await seedScenario()
+    let arrivals = 0
+    let released = false
+    let release: (() => void) | undefined
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const barrier = {
+      async afterRead() {
+        if (released) return
+        arrivals += 1
+        if (arrivals >= 2) {
+          released = true
+          release?.()
+        }
+        await waiting
+      },
+    }
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      barrier,
+    )
+    const admin = createProfessionalReviewService({
+      firestore: testEnvironment.authenticatedContext(adminId).firestore(),
+      getActorId: () => adminId,
+      coordinator: barrier,
+    })
+
+    const [acceptance, restriction] = await Promise.allSettled([
+      professional.acceptRequest({ requestId: 'request-1', expectedRound: 1 }),
+      admin.setActive({
+        professionalId: professionalA,
+        expectedVersion: 1,
+        expectedRevision: 1,
+        active: false,
+        reason: 'Restrição concorrente ao aceite.',
+      }),
+    ])
+    expect(restriction.status).toBe('fulfilled')
+    await inspect(async (firestore) => {
+      const [operational, request, assignments] = await Promise.all([
+        getDoc(
+          doc(firestore, 'professionalOperationalProfiles', professionalA),
+        ),
+        getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+        getDocs(
+          collection(
+            firestore,
+            'serviceRequests',
+            'request-1',
+            'assignments',
+          ),
+        ),
+      ])
+      expect(operational.data()?.active).toBe(false)
+      if (acceptance.status === 'fulfilled') {
+        expect(request.data()?.status).toBe('ASSIGNED')
+        expect(assignments.size).toBe(1)
+      } else {
+        expect(request.data()?.status).toBe('OPEN')
+        expect(assignments.size).toBe(0)
+      }
+    })
+  })
+
+  it('serializa edição relevante e aceite concorrentes sem cancelar atendimento confirmado', async () => {
+    await seedScenario()
+    let arrivals = 0
+    let released = false
+    let release: (() => void) | undefined
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const barrier = {
+      async afterRead() {
+        if (released) return
+        arrivals += 1
+        if (arrivals >= 2) {
+          released = true
+          release?.()
+        }
+        await waiting
+      },
+    }
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(
+      professionalFirestore,
+      professionalA,
+      barrier,
+    )
+    const edit = runTransaction(professionalFirestore, async (transaction) => {
+      const profileReference = doc(
+        professionalFirestore,
+        'professionalProfiles',
+        professionalA,
+      )
+      const operationalReference = doc(
+        professionalFirestore,
+        'professionalOperationalProfiles',
+        professionalA,
+      )
+      const [profileSnapshot, operationalSnapshot] = await Promise.all([
+        transaction.get(profileReference),
+        transaction.get(operationalReference),
+      ])
+      await barrier.afterRead()
+      if (!profileSnapshot.exists() || !operationalSnapshot.exists()) {
+        throw new Error('Fixture profissional ausente.')
+      }
+      transaction.update(profileReference, {
+        headline: 'Perfil atualizado durante o aceite',
+        updatedAt: serverTimestamp(),
+      })
+      transaction.update(operationalReference, {
+        reviewStatus: 'UNDER_REVIEW',
+        profileVersion: 2,
+        submittedVersion: 2,
+        revision: 2,
+        lastEventId: 'review-2',
+        professionalFeedback: null,
+        updatedAt: serverTimestamp(),
+      })
+      transaction.set(
+        doc(operationalReference, 'events', 'review-2'),
+        {
+          eventId: 'review-2',
+          entityType: 'PROFESSIONAL',
+          entityId: professionalA,
+          professionalId: professionalA,
+          actorId: professionalA,
+          actorRole: 'PROFESSIONAL',
+          action: 'REANALYSIS_REQUIRED',
+          reasonCode: 'PROFILE_DATA_CHANGED',
+          fromStatus: 'APPROVED',
+          toStatus: 'UNDER_REVIEW',
+          profileVersion: 2,
+          reviewedVersion: null,
+          reason: null,
+          createdAt: serverTimestamp(),
+        },
+      )
+    })
+    const results = await Promise.allSettled([
+      professional.acceptRequest({ requestId: 'request-1', expectedRound: 1 }),
+      edit,
+    ])
+    expect(results[1].status).toBe('fulfilled')
+
+    await inspect(async (firestore) => {
+      const [operationalSnapshot, request, assignments] = await Promise.all([
+        getDoc(
+          doc(firestore, 'professionalOperationalProfiles', professionalA),
+        ),
+        getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+        getDocs(
+          collection(
+            firestore,
+            'serviceRequests',
+            'request-1',
+            'assignments',
+          ),
+        ),
+      ])
+      expect(operationalSnapshot.data()).toMatchObject({
+        reviewStatus: 'UNDER_REVIEW',
+        profileVersion: 2,
+        approvedVersion: 1,
+      })
+      if (results[0].status === 'fulfilled') {
+        expect(request.data()?.status).toBe('ASSIGNED')
+        expect(assignments.size).toBe(1)
+      } else {
+        expect(request.data()?.status).toBe('OPEN')
+        expect(assignments.size).toBe(0)
+      }
+    })
   })
 })

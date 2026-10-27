@@ -26,8 +26,10 @@ import {
 } from '../services/service-period-policy'
 import {
   ServiceRequestError,
+  SERVICE_EVENT_HISTORY_LIMIT,
   type ProfessionalOperationalProfile,
   type ServicePeriod,
+  type ServiceRequestEvent,
   type ServiceRequestSummary,
 } from '../types/service-request'
 
@@ -47,6 +49,12 @@ export interface OpportunityQuery {
   cityIbgeCode: string
   serviceDate: string
   period: ServicePeriod
+}
+
+export interface ServiceHistoryQuery {
+  requestId: string
+  actorId?: string
+  pageSize?: number
 }
 
 export const OPPORTUNITY_QUERY_LIMIT = 50
@@ -145,6 +153,49 @@ function requestFromSnapshot(
         : null,
     excludedProfessionalIds: stringArray(data, 'excludedProfessionalIds'),
   }
+}
+
+function serviceEventFromSnapshot(
+  snapshot: DocumentSnapshot<DocumentData>,
+): ServiceRequestEvent {
+  const data = snapshot.data()
+  if (!data) {
+    throw new ServiceRequestError('not-found', 'Evento do atendimento não encontrado.')
+  }
+  const type = stringValue(data, 'type') as ServiceRequestEvent['type']
+  const requestId = stringValue(data, 'requestId')
+  const fallbackReason =
+    type === 'REQUEST_ASSIGNED'
+      ? 'PROFESSIONAL_ACCEPTANCE'
+      : type === 'PROFESSIONAL_REFUSED'
+        ? 'PROFESSIONAL_REFUSAL'
+        : 'PROFESSIONAL_CANCELLATION'
+
+  return {
+    eventId: snapshot.id,
+    entityType: 'SERVICE_REQUEST',
+    entityId: stringValue(data, 'entityId') || requestId,
+    requestId,
+    type,
+    reasonCode: (stringValue(data, 'reasonCode') || fallbackReason) as ServiceRequestEvent['reasonCode'],
+    actorId: stringValue(data, 'actorId'),
+    actorRole: 'PROFESSIONAL',
+    round: typeof data.round === 'number' ? data.round : 0,
+    assignmentId: nullableString(data, 'assignmentId'),
+    fromStatus: stringValue(data, 'fromStatus') as ServiceRequestEvent['fromStatus'],
+    toStatus: stringValue(data, 'toStatus') as ServiceRequestEvent['toStatus'],
+    ...(typeof data.targetRound === 'number'
+      ? { targetRound: data.targetRound }
+      : {}),
+    createdAt: dateValue(data, 'createdAt'),
+  }
+}
+
+function historyPageSize(pageSize?: number) {
+  if (pageSize === undefined || !Number.isFinite(pageSize)) {
+    return SERVICE_EVENT_HISTORY_LIMIT
+  }
+  return Math.max(1, Math.min(Math.trunc(pageSize), SERVICE_EVENT_HISTORY_LIMIT))
 }
 
 function operationalProfile(data: DocumentData): ProfessionalOperationalProfile {
@@ -251,6 +302,21 @@ export function createServiceRequestRepository({
   now = () => new Date(),
   coordinator,
 }: RepositoryDependencies) {
+  async function listRequestHistory(input: ServiceHistoryQuery) {
+    const constraints = [
+      ...(input.actorId ? [where('actorId', '==', input.actorId)] : []),
+      orderBy('createdAt', 'desc'),
+      limit(historyPageSize(input.pageSize)),
+    ]
+    const snapshot = await getDocs(
+      query(
+        collection(firestore, 'serviceRequests', input.requestId, 'events'),
+        ...constraints,
+      ),
+    )
+    return snapshot.docs.map(serviceEventFromSnapshot)
+  }
+
   async function listOpenOpportunities(input: OpportunityQuery) {
     const snapshot = await getDocs(
       query(
@@ -294,6 +360,20 @@ export function createServiceRequestRepository({
         const assignmentSnapshot = await transaction.get(assignmentReference)
         if (!assignmentSnapshot.exists()) {
           throw new ServiceRequestError('unknown', 'A atribuição confirmada está inconsistente.')
+        }
+        const assignment = assignmentSnapshot.data()
+        const acceptedEventId = stringValue(assignment, 'acceptedEventId')
+        const eventSnapshot = await transaction.get(
+          doc(requestReference, 'events', acceptedEventId),
+        )
+        if (
+          !acceptedEventId ||
+          !eventSnapshot.exists() ||
+          eventSnapshot.data().type !== 'REQUEST_ASSIGNED' ||
+          eventSnapshot.data().requestId !== requestId ||
+          eventSnapshot.data().actorId !== professionalId
+        ) {
+          throw new ServiceRequestError('unknown', 'O histórico do aceite está inconsistente.')
         }
         return {
           requestId,
@@ -432,8 +512,11 @@ export function createServiceRequestRepository({
       })
       transaction.set(eventReference, {
         eventId,
+        entityType: 'SERVICE_REQUEST',
+        entityId: requestId,
         requestId,
         type: 'REQUEST_ASSIGNED',
+        reasonCode: 'PROFESSIONAL_ACCEPTANCE',
         actorId: professionalId,
         actorRole: 'PROFESSIONAL',
         round: expectedRound,
@@ -501,6 +584,19 @@ export function createServiceRequestRepository({
         profileSnapshot.data(),
       )
       if (refusalSnapshot.exists()) {
+        const refusalEventId = stringValue(refusalSnapshot.data(), 'eventId')
+        const eventSnapshot = await transaction.get(
+          doc(requestReference, 'events', refusalEventId),
+        )
+        if (
+          !refusalEventId ||
+          !eventSnapshot.exists() ||
+          eventSnapshot.data().type !== 'PROFESSIONAL_REFUSED' ||
+          eventSnapshot.data().requestId !== requestId ||
+          eventSnapshot.data().actorId !== professionalId
+        ) {
+          throw new ServiceRequestError('unknown', 'O histórico da recusa está inconsistente.')
+        }
         return { requestId, round: expectedRound, idempotent: true }
       }
 
@@ -517,8 +613,11 @@ export function createServiceRequestRepository({
       })
       transaction.set(doc(requestReference, 'events', eventId), {
         eventId,
+        entityType: 'SERVICE_REQUEST',
+        entityId: requestId,
         requestId,
         type: 'PROFESSIONAL_REFUSED',
+        reasonCode: 'PROFESSIONAL_REFUSAL',
         actorId: professionalId,
         actorRole: 'PROFESSIONAL',
         round: expectedRound,
@@ -562,7 +661,12 @@ export function createServiceRequestRepository({
         const eventSnapshot = await transaction.get(
           doc(requestReference, 'events', assignment.endedEventId),
         )
-        if (!eventSnapshot.exists()) {
+        if (
+          !eventSnapshot.exists() ||
+          eventSnapshot.data().type !== 'PROFESSIONAL_CANCELLED_AND_REOPENED' ||
+          eventSnapshot.data().requestId !== requestId ||
+          eventSnapshot.data().actorId !== professionalId
+        ) {
           throw new ServiceRequestError('unknown', 'O cancelamento anterior está inconsistente.')
         }
         return {
@@ -671,8 +775,11 @@ export function createServiceRequestRepository({
       })
       transaction.set(doc(requestReference, 'events', eventId), {
         eventId,
+        entityType: 'SERVICE_REQUEST',
+        entityId: requestId,
         requestId,
         type: 'PROFESSIONAL_CANCELLED_AND_REOPENED',
+        reasonCode: 'PROFESSIONAL_CANCELLATION',
         actorId: professionalId,
         actorRole: 'PROFESSIONAL',
         round: request.round,
@@ -693,6 +800,7 @@ export function createServiceRequestRepository({
   }
 
   return {
+    listRequestHistory,
     listOpenOpportunities,
     acceptRequest,
     refuseRequest,

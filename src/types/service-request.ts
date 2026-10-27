@@ -1,3 +1,5 @@
+import type { ProfessionalReviewStatus } from './professional-review'
+
 export const SERVICE_REQUEST_STATUSES = [
   'OPEN',
   'ASSIGNED',
@@ -20,6 +22,14 @@ export const SERVICE_EVENT_TYPES = [
   'PROFESSIONAL_CANCELLED_AND_REOPENED',
 ] as const
 
+export const SERVICE_EVENT_REASON_CODES = [
+  'PROFESSIONAL_ACCEPTANCE',
+  'PROFESSIONAL_REFUSAL',
+  'PROFESSIONAL_CANCELLATION',
+] as const
+
+export const SERVICE_EVENT_HISTORY_LIMIT = 50
+
 export type ServiceRequestStatus = (typeof SERVICE_REQUEST_STATUSES)[number]
 export type ServicePeriod = (typeof SERVICE_PERIODS)[number]
 export type DistributionRoundStatus =
@@ -28,6 +38,8 @@ export type DistributionRoundReason =
   (typeof DISTRIBUTION_ROUND_REASONS)[number]
 export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number]
 export type ServiceEventType = (typeof SERVICE_EVENT_TYPES)[number]
+export type ServiceEventReasonCode =
+  (typeof SERVICE_EVENT_REASON_CODES)[number]
 
 export interface ServiceRequestSummary {
   requestId: string
@@ -118,16 +130,14 @@ export interface ProfessionalReservation {
 
 export interface ProfessionalOperationalProfile {
   professionalId: string
-  reviewStatus:
-    | 'DRAFT'
-    | 'UNDER_REVIEW'
-    | 'CHANGES_REQUESTED'
-    | 'APPROVED'
-    | 'REJECTED'
-    | 'SUSPENDED'
+  reviewStatus: ProfessionalReviewStatus
   active: boolean
   profileVersion: number
+  submittedVersion?: number | null
   approvedVersion: number | null
+  revision?: number
+  lastEventId?: string | null
+  professionalFeedback?: string | null
   approvedCategoryIds: string[]
   approvedSpecialtyIds: string[]
   approvedBaseCityIbgeCode: string
@@ -137,8 +147,11 @@ export interface ProfessionalOperationalProfile {
 
 export interface ServiceRequestEvent {
   eventId: string
+  entityType: 'SERVICE_REQUEST'
+  entityId: string
   requestId: string
   type: ServiceEventType
+  reasonCode: ServiceEventReasonCode
   actorId: string
   actorRole: 'PROFESSIONAL'
   round: number
@@ -146,6 +159,7 @@ export interface ServiceRequestEvent {
   fromStatus: ServiceRequestStatus
   toStatus: ServiceRequestStatus
   targetRound?: number
+  createdAt: Date
 }
 
 export type ServiceRequestErrorCode =

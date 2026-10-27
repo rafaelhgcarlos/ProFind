@@ -7,6 +7,7 @@ import {
   type CancelAssignmentInput,
   type OpportunityQuery,
   type RefuseRequestInput,
+  type ServiceHistoryQuery,
   type TransactionCoordinator,
 } from '../repositories/service-request.repository'
 import { ServiceRequestError } from '../types/service-request'
@@ -79,6 +80,17 @@ export function createServiceRequestService(
   }
 
   return {
+    listRequestHistory(input: Omit<ServiceHistoryQuery, 'actorId'> & { ownEventsOnly?: boolean }) {
+      const authenticatedActorId = actorId()
+      return safely(() =>
+        repository.listRequestHistory({
+          requestId: input.requestId,
+          pageSize: input.pageSize,
+          ...(input.ownEventsOnly ? { actorId: authenticatedActorId } : {}),
+        }),
+      )
+    },
+
     listOpenOpportunities(input: OpportunityQuery) {
       actorId()
       return safely(() => repository.listOpenOpportunities(input))
@@ -116,6 +128,11 @@ function getDefaultService() {
 }
 
 export const serviceRequestService = {
+  listRequestHistory(
+    input: Omit<ServiceHistoryQuery, 'actorId'> & { ownEventsOnly?: boolean },
+  ) {
+    return getDefaultService().listRequestHistory(input)
+  },
   listOpenOpportunities(input: OpportunityQuery) {
     return getDefaultService().listOpenOpportunities(input)
   },

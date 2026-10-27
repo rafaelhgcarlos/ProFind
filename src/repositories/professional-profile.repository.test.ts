@@ -5,9 +5,14 @@ const firebaseMocks = vi.hoisted(() => ({
   profileReference: { path: 'professionalProfiles/user-123' },
   privateProfileReference: { path: 'professionalPrivateProfiles/user-123' },
   userReference: { path: 'users/user-123' },
+  operationalReference: { path: 'professionalOperationalProfiles/user-123' },
+  eventReference: {
+    path: 'professionalOperationalProfiles/user-123/events/review-1',
+  },
   timestamp: { type: 'server-timestamp' },
   deletedField: { type: 'delete-field' },
   batch: {
+    get: vi.fn(),
     set: vi.fn(),
     update: vi.fn(),
     commit: vi.fn(),
@@ -17,6 +22,7 @@ const firebaseMocks = vi.hoisted(() => ({
   serverTimestamp: vi.fn(),
   writeBatch: vi.fn(),
   updateDoc: vi.fn(),
+  runTransaction: vi.fn(),
   deleteField: vi.fn(),
   getFirebaseFirestore: vi.fn(),
 }))
@@ -25,6 +31,7 @@ vi.mock('firebase/firestore', () => ({
   deleteField: firebaseMocks.deleteField,
   doc: firebaseMocks.doc,
   getDoc: firebaseMocks.getDoc,
+  runTransaction: firebaseMocks.runTransaction,
   serverTimestamp: firebaseMocks.serverTimestamp,
   updateDoc: firebaseMocks.updateDoc,
   writeBatch: firebaseMocks.writeBatch,
@@ -66,12 +73,18 @@ describe('professionalProfileRepository', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     firebaseMocks.getFirebaseFirestore.mockReturnValue(firebaseMocks.firestore)
-    firebaseMocks.doc.mockImplementation((_firestore, collection) => {
+    firebaseMocks.doc.mockImplementation((parent, collection) => {
+      if (parent === firebaseMocks.operationalReference && collection === 'events') {
+        return firebaseMocks.eventReference
+      }
       if (collection === 'professionalProfiles') {
         return firebaseMocks.profileReference
       }
       if (collection === 'professionalPrivateProfiles') {
         return firebaseMocks.privateProfileReference
+      }
+      if (collection === 'professionalOperationalProfiles') {
+        return firebaseMocks.operationalReference
       }
       return firebaseMocks.userReference
     })
@@ -79,6 +92,18 @@ describe('professionalProfileRepository', () => {
     firebaseMocks.serverTimestamp.mockReturnValue(firebaseMocks.timestamp)
     firebaseMocks.writeBatch.mockReturnValue(firebaseMocks.batch)
     firebaseMocks.batch.commit.mockResolvedValue(undefined)
+    firebaseMocks.batch.get.mockImplementation(async (reference) => {
+      if (reference === firebaseMocks.profileReference) {
+        return {
+          exists: () => true,
+          data: () => ({ ...profileInput, status: 'PUBLISHED' }),
+        }
+      }
+      return { exists: () => false, data: () => undefined }
+    })
+    firebaseMocks.runTransaction.mockImplementation(
+      async (_firestore, callback) => callback(firebaseMocks.batch),
+    )
   })
 
   it('lê os campos do perfil e mantém métricas somente como leitura', async () => {
@@ -159,6 +184,9 @@ describe('professionalProfileRepository', () => {
   })
 
   it('cria o perfil e atualiza o resumo do usuário em um único batch', async () => {
+    firebaseMocks.batch.get
+      .mockResolvedValueOnce({ exists: () => false, data: () => undefined })
+      .mockResolvedValueOnce({ exists: () => false, data: () => undefined })
     await professionalProfileRepository.save({
       userId: 'user-123',
       profile: profileInput,
@@ -206,7 +234,7 @@ describe('professionalProfileRepository', () => {
         updatedAt: firebaseMocks.timestamp,
       },
     )
-    expect(firebaseMocks.batch.commit).toHaveBeenCalledOnce()
+    expect(firebaseMocks.runTransaction).toHaveBeenCalledOnce()
   })
 
   it('descarta uma localização legada em texto livre ao ler o perfil', async () => {
@@ -348,6 +376,115 @@ describe('professionalProfileRepository', () => {
         phone: '11999998888',
         contactVisibility: 'PUBLIC',
       }),
+    )
+  })
+
+  it('invalida uma aprovação e incrementa a versão ao persistir mudança relevante', async () => {
+    firebaseMocks.batch.get.mockImplementation(async (reference) => {
+      if (reference === firebaseMocks.profileReference) {
+        return {
+          exists: () => true,
+          data: () => ({
+            ...profileInput,
+            selectedCityIbgeCodes: [],
+            status: 'PUBLISHED',
+          }),
+        }
+      }
+      if (reference === firebaseMocks.operationalReference) {
+        return {
+          exists: () => true,
+          data: () => ({
+            schemaVersion: 1,
+            professionalId: 'user-123',
+            reviewStatus: 'APPROVED',
+            active: true,
+            profileVersion: 1,
+            submittedVersion: 1,
+            approvedVersion: 1,
+            revision: 1,
+            lastEventId: 'review-1',
+            professionalFeedback: null,
+            approvedCategoryIds: profileInput.categoryIds,
+            approvedSpecialtyIds: profileInput.specialtyIds,
+            approvedBaseCityIbgeCode: profileInput.baseLocation.ibgeCode,
+            approvedSelectedCityIbgeCodes: [],
+            eligibleCityIbgeCodes: [profileInput.baseLocation.ibgeCode],
+          }),
+        }
+      }
+      return { exists: () => false, data: () => undefined }
+    })
+
+    await professionalProfileRepository.save({
+      userId: 'user-123',
+      profile: { ...profileInput, bio: 'Descrição revisada.' },
+      status: 'PUBLISHED',
+      exists: true,
+    })
+
+    expect(firebaseMocks.batch.set).toHaveBeenCalledWith(
+      firebaseMocks.operationalReference,
+      expect.objectContaining({
+        reviewStatus: 'UNDER_REVIEW',
+        active: true,
+        profileVersion: 2,
+        approvedVersion: 1,
+        revision: 2,
+        lastEventId: 'review-2',
+      }),
+    )
+    expect(firebaseMocks.batch.set).toHaveBeenCalledWith(
+      firebaseMocks.eventReference,
+      expect.objectContaining({
+        entityType: 'PROFESSIONAL',
+        entityId: 'user-123',
+        action: 'REANALYSIS_REQUIRED',
+        reasonCode: 'PROFILE_DATA_CHANGED',
+        profileVersion: 2,
+      }),
+    )
+  })
+
+  it('não cria nova versão quando os campos analisáveis não mudam', async () => {
+    firebaseMocks.batch.get.mockImplementation(async (reference) => {
+      if (reference === firebaseMocks.profileReference) {
+        return {
+          exists: () => true,
+          data: () => ({
+            ...profileInput,
+            selectedCityIbgeCodes: [],
+            status: 'PUBLISHED',
+          }),
+        }
+      }
+      return {
+        exists: () => true,
+        data: () => ({
+          professionalId: 'user-123',
+          reviewStatus: 'APPROVED',
+          active: true,
+          profileVersion: 1,
+          approvedVersion: 1,
+          revision: 1,
+        }),
+      }
+    })
+
+    await professionalProfileRepository.save({
+      userId: 'user-123',
+      profile: profileInput,
+      status: 'PUBLISHED',
+      exists: true,
+    })
+
+    expect(firebaseMocks.batch.set).not.toHaveBeenCalledWith(
+      firebaseMocks.operationalReference,
+      expect.anything(),
+    )
+    expect(firebaseMocks.batch.set).not.toHaveBeenCalledWith(
+      firebaseMocks.eventReference,
+      expect.anything(),
     )
   })
 
