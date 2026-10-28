@@ -379,7 +379,7 @@ describe('professionalProfileRepository', () => {
     )
   })
 
-  it('invalida uma aprovação e incrementa a versão ao persistir mudança relevante', async () => {
+  it('invalida uma aprovação e audita a nova versão ao persistir somente a imagem', async () => {
     firebaseMocks.batch.get.mockImplementation(async (reference) => {
       if (reference === firebaseMocks.profileReference) {
         return {
@@ -418,10 +418,30 @@ describe('professionalProfileRepository', () => {
 
     await professionalProfileRepository.save({
       userId: 'user-123',
-      profile: { ...profileInput, bio: 'Descrição revisada.' },
+      profile: {
+        ...profileInput,
+        profileImage: {
+          provider: 'IMAGEKIT',
+          ownerId: 'user-123',
+          purpose: 'PROFESSIONAL_AVATAR',
+          url: 'https://images.example/profile-v2.webp',
+          providerId: 'profile-v2',
+          createdAt: 1_796_000_000_000,
+          updatedAt: 1_796_000_000_000,
+          order: 0,
+          altText: 'Nova foto profissional',
+        },
+      },
       status: 'PUBLISHED',
       exists: true,
     })
+
+    expect(firebaseMocks.batch.update).toHaveBeenCalledWith(
+      firebaseMocks.profileReference,
+      expect.objectContaining({
+        profileImage: expect.objectContaining({ providerId: 'profile-v2' }),
+      }),
+    )
 
     expect(firebaseMocks.batch.set).toHaveBeenCalledWith(
       firebaseMocks.operationalReference,

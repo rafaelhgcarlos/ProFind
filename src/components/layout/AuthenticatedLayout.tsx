@@ -47,6 +47,12 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
   ],
   professional: [
     { label: 'Início', href: '/profissional', icon: Home },
+    {
+      label: 'Análise',
+      href: '/profissional/analise',
+      icon: ClipboardCheck,
+      showOnMobile: false,
+    },
     { label: 'Oportunidades', href: '/profissional/oportunidades', icon: Compass },
     { label: 'Serviços', href: '/profissional/servicos', icon: BriefcaseBusiness },
     { label: 'Mensagens', href: '/profissional/mensagens', icon: MessageCircle },

@@ -373,6 +373,19 @@ describe('professional review domain and Security Rules', () => {
         active: false,
       }),
     )
+
+    await seedReview('REJECTED', {
+      operational: {
+        active: false,
+        professionalFeedback: 'Rejeição administrativa.',
+      },
+    })
+    await assertFails(
+      updateDoc(reference, {
+        reviewStatus: 'UNDER_REVIEW',
+        submittedVersion: 1,
+      }),
+    )
   })
 
   it('suspends without deleting the profile and does not let activation bypass review', async () => {
@@ -459,6 +472,59 @@ describe('professional review domain and Security Rules', () => {
         profileVersion: 2,
         approvedVersion: 1,
         active: true,
+      })
+    })
+  })
+
+  it('allows portfolio changes while under review only with the next version and audit event', async () => {
+    await seedReview('UNDER_REVIEW')
+    const professional = testEnvironment
+      .authenticatedContext(professionalId)
+      .firestore()
+
+    await assertSucceeds(
+      editReviewedProfile(professional, {
+        portfolioImages: [
+          {
+            provider: 'IMAGEKIT',
+            ownerId: professionalId,
+            purpose: 'PROFESSIONAL_PORTFOLIO',
+            url: 'https://images.example/portfolio-under-review.webp',
+            providerId: 'portfolio-under-review',
+            createdAt: 1_796_000_000_000,
+            updatedAt: 1_796_000_000_000,
+            order: 0,
+            altText: 'Trabalho enviado durante a análise',
+          },
+        ],
+      }),
+    )
+
+    await inspect(async (firestore) => {
+      const operationalSnapshot = await getDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalId),
+      )
+      const eventSnapshot = await getDoc(
+        doc(
+          firestore,
+          'professionalOperationalProfiles',
+          professionalId,
+          'events',
+          'review-2',
+        ),
+      )
+      expect(operationalSnapshot.data()).toMatchObject({
+        reviewStatus: 'UNDER_REVIEW',
+        profileVersion: 2,
+        submittedVersion: 2,
+        revision: 2,
+        lastEventId: 'review-2',
+      })
+      expect(eventSnapshot.data()).toMatchObject({
+        action: 'REANALYSIS_REQUIRED',
+        fromStatus: 'UNDER_REVIEW',
+        toStatus: 'UNDER_REVIEW',
+        profileVersion: 2,
       })
     })
   })

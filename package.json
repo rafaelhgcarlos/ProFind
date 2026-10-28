@@ -12,6 +12,7 @@
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
     "seed:catalog": "node scripts/seed-catalog.mjs",
+    "migration:professional-review:preview": "node scripts/preview-professional-review-migration.mjs",
     "test": "vitest run",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run --config vitest.rules.config.ts\"",
     "test:worker": "vitest run --config worker/vitest.config.ts",

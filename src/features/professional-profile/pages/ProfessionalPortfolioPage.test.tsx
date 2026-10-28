@@ -266,6 +266,56 @@ describe('ProfessionalPortfolioPage', () => {
     expect(mocks.saveProfessionalProfile).not.toHaveBeenCalled()
   })
 
+  it('preserva a referência vigente e permite repetir o salvamento sem duplicar uploads', async () => {
+    const currentProfile = {
+      ...profile,
+      portfolioImages: [portfolioImage(1)],
+    }
+    mocks.loadProfessionalProfile.mockResolvedValue(currentProfile)
+    mocks.saveProfessionalProfile
+      .mockRejectedValueOnce(new Error('Firestore indisponível'))
+      .mockImplementationOnce(async (_userId, input, status) => ({
+        ...currentProfile,
+        ...input,
+        status,
+      }))
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(
+      await screen.findByRole('img', { name: portfolioImage(1).altText }),
+    ).toHaveAttribute('src', portfolioImage(1).url)
+    await user.upload(
+      screen.getByLabelText('Adicionar trabalho 2'),
+      new File(['image'], 'segunda.png', { type: 'image/png' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Salvar portfólio' }))
+
+    expect(
+      await screen.findByText(/o portfólio salvo continua vigente/i),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: portfolioImage(1).altText })).toHaveAttribute(
+      'src',
+      portfolioImage(1).url,
+    )
+    expect(screen.getByRole('img', { name: /prévia do trabalho 2/i })).toHaveAttribute(
+      'src',
+      'https://images.example/segunda.png.webp',
+    )
+    expect(mocks.imageRemove).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Salvar portfólio' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: 'Salvar portfólio' }))
+
+    expect(mocks.imageUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.saveProfessionalProfile).toHaveBeenCalledTimes(2)
+    const retriedInput = mocks.saveProfessionalProfile.mock.calls.at(-1)?.[1]
+    expect(retriedInput.portfolioImages.map((image: { providerId: string }) => image.providerId)).toEqual([
+      'portfolio-1',
+      'uploaded-segunda.png',
+    ])
+  })
+
   it('substitui e remove imagens somente após salvar a nova seleção', async () => {
     const currentProfile = {
       ...profile,

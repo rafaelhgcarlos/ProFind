@@ -7,7 +7,7 @@ import type { ProfessionalProfileStatus } from '../../../types/professional-prof
 
 const statusLabels: Record<ProfessionalProfileStatus, string> = {
   DRAFT: 'Rascunho',
-  PUBLISHED: 'Publicado',
+  PUBLISHED: 'Cadastro enviado',
   PAUSED: 'Pausado',
   SUSPENDED: 'Suspenso',
 }
@@ -29,6 +29,7 @@ interface ProfileBuilderHeaderProps {
   saving: boolean
   disabled: boolean
   showPrimary?: boolean
+  primaryActionLabel?: string
   onPreview: () => void
   onPrimaryAction: () => void
 }
@@ -53,11 +54,18 @@ export function ProfileBuilderHeader({
   saving,
   disabled,
   showPrimary = true,
+  primaryActionLabel,
   onPreview,
   onPrimaryAction,
 }: ProfileBuilderHeaderProps) {
   const name = publicName.trim() || 'Seu perfil profissional'
-  const actionLabel = status === 'PUBLISHED' ? 'Salvar alterações' : status === 'PAUSED' ? 'Republicar perfil' : 'Publicar perfil'
+  const actionLabel =
+    primaryActionLabel ??
+    (status === 'PUBLISHED'
+      ? 'Salvar alterações'
+      : status === 'PAUSED'
+        ? 'Enviar novamente'
+        : 'Enviar para análise')
 
   return (
     <section aria-labelledby="profile-builder-title" className="min-w-0 max-w-full overflow-hidden rounded-xl border bg-card p-5 shadow-soft sm:p-6">
@@ -82,7 +90,7 @@ export function ProfileBuilderHeader({
         <div className="min-w-0 max-w-full 2xl:px-4">
           <div className="mb-2 flex items-center justify-between gap-3 text-xs">
             <span className="font-medium">Perfil {completion}% completo</span>
-            <span className="text-muted-foreground">{completion === 100 ? 'Pronto para publicar' : 'Continue preenchendo'}</span>
+            <span className="text-muted-foreground">{completion === 100 ? 'Pronto para enviar' : 'Continue preenchendo'}</span>
           </div>
           <progress className="h-2 w-full accent-primary" value={completion} max={100} aria-label={`Perfil ${completion}% completo`} />
         </div>

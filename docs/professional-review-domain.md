@@ -89,15 +89,23 @@ Não há cancelamento silencioso de compromisso.
 
 Esta entrega usa leituras por caminho e não exige índice composto novo. Os índices da #22 permanecem em `firestore.indexes.json`.
 
-## Perfis legados e migração futura
+## Perfis legados e prévia de migração
 
 Perfis sem documento operacional não recebem aprovação automática. Na primeira gravação legítima do próprio perfil, o cliente cria atomicamente um documento `DRAFT` ou `UNDER_REVIEW`, versão `1`, inativo e sem projeção aprovada.
 
-Uma migração futura pode criar somente documentos ausentes, de forma incremental e idempotente, nesse mesmo estado seguro. Documentos operacionais do contrato anterior que não tenham `schemaVersion`, `revision` e os campos de auditoria também devem ser atualizados por ferramenta confiável antes de decisões administrativas; até lá, as Rules falham fechadas. A migração não deve inferir aprovação de `status == PUBLISHED`. Nenhuma migração remota foi executada nesta entrega.
+A #51 acrescenta uma ferramenta de prévia local que cria plano somente para
+documentos ausentes, de forma incremental e idempotente, nesse mesmo estado
+seguro. Ela não possui modo de aplicação nem conexão com o Firebase. Documentos
+operacionais do contrato anterior que não tenham `schemaVersion`, `revision` e
+os campos de auditoria ainda devem ser atualizados por ferramenta confiável
+antes de decisões administrativas; até lá, as Rules falham fechadas. A migração
+não infere aprovação de `status == PUBLISHED`. Nenhuma migração remota foi
+executada nesta entrega.
 
 ## Contratos para as próximas telas
 
-- #51 usará o salvamento transacional e `submitForReview` no autocadastro completo.
+- #51 usa o salvamento transacional no autocadastro completo e mostra o estado
+  produzido pelo mesmo contrato de `submitForReview`.
 - #32 listará os documentos operacionais e chamará `decide`, `suspend` e `setActive`.
 - A interface, quando exibir aprovação, deve usar “Cadastro aprovado — demonstração” e não sugerir identidade verificada ou garantia de qualidade.
 

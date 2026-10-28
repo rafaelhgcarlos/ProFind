@@ -109,7 +109,7 @@ describe('onboarding de papéis', () => {
     )
 
     expect(screen.getAllByRole('radio')).toHaveLength(3)
-    expect(screen.getByText(/pessoa física no mvp/i)).toBeInTheDocument()
+    expect(screen.getByText(/preencha seu cadastro e envie para análise/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Continuar' }))
     expect(screen.getByText(/escolha como você pretende/i)).toBeInTheDocument()
     expect(context.completeOnboarding).not.toHaveBeenCalled()
@@ -319,7 +319,7 @@ describe('onboarding de papéis', () => {
     expect(await screen.findByText('Complete o perfil do cliente')).toBeInTheDocument()
   })
 
-  it('não apresenta o papel Profissional como perfil já publicável', () => {
+  it('não apresenta a escolha profissional como cadastro aprovado', () => {
     const context = createProfileContext({
       ...incompleteProfile,
       roles: ['professional'],
@@ -336,10 +336,10 @@ describe('onboarding de papéis', () => {
     )
 
     expect(
-      screen.getByText('Perfil profissional ainda não publicável'),
+      screen.getByText('Cadastro profissional ainda incompleto'),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('link', { name: 'Criar perfil profissional' }),
+      screen.getByRole('link', { name: 'Criar cadastro profissional' }),
     ).toHaveAttribute('href', '/profissional/perfil')
   })
 

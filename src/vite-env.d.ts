@@ -13,6 +13,7 @@ interface ImportMetaEnv {
   readonly VITE_IMAGEKIT_PUBLIC_KEY?: string
   readonly VITE_IMAGEKIT_URL_ENDPOINT?: string
   readonly VITE_IMAGEKIT_AUTH_ENDPOINT?: string
+  readonly VITE_SUPPORT_WHATSAPP_NUMBER?: string
 }
 
 interface ImportMeta {

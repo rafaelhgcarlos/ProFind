@@ -247,3 +247,25 @@ git diff --check
 O adapter `mock` não armazena arquivos e sua URL sintética não representa mídia
 durável. Com `imagekit`, somente uma resposta HTTPS no endpoint configurado,
 `fileId` não vazio e `provider: IMAGEKIT` tornam-se persistíveis.
+
+## Validação hospedada pendente (#54)
+
+Os testes automatizados desta integração usam doubles do ImageKit, do Worker e
+do Firestore. Eles validam contratos, isolamento, falhas e ordem das operações,
+mas não comprovam um upload real. A validação da versão hospedada permanece na
+#54 e deve registrar, sem expor tokens ou chaves:
+
+- URL HTTPS do Worker configurada em `VITE_IMAGEKIT_AUTH_ENDPOINT`, sem
+  `localhost` no bundle publicado;
+- origem do frontend presente em `ALLOWED_ORIGINS` e chave privada somente no
+  secret `IMAGEKIT_PRIVATE_KEY` do Worker;
+- upload, recarga, substituição e remoção reais para `CLIENT_AVATAR`,
+  `PROFESSIONAL_AVATAR` e `PROFESSIONAL_PORTFOLIO` com duas contas distintas;
+- envio de avatar e portfólio profissional em rascunho e durante análise;
+- incremento de versão, evento de reanálise e perda de elegibilidade somente
+  depois da persistência bem-sucedida da mudança profissional;
+- preservação das URLs antigas até a troca confirmada e recuperação após
+  falha induzida de rede/persistência.
+
+Até essa evidência ser anexada à #54, o resultado deve ser descrito como
+"contrato automatizado validado", e não como "upload real hospedado testado".

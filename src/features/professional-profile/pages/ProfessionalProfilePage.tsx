@@ -81,6 +81,7 @@ import {
   type EditableProfessionalProfileStatus,
   type ProfessionalProfileFieldErrors,
 } from '../../../services/professional-profile.service'
+import { professionalReviewService } from '../../../services/professional-review.service'
 import type { ServiceCatalog } from '../../../types/catalog'
 import type {
   ProfessionalAvailability,
@@ -92,6 +93,7 @@ import type {
   ProfessionalProfileStatus,
   ProfessionalServiceMode,
 } from '../../../types/professional-profile'
+import type { ProfessionalOperationalReview } from '../../../types/professional-review'
 import {
   BRAZILIAN_STATE_CODES,
   PROFESSIONAL_SERVICE_RADIUS_OPTIONS,
@@ -100,6 +102,8 @@ import { useAuth } from '../../auth/use-auth'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
 import { MunicipalityCombobox } from '../components/MunicipalityCombobox'
+import { ProfessionalRegistrationSupport } from '../components/ProfessionalRegistrationSupport'
+import { ProfessionalReviewStatusCard } from '../components/ProfessionalReviewStatusCard'
 import { ProfileBuilderHeader } from '../components/ProfileBuilderHeader'
 import { ProfileBuilderSection } from '../components/ProfileBuilderSection'
 import { ProfessionalProfilePreview } from '../components/ProfessionalProfilePreview'
@@ -218,7 +222,7 @@ const serviceModeOptions: Array<{
 
 const statusLabels: Record<ProfessionalProfileStatus, string> = {
   DRAFT: 'Rascunho',
-  PUBLISHED: 'Publicado',
+  PUBLISHED: 'Cadastro enviado',
   PAUSED: 'Pausado',
   SUSPENDED: 'Suspenso',
 }
@@ -394,6 +398,8 @@ export function ProfessionalProfilePage() {
   const [catalog, setCatalog] = useState<ServiceCatalog | null>(null)
   const [professionalProfile, setProfessionalProfile] =
     useState<ProfessionalProfile | null>(null)
+  const [operationalReview, setOperationalReview] =
+    useState<ProfessionalOperationalReview | null>(null)
   const [form, setForm] = useState(() => emptyForm(userProfile?.name ?? ''))
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -445,11 +451,13 @@ export function ProfessionalProfilePage() {
     void Promise.all([
       loadProfessionalProfile(userId),
       listAvailableCatalog(),
+      professionalReviewService.findByProfessionalId(userId),
     ])
-      .then(([loadedProfile, loadedCatalog]) => {
+      .then(([loadedProfile, loadedCatalog, loadedReview]) => {
         if (!active) return
         setProfessionalProfile(loadedProfile)
         setCatalog(loadedCatalog)
+        setOperationalReview(loadedReview)
         setForm(formFromProfile(loadedProfile, userProfile?.name ?? ''))
         setLoading(false)
       })
@@ -493,6 +501,21 @@ export function ProfessionalProfilePage() {
     return grouped
   }, [catalog])
   const currentStatus = professionalProfile?.status ?? 'DRAFT'
+  const reviewStatus = operationalReview?.reviewStatus
+  const primaryActionLabel =
+    reviewStatus === 'CHANGES_REQUESTED'
+      ? 'Corrigir e reenviar'
+      : reviewStatus === 'APPROVED'
+        ? 'Salvar alterações'
+        : reviewStatus === 'UNDER_REVIEW'
+          ? 'Salvar alterações para análise'
+          : reviewStatus === 'REJECTED'
+            ? 'Salvar sem remover rejeição'
+            : reviewStatus === 'SUSPENDED'
+              ? 'Salvar sem remover suspensão'
+              : 'Enviar para análise'
+  const canSaveDraft =
+    !reviewStatus || ['DRAFT', 'CHANGES_REQUESTED'].includes(reviewStatus)
   const needsServiceModeReview = professionalProfile?.serviceMode === null
   const isSuspended = currentStatus === 'SUSPENDED'
   const isSaving = savingStatus !== null || savingAvailability
@@ -978,12 +1001,30 @@ export function ProfessionalProfilePage() {
       syncProfessionalProfileStatus(
         userProfileStatusForProfessionalProfile(status),
       )
+      try {
+        setOperationalReview(
+          await professionalReviewService.findByProfessionalId(userId),
+        )
+      } catch {
+        // O perfil já foi confirmado. A tela de análise permite recarregar o
+        // estado sem transformar uma falha de leitura posterior em falha de save.
+      }
       const message =
         status === 'DRAFT'
           ? 'Rascunho salvo. Você pode continuar depois.'
           : status === 'PAUSED'
             ? 'Perfil pausado e removido das superfícies públicas.'
-            : 'Perfil publicado com sucesso.'
+            : reviewStatus === 'CHANGES_REQUESTED'
+              ? 'Correções enviadas para uma nova análise.'
+              : reviewStatus === 'APPROVED'
+                ? 'Alterações salvas. Mudanças relevantes exigem uma nova análise.'
+                : reviewStatus === 'REJECTED'
+                  ? 'Alterações salvas sem remover a rejeição vigente.'
+                  : reviewStatus === 'SUSPENDED'
+                    ? 'Alterações salvas sem remover a suspensão vigente.'
+                    : reviewStatus === 'UNDER_REVIEW'
+                      ? 'Suas alterações foram salvas e serão analisadas.'
+                      : 'Cadastro enviado para análise com sucesso.'
       setSuccessMessage(message)
       toast.success(message)
 
@@ -1082,7 +1123,8 @@ export function ProfessionalProfilePage() {
         professionalProfile,
       )
       setProfessionalProfile(updatedProfile)
-      const message = 'Disponibilidade atualizada sem alterar a publicação do perfil.'
+      const message =
+        'Disponibilidade atualizada. Seu cadastro continua com o mesmo status.'
       setSuccessMessage(message)
       toast.success(message)
     } catch (error) {
@@ -1167,9 +1209,17 @@ export function ProfessionalProfilePage() {
         saving={savingStatus === 'PUBLISHED'}
         disabled={isSaving || isImageOperationInProgress || isSuspended}
         showPrimary={!isSuspended}
+        primaryActionLabel={primaryActionLabel}
         onPreview={() => setPreviewOpen(true)}
         onPrimaryAction={() => void handleSave('PUBLISHED')}
       />
+
+      <ProfessionalReviewStatusCard
+        review={operationalReview}
+        profileExists={professionalProfile !== null}
+        detailsHref="/profissional/analise"
+      />
+      <ProfessionalRegistrationSupport className="xl:hidden" />
 
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-start">
         <form
@@ -1188,12 +1238,23 @@ export function ProfessionalProfilePage() {
           </Alert>
         ) : null}
 
+        {reviewStatus === 'SUSPENDED' ? (
+          <Alert variant="destructive">
+            <ShieldAlert aria-hidden="true" />
+            <AlertTitle>Análise profissional suspensa</AlertTitle>
+            <AlertDescription>
+              Editar o cadastro ou alternar de modo não remove a suspensão nem
+              libera novas oportunidades. Atendimentos existentes permanecem.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         {needsServiceModeReview && !isSuspended ? (
           <Alert>
             <CircleAlert aria-hidden="true" />
             <AlertTitle>Escolha uma nova modalidade de atendimento</AlertTitle>
             <AlertDescription>
-              A modalidade salva anteriormente não faz parte do MVP. O perfil foi tratado como rascunho e precisa de uma opção válida antes de ser publicado novamente.
+              A modalidade salva anteriormente não está mais disponível. Escolha uma das opções abaixo antes de enviar novamente.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -1224,7 +1285,7 @@ export function ProfessionalProfilePage() {
         <ProfileBuilderSection
           id="profile-section-presentation"
           title="Apresentação"
-          description="Conte quem você é e como pode ajudar. Campos obrigatórios para publicação estão indicados."
+          description="Conte quem você é e como pode ajudar. Campos obrigatórios para envio à análise estão indicados."
           summary={`${form.publicName.trim() || 'Nome pendente'} · ${form.headline.trim() || 'Título pendente'}`}
           open={openSections.has('presentation')}
           complete={!publicationErrors.publicName}
@@ -2000,17 +2061,19 @@ export function ProfessionalProfilePage() {
                   {submissionError}
                 </p>
               ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                loading={savingStatus === 'DRAFT'}
-                loadingLabel="Salvando rascunho…"
-                disabled={isSaving || isImageOperationInProgress}
-                onClick={() => void handleSave('DRAFT')}
-              >
-                <Save aria-hidden="true" />
-                {professionalProfile && currentStatus !== 'DRAFT' ? 'Voltar para rascunho' : 'Salvar rascunho'}
-              </Button>
+              {canSaveDraft ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  loading={savingStatus === 'DRAFT'}
+                  loadingLabel="Salvando rascunho…"
+                  disabled={isSaving || isImageOperationInProgress}
+                  onClick={() => void handleSave('DRAFT')}
+                >
+                  <Save aria-hidden="true" />
+                  Salvar rascunho
+                </Button>
+              ) : null}
               {currentStatus === 'PUBLISHED' ? (
                 <Button
                   type="button"
@@ -2044,13 +2107,13 @@ export function ProfessionalProfilePage() {
         {profilePreview}
         <Card>
           <CardHeader>
-            <CardTitle>Checklist de publicação</CardTitle>
+            <CardTitle>Checklist para análise</CardTitle>
             <CardDescription>
-              Rascunhos ficam privados. Somente perfis publicados podem aparecer para clientes.
+              Rascunhos ficam privados. Enviar o cadastro não concede aprovação nem ativação.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm font-semibold">Pronto para publicar</p>
+            <p className="text-sm font-semibold">Pronto para enviar</p>
             <ul className="mt-3 space-y-3 text-sm">
               {[
                 {
@@ -2105,6 +2168,7 @@ export function ProfessionalProfilePage() {
         <PrivacyNotice title="Dados protegidos">
           CEP, bairro e telefone privado ficam em um documento separado, acessível somente por você e pelo backend autorizado. Rua, número e complemento não são coletados.
         </PrivacyNotice>
+        <ProfessionalRegistrationSupport />
         </aside>
       </div>
 

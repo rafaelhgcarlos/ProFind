@@ -166,6 +166,14 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
+  it('protege a rota de acompanhamento da análise profissional', async () => {
+    renderRoute('/profissional/analise')
+
+    expect(
+      await screen.findByRole('heading', { name: /entre no profind/i }),
+    ).toBeInTheDocument()
+  })
+
   it('renderiza o catálogo do design system', async () => {
     renderRoute('/design-system')
 

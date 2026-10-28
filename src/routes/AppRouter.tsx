@@ -78,6 +78,12 @@ const ProfessionalPortfolioPage = lazy(() =>
   ),
 )
 
+const ProfessionalReviewPage = lazy(() =>
+  import('../features/professional-profile/pages/ProfessionalReviewPage').then(
+    (module) => ({ default: module.ProfessionalReviewPage }),
+  ),
+)
+
 const ClientProfilePage = lazy(() =>
   import('../features/client-profile/pages/ClientProfilePage').then(
     (module) => ({ default: module.ClientProfilePage }),
@@ -202,6 +208,14 @@ export function AppRouter() {
               element={
                 <Suspense fallback={<RouteFallback />}>
                   <ProfessionalPortfolioPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/profissional/analise"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ProfessionalReviewPage />
                 </Suspense>
               }
             />

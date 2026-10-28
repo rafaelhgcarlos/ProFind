@@ -15,9 +15,10 @@ import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { useAuth } from '../../auth/use-auth'
+import { ProfessionalRegistrationSupport } from '../../professional-profile/components/ProfessionalRegistrationSupport'
 import { ModeSwitcher } from '../components/ModeSwitcher'
 import {
-  hasPublicableProfessionalProfile,
+  hasCompletedProfessionalProfile,
   roleLabels,
   type UserRole,
 } from '../user-role'
@@ -86,17 +87,18 @@ export function ModeHomePage({ mode }: ModeHomePageProps) {
         </Alert>
       ) : null}
 
-      {!isClient && profile && !hasPublicableProfessionalProfile(profile) ? (
+      {!isClient && profile && !hasCompletedProfessionalProfile(profile) ? (
         <Alert variant="warning" className="mb-6">
           <CircleAlert aria-hidden="true" />
-          <AlertTitle>Perfil profissional ainda não publicável</AlertTitle>
+          <AlertTitle>Cadastro profissional ainda incompleto</AlertTitle>
           <AlertDescription>
             <p>
-              O papel Profissional está habilitado, mas o perfil profissional
-              ainda precisa ser concluído antes da publicação.
+              Seu cadastro profissional ainda precisa ser concluído e enviado
+              para análise. Para receber oportunidades, seu cadastro precisa
+              estar aprovado e ativo.
             </p>
             <Button asChild variant="outline" size="sm" className="mt-3">
-              <Link to="/profissional/perfil">Criar perfil profissional</Link>
+              <Link to="/profissional/perfil">Criar cadastro profissional</Link>
             </Button>
           </AlertDescription>
         </Alert>
@@ -115,8 +117,21 @@ export function ModeHomePage({ mode }: ModeHomePageProps) {
       <p className="mt-3 max-w-2xl leading-7 text-muted-foreground">
         {isClient
           ? 'Você está na experiência de Cliente. A partir daqui, as próximas funcionalidades priorizarão suas necessidades de contratação.'
-          : 'Você está na experiência de Profissional. No MVP, este contexto é destinado exclusivamente a profissionais pessoa física.'}
+          : 'Você está na área profissional. Complete seu cadastro e acompanhe a análise da equipe.'}
       </p>
+
+      {!isClient ? (
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Button asChild>
+            <Link to="/profissional/analise">Acompanhar análise</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/profissional/perfil">Editar cadastro</Link>
+          </Button>
+        </div>
+      ) : null}
+
+      {!isClient ? <ProfessionalRegistrationSupport className="mt-6" /> : null}
 
       <div className="mt-8 border-t pt-6">
         <p className="text-sm text-muted-foreground">

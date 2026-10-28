@@ -20,6 +20,7 @@ import { RadioGroup, RadioGroupItem } from '../../../components/ui/radio-group'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { cn } from '../../../utils/cn'
 import { useAuth } from '../../auth/use-auth'
+import { ProfessionalRegistrationSupport } from '../../professional-profile/components/ProfessionalRegistrationSupport'
 import { type OnboardingChoice } from '../user-role'
 import { useProfile } from '../use-profile'
 
@@ -35,8 +36,8 @@ const choices = [
     value: 'professional',
     title: 'Quero prestar serviços',
     description:
-      'Acesse sua jornada como profissional autônomo — pessoa física no MVP.',
-    detail: 'Modo inicial: Profissional',
+      'Preencha seu cadastro e envie para análise como profissional autônomo.',
+    detail: 'Não concede aprovação',
     icon: BriefcaseBusiness,
   },
   {
@@ -240,6 +241,7 @@ export function OnboardingPage() {
             Seus papéis orientam apenas a experiência dentro da conta e não
             tornam seus dados de contato públicos.
           </PrivacyNotice>
+          <ProfessionalRegistrationSupport className="mt-6" />
         </aside>
       </section>
     </AppShell>

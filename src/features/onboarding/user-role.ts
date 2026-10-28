@@ -57,7 +57,7 @@ export function hasCompletedOnboarding(
   )
 }
 
-export function hasPublicableProfessionalProfile(profile: UserProfile) {
+export function hasCompletedProfessionalProfile(profile: UserProfile) {
   return (
     profile.roles.includes('professional') &&
     profile.professionalProfileStatus === 'complete'

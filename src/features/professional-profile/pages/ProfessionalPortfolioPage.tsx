@@ -553,10 +553,11 @@ export function ProfessionalPortfolioPage() {
       toast.success('Portfólio salvo com sucesso.')
       await cleanRemovedImages(previous, saved.portfolioImages)
     } catch (error) {
-      const message =
+      const detail =
         error instanceof ProfessionalProfileError
           ? error.fieldErrors.portfolioImages ?? error.message
           : 'Não foi possível salvar o portfólio agora.'
+      const message = `${detail} O portfólio salvo continua vigente e estas alterações foram mantidas para uma nova tentativa.`
       setSaveError(message)
       toast.error(message)
     } finally {

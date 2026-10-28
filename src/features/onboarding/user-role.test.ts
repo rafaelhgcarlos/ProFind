@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   hasCompletedOnboarding,
-  hasPublicableProfessionalProfile,
+  hasCompletedProfessionalProfile,
   initialModeForChoice,
   rolesForChoice,
   type UserProfile,
@@ -29,7 +29,7 @@ describe('configuração de papéis', () => {
     expect(hasCompletedOnboarding(profile)).toBe(false)
   })
 
-  it('não confunde papel Profissional com perfil profissional publicável', () => {
+  it('não confunde papel Profissional com preenchimento concluído', () => {
     const profile: UserProfile = {
       userId: 'user-123',
       name: 'Marina',
@@ -40,9 +40,9 @@ describe('configuração de papéis', () => {
     }
 
     expect(hasCompletedOnboarding(profile)).toBe(true)
-    expect(hasPublicableProfessionalProfile(profile)).toBe(false)
+    expect(hasCompletedProfessionalProfile(profile)).toBe(false)
     expect(
-      hasPublicableProfessionalProfile({
+      hasCompletedProfessionalProfile({
         ...profile,
         professionalProfileStatus: 'complete',
       }),

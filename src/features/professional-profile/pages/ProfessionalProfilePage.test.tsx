@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   imageRetry: vi.fn(),
   imagePrepareRemoval: vi.fn(),
   imageRemove: vi.fn(),
+  findProfessionalReview: vi.fn(),
 }))
 
 vi.mock('../../../components/layout/ProfessionalLayout', () => ({
@@ -78,6 +79,12 @@ vi.mock('../../../services/professional-profile.service', async (importOriginal)
 
 vi.mock('sonner', () => ({
   toast: { success: mocks.toastSuccess, error: mocks.toastError },
+}))
+
+vi.mock('../../../services/professional-review.service', () => ({
+  professionalReviewService: {
+    findByProfessionalId: mocks.findProfessionalReview,
+  },
 }))
 
 vi.mock('../../../providers/image-provider.factory', () => ({
@@ -208,6 +215,7 @@ describe('ProfessionalProfilePage', () => {
     })
     mocks.imagePrepareRemoval.mockResolvedValue(undefined)
     mocks.imageRemove.mockResolvedValue(undefined)
+    mocks.findProfessionalReview.mockResolvedValue(null)
   })
 
   it('carrega o catálogo real e permite salvar um perfil incompleto como rascunho', async () => {
@@ -243,6 +251,55 @@ describe('ProfessionalProfilePage', () => {
     )
     expect(await screen.findByText(/rascunho salvo/i)).toBeInTheDocument()
     expect(mocks.syncProfessionalProfileStatus).toHaveBeenCalledWith('incomplete')
+  })
+
+  it('exibe o feedback permitido e reenvia correções sem remover estados administrativos no cliente', async () => {
+    mocks.loadProfessionalProfile.mockResolvedValue(publishedProfile)
+    mocks.findProfessionalReview.mockResolvedValue({
+      schemaVersion: 1,
+      professionalId: 'user-123',
+      reviewStatus: 'CHANGES_REQUESTED',
+      active: false,
+      profileVersion: 1,
+      submittedVersion: null,
+      approvedVersion: null,
+      revision: 2,
+      lastEventId: 'review-2',
+      professionalFeedback: 'Detalhe melhor sua região de atendimento.',
+      approvedCategoryIds: [],
+      approvedSpecialtyIds: [],
+      approvedBaseCityIbgeCode: '',
+      approvedSelectedCityIbgeCodes: [],
+      eligibleCityIbgeCodes: [],
+    })
+    mocks.saveProfessionalProfile.mockImplementation(
+      async (_userId, input, status) => ({
+        ...publishedProfile,
+        ...input,
+        status,
+      }),
+    )
+    const user = userEvent.setup()
+
+    await renderProfile(false)
+
+    expect(
+      screen.getByText('Detalhe melhor sua região de atendimento.'),
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole('button', { name: 'Corrigir e reenviar' }),
+    )
+
+    expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
+      'user-123',
+      expect.any(Object),
+      'PUBLISHED',
+      catalog,
+      publishedProfile,
+    )
+    expect(
+      await screen.findByText(/correções enviadas para uma nova análise/i),
+    ).toBeInTheDocument()
   })
 
   it('recolhe seções, exibe o resumo e preserva os valores ao reabrir', async () => {
@@ -323,7 +380,7 @@ describe('ProfessionalProfilePage', () => {
     expect(avatarInput).toHaveClass('sr-only')
     expect(avatarInput).not.toHaveClass('w-full', 'min-h-11', 'max-w-full')
 
-    await user.click(screen.getByRole('button', { name: 'Salvar alterações' }))
+    await user.click(screen.getByRole('button', { name: 'Enviar para análise' }))
 
     expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
       'user-123',
@@ -356,7 +413,7 @@ describe('ProfessionalProfilePage', () => {
     expect(services).toHaveAttribute('aria-expanded', 'false')
     expect(contact).toHaveAttribute('aria-expanded', 'false')
 
-    await user.click(screen.getByRole('button', { name: 'Publicar perfil' }))
+    await user.click(screen.getByRole('button', { name: 'Enviar para análise' }))
 
     await screen.findByText('Selecione ao menos uma categoria para publicar.')
     expect(services).toHaveAttribute('aria-expanded', 'true')
@@ -393,7 +450,7 @@ describe('ProfessionalProfilePage', () => {
 
     await renderProfile()
     await screen.findByLabelText('Nome público *')
-    await user.click(screen.getByRole('button', { name: 'Publicar perfil' }))
+    await user.click(screen.getByRole('button', { name: 'Enviar para análise' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /complete os campos obrigatórios/i,
@@ -578,7 +635,7 @@ describe('ProfessionalProfilePage', () => {
     ).toHaveAttribute('src', 'https://images.example/profile.webp')
 
     await user.click(
-      screen.getByRole('button', { name: 'Voltar para rascunho' }),
+      screen.getByRole('button', { name: 'Salvar rascunho' }),
     )
 
     expect(mocks.syncProfessionalProfile).toHaveBeenCalledWith(
@@ -621,7 +678,7 @@ describe('ProfessionalProfilePage', () => {
     )
     await screen.findByLabelText('Texto alternativo')
     await user.click(
-      screen.getByRole('button', { name: 'Voltar para rascunho' }),
+      screen.getByRole('button', { name: 'Salvar rascunho' }),
     )
 
     expect(
@@ -664,7 +721,7 @@ describe('ProfessionalProfilePage', () => {
     )
     await screen.findByLabelText('Texto alternativo')
     await user.click(
-      screen.getByRole('button', { name: 'Voltar para rascunho' }),
+      screen.getByRole('button', { name: 'Salvar rascunho' }),
     )
 
     expect(
@@ -704,7 +761,7 @@ describe('ProfessionalProfilePage', () => {
     expect(screen.getByText(/nenhuma foto de perfil adicionada/i)).toBeInTheDocument()
 
     await user.click(
-      screen.getByRole('button', { name: 'Voltar para rascunho' }),
+      screen.getByRole('button', { name: 'Salvar rascunho' }),
     )
     expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
       'user-123',
@@ -741,7 +798,7 @@ describe('ProfessionalProfilePage', () => {
     await renderProfile()
 
     await user.click(await screen.findByRole('button', { name: /remover foto/i }))
-    await user.click(screen.getByRole('button', { name: 'Voltar para rascunho' }))
+    await user.click(screen.getByRole('button', { name: 'Salvar rascunho' }))
 
     expect(
       await screen.findByRole('heading', { name: /salvar o perfil/i }),
@@ -761,7 +818,7 @@ describe('ProfessionalProfilePage', () => {
     expect(screen.queryByLabelText(/código IBGE/i)).not.toBeInTheDocument()
     expect(screen.getByRole('radio', { name: '30 km' })).toBeChecked()
     expect(screen.getByRole('radio', { name: 'Aceitando novos serviços' })).toBeChecked()
-    expect(screen.getByText('Publicado')).toBeInTheDocument()
+    expect(screen.getByText('Cadastro enviado')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Pausar perfil' })).toBeInTheDocument()
   })
 
@@ -789,7 +846,7 @@ describe('ProfessionalProfilePage', () => {
     await renderProfile()
 
     await user.click(
-      await screen.findByRole('button', { name: 'Voltar para rascunho' }),
+      await screen.findByRole('button', { name: 'Salvar rascunho' }),
     )
 
     expect(mocks.saveProfessionalProfile).toHaveBeenCalledWith(
@@ -899,8 +956,10 @@ describe('ProfessionalProfilePage', () => {
       publishedProfile,
     )
     expect(mocks.saveProfessionalProfile).not.toHaveBeenCalled()
-    expect(screen.getByText('Publicado')).toBeInTheDocument()
-    expect(await screen.findByText(/sem alterar a publicação/i)).toBeInTheDocument()
+    expect(screen.getByText('Cadastro enviado')).toBeInTheDocument()
+    expect(
+      await screen.findByText(/continua com o mesmo status/i),
+    ).toBeInTheDocument()
   })
 
   it('exige nova escolha para um perfil legado com atendimento remoto', async () => {
