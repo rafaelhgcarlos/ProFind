@@ -6,10 +6,13 @@ import {
   ChevronRight,
   ClipboardCheck,
   ImageIcon,
+  Maximize2,
+  MapPin,
+  Phone,
   RefreshCw,
   UserRound,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { AdminLayout } from '../../../components/layout/AdminLayout'
@@ -47,6 +50,11 @@ import {
 } from '../../../types/professional-review'
 import type { ServiceCatalog } from '../../../types/catalog'
 import { useAuth } from '../../auth/use-auth'
+import {
+  AdminImageViewer,
+  type AdminReviewImage,
+} from '../components/AdminImageViewer'
+import { imageKitDisplayUrl } from '../components/admin-image-viewer.utils'
 
 const STATUS_LABELS: Record<ProfessionalReviewStatus, string> = {
   DRAFT: 'Rascunho',
@@ -77,6 +85,18 @@ const PERIOD_LABELS: Record<string, string> = {
   EVENING: 'Noite',
 }
 
+const AVAILABILITY_LABELS: Record<string, string> = {
+  AVAILABLE: 'Disponível para novos atendimentos',
+  LIMITED: 'Disponibilidade limitada',
+  UNAVAILABLE: 'Indisponível no momento',
+}
+
+const SERVICE_MODE_LABELS: Record<string, string> = {
+  CITY_ONLY: 'Atende no município base',
+  RADIUS: 'Atende por raio de distância',
+  SELECTED_CITIES: 'Atende municípios selecionados',
+}
+
 type AdminAction =
   | 'approve'
   | 'changes'
@@ -105,6 +125,18 @@ function formatServiceDate(value: string) {
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: 'UTC' }).format(
     new Date(`${value}T12:00:00Z`),
   )
+}
+
+function formatPhone(value: string | null) {
+  if (!value) return 'Não publicado'
+  const digits = value.replace(/\D/g, '')
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`
+  }
+  return value
 }
 
 function errorMessage(error: unknown) {
@@ -506,6 +538,168 @@ function AssistanceDialog({ open, detail, busy, error, onClose, onSubmit }: Assi
   )
 }
 
+interface DecisionPanelProps {
+  detail: AdminProfessionalReviewDetail
+  versionBlocked: boolean
+  onAction(action: AdminAction): void
+}
+
+function DecisionPanel({ detail, versionBlocked, onAction }: DecisionPanelProps) {
+  const { operational } = detail
+  return (
+    <div className="grid gap-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>Decisão da análise</CardTitle>
+          <p className="text-sm leading-6 text-muted-foreground">
+            A decisão será vinculada à versão {operational.submittedVersion ?? operational.profileVersion}.
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {versionBlocked ? (
+            <Alert variant="destructive">
+              <AlertTriangle aria-hidden="true" />
+              <AlertTitle>Versão divergente</AlertTitle>
+              <AlertDescription>Recarregue o cadastro antes de decidir.</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {operational.reviewStatus === 'UNDER_REVIEW' ? (
+            <>
+              <Button className="w-full" disabled={versionBlocked} onClick={() => onAction('approve')}>
+                Aprovar cadastro
+              </Button>
+              <p className="-mt-1 text-xs leading-5 text-muted-foreground">
+                {operational.active
+                  ? 'A aprovação mantém o profissional ativo.'
+                  : 'Na confirmação, “Ativar ao aprovar” vem marcado e pode ser desmarcado.'}
+              </p>
+              <Button className="w-full" variant="outline" disabled={versionBlocked} onClick={() => onAction('changes')}>
+                Solicitar ajustes
+              </Button>
+              <Button className="w-full" variant="destructive" disabled={versionBlocked} onClick={() => onAction('reject')}>
+                Rejeitar cadastro
+              </Button>
+            </>
+          ) : null}
+
+          {operational.reviewStatus === 'APPROVED' ? (
+            <>
+              <Button className="w-full" variant="outline" onClick={() => onAction(operational.active ? 'deactivate' : 'reactivate')}>
+                {operational.active ? 'Desativar profissional' : 'Reativar profissional'}
+              </Button>
+              <Button className="w-full" variant="destructive" onClick={() => onAction('suspend')}>
+                Suspender profissional
+              </Button>
+            </>
+          ) : null}
+
+          {operational.reviewStatus === 'REJECTED' || operational.reviewStatus === 'SUSPENDED' ? (
+            <Button className="w-full" variant="outline" onClick={() => onAction('changes')}>
+              Permitir correções
+            </Button>
+          ) : null}
+
+          {operational.reviewStatus === 'DRAFT' || operational.reviewStatus === 'CHANGES_REQUESTED' ? (
+            <p className="text-sm leading-6 text-muted-foreground">
+              Aguarde o profissional enviar ou reenviar o cadastro para análise.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card className="border-dashed">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Auxílio no preenchimento</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Corrija dados confirmados com o profissional sem acessar a conta dele. A ação cria nova versão e nota privada.
+          </p>
+          <Button className="mt-4 w-full" variant="secondary" onClick={() => onAction('assist')}>
+            Auxiliar no preenchimento
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+interface ReviewTimelineProps {
+  detail: AdminProfessionalReviewDetail
+  internalNotes: Map<string, AdminProfessionalReviewDetail['internalHistory'][number]>
+}
+
+function ReviewTimeline({ detail, internalNotes }: ReviewTimelineProps) {
+  const [showAll, setShowAll] = useState(false)
+  const visibleHistory = showAll ? detail.history : detail.history.slice(0, 4)
+  const hiddenCount = detail.history.length - visibleHistory.length
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>Histórico da análise</CardTitle>
+          <Badge variant="outline">{detail.history.length} evento(s)</Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {detail.history.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum evento registrado.</p>
+        ) : (
+          <>
+            <ol className="ml-2 border-l border-border">
+              {visibleHistory.map((event) => {
+                const internal = internalNotes.get(event.eventId)
+                return (
+                  <li key={event.eventId} className="relative pb-4 pl-5 last:pb-0">
+                    <span className="absolute top-2 -left-1.5 size-3 rounded-full border-2 border-background bg-primary" aria-hidden="true" />
+                    <details className="group rounded-md border bg-card open:bg-muted/35">
+                      <summary className="cursor-pointer list-none px-3 py-2.5 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 [&::-webkit-details-marker]:hidden">
+                        <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                          <div className="min-w-0">
+                            <p className="font-semibold">{ACTION_LABELS[event.action]}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {event.actorRole === 'ADMIN' ? 'Equipe administrativa' : 'Profissional'} · versão {event.profileVersion}
+                            </p>
+                          </div>
+                          <time className="shrink-0 text-xs text-muted-foreground">{formatDate(event.createdAt)}</time>
+                        </div>
+                      </summary>
+                      <div className="grid gap-2 border-t px-3 py-3 text-sm">
+                        <p>
+                          <span className="text-muted-foreground">Estado:</span>{' '}
+                          {STATUS_LABELS[event.fromStatus]} → {STATUS_LABELS[event.toStatus]}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Versão analisada:</span>{' '}
+                          {event.reviewedVersion ?? 'Não se aplica'}
+                        </p>
+                        {event.reason ? <p><span className="font-medium">Feedback:</span> {event.reason}</p> : null}
+                        {internal?.note ? <p className="rounded-md bg-muted p-3"><span className="font-medium">Nota interna:</span> {internal.note}</p> : null}
+                        {!event.reason && !internal?.note ? <p className="text-muted-foreground">Sem observações adicionais.</p> : null}
+                      </div>
+                    </details>
+                  </li>
+                )
+              })}
+            </ol>
+            {hiddenCount > 0 ? (
+              <Button className="mt-4 w-full" variant="outline" onClick={() => setShowAll(true)}>
+                Mostrar {hiddenCount} evento(s) anterior(es)
+              </Button>
+            ) : showAll && detail.history.length > 4 ? (
+              <Button className="mt-4 w-full" variant="ghost" onClick={() => setShowAll(false)}>
+                Mostrar somente os recentes
+              </Button>
+            ) : null}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function AdminProfessionalDetail({ professionalId }: { professionalId: string }) {
   const { user } = useAuth()
   const [detail, setDetail] = useState<AdminProfessionalReviewDetail | null>(null)
@@ -517,6 +711,8 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
   const [busy, setBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
   const [reloadSequence, setReloadSequence] = useState(0)
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
+  const [viewerReturnFocus, setViewerReturnFocus] = useState<HTMLElement | null>(null)
 
   useDocumentTitle('Detalhes da análise — ProFind')
 
@@ -551,6 +747,38 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
     () => new Map(detail?.internalHistory.map((event) => [event.eventId, event]) ?? []),
     [detail],
   )
+  const reviewImages = useMemo<AdminReviewImage[]>(() => {
+    if (!detail) return []
+    return [
+      ...(detail.profile.profileImage
+        ? [{
+            url: detail.profile.profileImage.url,
+            alt: detail.profile.profileImage.altText || `Foto de perfil de ${detail.profile.publicName}`,
+            label: 'Foto de perfil',
+          }]
+        : []),
+      ...detail.profile.portfolioImages.map((image, index) => ({
+        url: image.url,
+        alt: image.altText || `Item ${index + 1} do portfólio`,
+        label: `Portfólio ${index + 1}`,
+      })),
+    ]
+  }, [detail])
+
+  const versionBlocked = Boolean(
+    detail?.operational.reviewStatus === 'UNDER_REVIEW' &&
+      detail.operational.submittedVersion !== detail.operational.profileVersion,
+  )
+
+  function openAction(nextAction: AdminAction) {
+    setActionError(null)
+    setAction(nextAction)
+  }
+
+  function openImage(event: ReactMouseEvent<HTMLButtonElement>, index: number) {
+    setViewerReturnFocus(event.currentTarget)
+    setViewerIndex(index)
+  }
 
   async function performDecision(input: { feedback: string; internalNote: string; activateOnApproval: boolean }) {
     if (!detail || !action || action === 'assist') return
@@ -674,26 +902,43 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
               </Alert>
             ) : null}
             <Card>
-              <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex min-w-0 items-center gap-4">
-                  <Avatar className="size-16 border">
-                    {detail.profile.profileImage ? <AvatarImage src={detail.profile.profileImage.url} alt="" /> : null}
-                    <AvatarFallback>{detail.profile.publicName.slice(0, 2).toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <CardTitle className="text-xl">{detail.profile.publicName || 'Cadastro profissional'}</CardTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">{detail.profile.headline || 'Apresentação não preenchida'}</p>
+              <CardContent className="p-4 sm:p-5">
+                <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar className="size-14 shrink-0 border sm:size-16">
+                      {detail.profile.profileImage ? (
+                        <AvatarImage src={imageKitDisplayUrl(detail.profile.profileImage.url, 240)} alt="" />
+                      ) : null}
+                      <AvatarFallback>{detail.profile.publicName.slice(0, 2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <h2 className="break-words text-xl font-bold tracking-tight">
+                        {detail.profile.publicName || 'Cadastro profissional'}
+                      </h2>
+                      <p className="mt-0.5 break-words text-sm text-muted-foreground">
+                        {detail.profile.headline || 'Profissão não informada'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <Badge variant={statusVariant(detail.operational.reviewStatus)}>
+                      {STATUS_LABELS[detail.operational.reviewStatus]}
+                    </Badge>
+                    <Badge variant={detail.operational.active ? 'success' : 'outline'}>
+                      {detail.operational.active ? 'Ativo' : 'Inativo'}
+                    </Badge>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant={statusVariant(detail.operational.reviewStatus)}>{STATUS_LABELS[detail.operational.reviewStatus]}</Badge>
-                  <Badge variant={detail.operational.active ? 'success' : 'outline'}>{detail.operational.active ? 'Ativo' : 'Inativo'}</Badge>
+                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3 text-xs text-muted-foreground">
+                  <span>Cadastro <strong className="text-foreground">v{detail.operational.profileVersion}</strong></span>
+                  <span>Enviado <strong className={versionBlocked ? 'text-destructive' : 'text-foreground'}>v{detail.operational.submittedVersion ?? '—'}</strong></span>
+                  <span>Aprovado <strong className="text-foreground">v{detail.operational.approvedVersion ?? '—'}</strong></span>
+                  {versionBlocked ? (
+                    <span className="inline-flex items-center gap-1 font-semibold text-destructive">
+                      <AlertTriangle className="size-3.5" aria-hidden="true" /> Divergência impede a decisão
+                    </span>
+                  ) : null}
                 </div>
-              </CardHeader>
-              <CardContent className="grid gap-4 border-t pt-5 sm:grid-cols-3">
-                <div><p className="text-xs text-muted-foreground">Versão do cadastro</p><p className="font-semibold">{detail.operational.profileVersion}</p></div>
-                <div><p className="text-xs text-muted-foreground">Versão enviada</p><p className="font-semibold">{detail.operational.submittedVersion ?? '—'}</p></div>
-                <div><p className="text-xs text-muted-foreground">Versão aprovada</p><p className="font-semibold">{detail.operational.approvedVersion ?? '—'}</p></div>
               </CardContent>
             </Card>
 
@@ -714,94 +959,143 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
               </Alert>
             ) : null}
 
-            <section aria-labelledby="admin-actions-title">
-              <h2 id="admin-actions-title" className="text-lg font-bold">Ações administrativas</h2>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {detail.operational.reviewStatus === 'UNDER_REVIEW' ? (
-                  <>
-                    <Button onClick={() => { setActionError(null); setAction('approve') }}>Aprovar</Button>
-                    <Button variant="outline" onClick={() => { setActionError(null); setAction('changes') }}>Solicitar ajustes</Button>
-                    <Button variant="destructive" onClick={() => { setActionError(null); setAction('reject') }}>Rejeitar</Button>
-                  </>
+            <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)] lg:items-start">
+              <div className="grid min-w-0 gap-5">
+                {detail.operational.professionalFeedback ? (
+                  <Alert>
+                    <ClipboardCheck aria-hidden="true" />
+                    <AlertTitle>Feedback visível ao profissional</AlertTitle>
+                    <AlertDescription>{detail.operational.professionalFeedback}</AlertDescription>
+                  </Alert>
                 ) : null}
-                {detail.operational.reviewStatus === 'APPROVED' ? (
-                  <>
-                    <Button variant="destructive" onClick={() => { setActionError(null); setAction('suspend') }}>Suspender</Button>
-                    <Button variant="outline" onClick={() => { setActionError(null); setAction(detail.operational.active ? 'deactivate' : 'reactivate') }}>
-                      {detail.operational.active ? 'Desativar' : 'Reativar'}
-                    </Button>
-                  </>
-                ) : null}
-                {detail.operational.reviewStatus === 'REJECTED' || detail.operational.reviewStatus === 'SUSPENDED' ? (
-                  <Button variant="outline" onClick={() => { setActionError(null); setAction('changes') }}>Permitir correções</Button>
-                ) : null}
-                <Button variant="secondary" onClick={() => { setActionError(null); setAction('assist') }}>Auxiliar no preenchimento</Button>
-              </div>
-            </section>
 
-            {detail.operational.professionalFeedback ? (
-              <Alert>
-                <ClipboardCheck aria-hidden="true" />
-                <AlertTitle>Feedback visível ao profissional</AlertTitle>
-                <AlertDescription>{detail.operational.professionalFeedback}</AlertDescription>
-              </Alert>
-            ) : null}
-
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
-              <Card>
-                <CardHeader><CardTitle>Dados do cadastro</CardTitle></CardHeader>
-                <CardContent className="grid gap-4 text-sm sm:grid-cols-2">
-                  <div className="sm:col-span-2"><p className="text-muted-foreground">Descrição</p><p className="mt-1 whitespace-pre-wrap">{detail.profile.bio || 'Não preenchida'}</p></div>
-                  <div><p className="text-muted-foreground">Experiência</p><p>{detail.profile.experienceYears === null ? 'Não informada' : `${detail.profile.experienceYears} ano(s)`}</p></div>
-                  <div><p className="text-muted-foreground">Localidade</p><p>{[detail.profile.baseLocation.city, detail.profile.baseLocation.stateCode].filter(Boolean).join(' / ') || 'Não informada'}</p></div>
-                  <div><p className="text-muted-foreground">Categorias</p><p>{detail.profile.categoryIds.map((id) => catalog?.categories.find((item) => item.id === id)?.name ?? id).join(', ') || 'Não informadas'}</p></div>
-                  <div><p className="text-muted-foreground">Especialidades</p><p>{detail.profile.specialtyIds.map((id) => catalog?.specialties.find((item) => item.id === id)?.name ?? id).join(', ') || 'Não informadas'}</p></div>
-                  <div><p className="text-muted-foreground">Disponibilidade</p><p>{detail.profile.availability || 'Não informada'}</p></div>
-                  <div><p className="text-muted-foreground">Telefone público</p><p>{detail.profile.publicPhone || 'Não publicado'}</p></div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader><CardTitle>Foto e portfólio</CardTitle></CardHeader>
-                <CardContent>
-                  {detail.profile.portfolioImages.length === 0 ? (
-                    <EmptyState icon={<ImageIcon aria-hidden="true" />} title="Portfólio vazio" description="O profissional ainda não enviou imagens para o portfólio." />
-                  ) : (
-                    <div className="grid grid-cols-2 gap-3">
-                      {detail.profile.portfolioImages.map((image, index) => (
-                        <img key={`${image.url}-${index}`} src={image.url} alt={image.altText || `Item ${index + 1} do portfólio`} className="aspect-square w-full rounded-md border object-cover" />
-                      ))}
+                <Card>
+                  <CardHeader className="pb-3"><CardTitle>Informações profissionais</CardTitle></CardHeader>
+                  <CardContent className="grid gap-4 text-sm sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sobre</p>
+                      <p className="mt-1 whitespace-pre-wrap leading-6">{detail.profile.bio || 'Descrição não preenchida'}</p>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Experiência</p>
+                      <p className="mt-1">{detail.profile.experienceYears === null ? 'Não informada' : `${detail.profile.experienceYears} ano(s)`}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Disponibilidade</p>
+                      <p className="mt-1">{AVAILABILITY_LABELS[detail.profile.availability] ?? 'Não informada'}</p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Contato público</p>
+                      <p className="mt-1 inline-flex items-center gap-2"><Phone className="size-4 text-muted-foreground" aria-hidden="true" /> {formatPhone(detail.profile.publicPhone)}</p>
+                    </div>
+                  </CardContent>
+                </Card>
 
-            <Card>
-              <CardHeader><CardTitle>Histórico da análise</CardTitle></CardHeader>
-              <CardContent>
-                {detail.history.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum evento registrado.</p> : (
-                  <ol className="grid gap-4">
-                    {detail.history.map((event) => {
-                      const internal = internalNotes.get(event.eventId)
-                      return (
-                        <li key={event.eventId} className="rounded-md border p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div><p className="font-semibold">{ACTION_LABELS[event.action]}</p><p className="text-xs text-muted-foreground">{event.actorRole === 'ADMIN' ? 'Ação administrativa' : 'Ação do profissional'} · versão {event.profileVersion}</p></div>
-                            <time className="text-xs text-muted-foreground">{formatDate(event.createdAt)}</time>
-                          </div>
-                          {event.reason ? <p className="mt-3 text-sm"><span className="font-medium">Feedback:</span> {event.reason}</p> : null}
-                          {internal?.note ? <p className="mt-2 rounded-md bg-muted p-3 text-sm"><span className="font-medium">Nota interna:</span> {internal.note}</p> : null}
-                        </li>
-                      )
-                    })}
-                  </ol>
-                )}
-              </CardContent>
-            </Card>
+                <Card>
+                  <CardHeader className="pb-3"><CardTitle>Serviços e especialidades</CardTitle></CardHeader>
+                  <CardContent className="grid gap-4 text-sm sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Áreas de serviço</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {detail.profile.categoryIds.length ? detail.profile.categoryIds.map((id) => (
+                          <Badge key={id} variant="secondary">{catalog?.categories.find((item) => item.id === id)?.name ?? id}</Badge>
+                        )) : <span>Não informadas</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Especialidades</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {detail.profile.specialtyIds.length ? detail.profile.specialtyIds.map((id) => (
+                          <Badge key={id} variant="outline">{catalog?.specialties.find((item) => item.id === id)?.name ?? id}</Badge>
+                        )) : <span>Não informadas</span>}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3"><CardTitle>Região atendida</CardTitle></CardHeader>
+                  <CardContent className="grid gap-4 text-sm sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Município base</p>
+                      <p className="mt-1 inline-flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" /> {[detail.profile.baseLocation.city, detail.profile.baseLocation.stateCode].filter(Boolean).join(' / ') || 'Não informado'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Forma de atendimento</p>
+                      <p className="mt-1">{detail.profile.serviceMode ? SERVICE_MODE_LABELS[detail.profile.serviceMode] ?? detail.profile.serviceMode : 'Não informada'}</p>
+                      {detail.profile.serviceMode === 'RADIUS' && detail.profile.serviceRadiusKm !== null ? <p className="mt-1 text-muted-foreground">Até {detail.profile.serviceRadiusKm} km do município base</p> : null}
+                    </div>
+                    {detail.profile.serviceMode === 'SELECTED_CITIES' ? (
+                      <div className="sm:col-span-2">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Municípios selecionados</p>
+                        <p className="mt-1">{detail.profile.selectedCities.map((city) => `${city.city} / ${city.stateCode}`).join(', ') || 'Nenhum município informado'}</p>
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+
+                <div className="grid items-start gap-5 md:grid-cols-[minmax(12rem,0.75fr)_minmax(0,1.25fr)]">
+                  <Card>
+                    <CardHeader className="pb-3"><CardTitle>Foto de perfil</CardTitle></CardHeader>
+                    <CardContent>
+                      {detail.profile.profileImage ? (
+                        <button
+                          type="button"
+                          className="group relative block w-full overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+                          aria-label="Ampliar foto de perfil"
+                          onClick={(event) => openImage(event, 0)}
+                        >
+                          <img src={imageKitDisplayUrl(detail.profile.profileImage.url, 640)} alt={detail.profile.profileImage.altText || `Foto de perfil de ${detail.profile.publicName}`} className="aspect-[4/3] w-full object-cover" />
+                          <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 bg-black/65 px-2 py-2 text-xs font-semibold text-white"><Maximize2 className="size-4" aria-hidden="true" /> Ampliar</span>
+                        </button>
+                      ) : (
+                        <EmptyState icon={<UserRound aria-hidden="true" />} title="Sem foto" description="Nenhuma foto de perfil foi enviada." className="py-5" />
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3"><CardTitle>Portfólio</CardTitle></CardHeader>
+                    <CardContent>
+                      {detail.profile.portfolioImages.length === 0 ? (
+                        <EmptyState icon={<ImageIcon aria-hidden="true" />} title="Portfólio vazio" description="O profissional ainda não enviou imagens." className="py-5" />
+                      ) : (
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          {detail.profile.portfolioImages.map((image, index) => {
+                            const viewerImageIndex = index + (detail.profile.profileImage ? 1 : 0)
+                            const alt = image.altText || `Item ${index + 1} do portfólio`
+                            return (
+                              <button
+                                key={`${image.url}-${index}`}
+                                type="button"
+                                className="group relative overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+                                aria-label={`Ampliar ${alt}`}
+                                onClick={(event) => openImage(event, viewerImageIndex)}
+                              >
+                                <img src={imageKitDisplayUrl(image.url, 480)} alt={alt} className="aspect-square w-full object-cover transition-transform group-hover:scale-[1.03]" />
+                                <span className="absolute right-1.5 bottom-1.5 flex size-8 items-center justify-center rounded-full bg-black/70 text-white" aria-hidden="true"><Maximize2 className="size-4" /></span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+
+              <aside aria-label="Decisões administrativas" className="min-w-0 lg:sticky lg:top-24">
+                <DecisionPanel detail={detail} versionBlocked={versionBlocked} onAction={openAction} />
+              </aside>
+
+              <div className="min-w-0 lg:col-start-1">
+                <ReviewTimeline detail={detail} internalNotes={internalNotes} />
+              </div>
+            </div>
 
             <DecisionDialog key={action ?? 'closed'} action={action} detail={detail} busy={busy} error={actionError} onClose={() => setAction(null)} onSubmit={(input) => void performDecision(input)} />
             <AssistanceDialog key={`assist-${action ?? 'closed'}-${detail.operational.revision}`} open={action === 'assist'} detail={detail} busy={busy} error={actionError} onClose={() => setAction(null)} onSubmit={(input) => void performAssistance(input)} />
+            <AdminImageViewer images={reviewImages} index={viewerIndex} returnFocusTo={viewerReturnFocus} onIndexChange={setViewerIndex} />
           </>
         ) : null}
       </div>

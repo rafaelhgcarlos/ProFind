@@ -84,7 +84,7 @@ function detailFixture(
       selectedCities: [],
       availability: 'AVAILABLE',
       contactVisibility: 'PRIVATE',
-      publicPhone: null,
+      publicPhone: '12991706194',
       status: 'PUBLISHED',
       profileImage: { url: 'https://images.example/avatar.webp', altText: 'Ana sorrindo' },
       portfolioImages: [{ url: 'https://images.example/work.webp', altText: 'Instalação concluída', order: 0 }],
@@ -194,19 +194,28 @@ describe('AdminProfessionalReviewPage', () => {
     renderPage('/admin/profissionais/professional-1')
 
     expect(await screen.findByText('Ana Profissional')).toBeInTheDocument()
-    expect(screen.getByText('Versão enviada').nextSibling).toHaveTextContent('3')
+    expect(screen.getByText('Enviado').parentElement).toHaveTextContent('Enviado v3')
     expect(screen.getByAltText('Instalação concluída')).toHaveAttribute('src', 'https://images.example/work.webp')
     expect(screen.getByText('Reparos')).toBeInTheDocument()
     expect(screen.getByText('Elétrica')).toBeInTheDocument()
+    expect(screen.getByText('(12) 99170-6194')).toBeInTheDocument()
+    expect(screen.getByText('Disponível para novos atendimentos')).toBeInTheDocument()
+    expect(screen.getByText('Atende no município base')).toBeInTheDocument()
     expect(screen.getByText('Nota privada da equipe.')).toBeInTheDocument()
     expect(screen.getByText('Atendimentos confirmados devem ser preservados')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Aprovar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Aprovar cadastro' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ampliar Instalação concluída' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('Portfólio 1')
+    expect(screen.getByText('2 de 2')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
   it('aprova exatamente a versão lida e ativa na mesma operação explícita', async () => {
     reviewService.findAdminDetail.mockResolvedValue(detailFixture())
     renderPage('/admin/profissionais/professional-1')
-    fireEvent.click(await screen.findByRole('button', { name: 'Aprovar' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Aprovar cadastro' }))
     const dialog = screen.getByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Mensagem ao profissional (opcional)'), {
       target: { value: 'Cadastro revisado.' },
@@ -222,6 +231,41 @@ describe('AdminProfessionalReviewPage', () => {
       feedback: 'Cadastro revisado.',
       internalNote: '',
     }))
+  })
+
+  it('impede decisões quando a versão enviada não é a versão atual', async () => {
+    reviewService.findAdminDetail.mockResolvedValue(detailFixture({
+      profileVersion: 4,
+      submittedVersion: 3,
+    }))
+    renderPage('/admin/profissionais/professional-1')
+
+    expect(await screen.findByText('Divergência impede a decisão')).toBeInTheDocument()
+    expect(screen.getByText(/recarregue o cadastro antes de decidir/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Aprovar cadastro' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Solicitar ajustes' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Rejeitar cadastro' })).toBeDisabled()
+  })
+
+  it('resume eventos recentes e permite consultar os anteriores', async () => {
+    const detail = detailFixture()
+    detail.history = Array.from({ length: 5 }, (_, index) => ({
+      ...detail.history[0],
+      eventId: `review-${index + 1}`,
+      createdAt: new Date(`2026-10-${String(20 + index).padStart(2, '0')}T12:00:00Z`),
+    }))
+    detail.internalHistory = []
+    reviewService.findAdminDetail.mockResolvedValue(detail)
+    renderPage('/admin/profissionais/professional-1')
+
+    expect(await screen.findAllByText('Enviado novamente')).toHaveLength(4)
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar 1 evento(s) anterior(es)' }))
+    const events = await screen.findAllByText('Enviado novamente')
+    expect(events).toHaveLength(5)
+    const summary = events[0].closest('summary')
+    expect(summary).not.toBeNull()
+    fireEvent.click(summary as HTMLElement)
+    expect(summary?.parentElement).toHaveAttribute('open')
   })
 
   it('exige confirmação e nota privada no auxílio administrativo', async () => {
