@@ -26,6 +26,7 @@ const actionLabels: Record<ProfessionalReviewEvent['action'], string> = {
   PROFILE_RESUBMITTED: 'Enviado novamente',
   REANALYSIS_REQUIRED: 'Atualização enviada para análise',
   APPROVED: 'Cadastro aprovado',
+  APPROVED_AND_ACTIVATED: 'Cadastro aprovado e ativado',
   CHANGES_REQUESTED: 'Ajustes solicitados',
   REJECTED: 'Cadastro rejeitado',
   SUSPENDED: 'Cadastro suspenso',

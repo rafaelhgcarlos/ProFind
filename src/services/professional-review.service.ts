@@ -3,7 +3,9 @@ import type { Firestore } from 'firebase/firestore'
 import { getFirebaseAuth, getFirebaseFirestore } from '../lib/firebase'
 import {
   createProfessionalReviewRepository,
+  type AssistProfessionalProfileInput,
   type DecideReviewInput,
+  type ProfessionalReviewQueueInput,
   type ReviewTransactionCoordinator,
   type SetProfessionalActiveInput,
   type SubmitReviewInput,
@@ -86,6 +88,14 @@ export function createProfessionalReviewService(
       actorId()
       return safely(() => repository.listHistory(professionalId, pageSize))
     },
+    listQueue(input?: ProfessionalReviewQueueInput) {
+      actorId()
+      return safely(() => repository.listQueue(input))
+    },
+    findAdminDetail(professionalId: string) {
+      actorId()
+      return safely(() => repository.findAdminDetail(professionalId))
+    },
     submitForReview(input: Omit<SubmitReviewInput, 'actorId'>) {
       return safely(() => repository.submitForReview({ ...input, actorId: actorId() }))
     },
@@ -97,6 +107,9 @@ export function createProfessionalReviewService(
     },
     setActive(input: Omit<SetProfessionalActiveInput, 'actorId'>) {
       return safely(() => repository.setActive({ ...input, actorId: actorId() }))
+    },
+    assistProfile(input: Omit<AssistProfessionalProfileInput, 'actorId'>) {
+      return safely(() => repository.assistProfile({ ...input, actorId: actorId() }))
     },
   }
 }
@@ -118,6 +131,12 @@ export const professionalReviewService = {
   listHistory(professionalId: string, pageSize?: number) {
     return getDefaultService().listHistory(professionalId, pageSize)
   },
+  listQueue(input?: ProfessionalReviewQueueInput) {
+    return getDefaultService().listQueue(input)
+  },
+  findAdminDetail(professionalId: string) {
+    return getDefaultService().findAdminDetail(professionalId)
+  },
   submitForReview(input: Omit<SubmitReviewInput, 'actorId'>) {
     return getDefaultService().submitForReview(input)
   },
@@ -129,5 +148,8 @@ export const professionalReviewService = {
   },
   setActive(input: Omit<SetProfessionalActiveInput, 'actorId'>) {
     return getDefaultService().setActive(input)
+  },
+  assistProfile(input: Omit<AssistProfessionalProfileInput, 'actorId'>) {
+    return getDefaultService().assistProfile(input)
   },
 }

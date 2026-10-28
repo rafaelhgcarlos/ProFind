@@ -721,8 +721,7 @@ service cloud.firestore {
     }
 
     function hasValidProfessionalImage(image, ownerId, purpose) {
-      return image.keys().size() == 9
-        && image.keys().hasOnly([
+      return image.keys().hasOnly([
           'provider', 'ownerId', 'purpose', 'url', 'providerId',
           'createdAt', 'updatedAt', 'order', 'altText'
         ])
@@ -891,7 +890,10 @@ service cloud.firestore {
               && event.reasonCode == 'PROFESSIONAL_SUBMISSION')
           || (event.action == 'PROFILE_RESUBMITTED'
               && event.reasonCode == 'PROFESSIONAL_RESUBMISSION')
-          || (event.action in ['APPROVED', 'CHANGES_REQUESTED', 'REJECTED']
+          || (event.action in [
+                'APPROVED', 'APPROVED_AND_ACTIVATED',
+                'CHANGES_REQUESTED', 'REJECTED'
+              ]
               && event.reasonCode == 'ADMIN_DECISION')
           || (event.action == 'SUSPENDED'
               && event.reasonCode == 'ADMIN_SUSPENSION')
@@ -1146,7 +1148,7 @@ service cloud.firestore {
         && (!isReviewApproval(before, after) || (
           after.approvedVersion == before.profileVersion
           && after.submittedVersion == before.profileVersion
-          && after.active == before.active
+          && (after.active == before.active || after.active == true)
           && approvedSnapshotMatchesProfile(after, profile)
         ))
         && (!(isReviewChangesRequest(before, after)
@@ -1197,7 +1199,11 @@ service cloud.firestore {
           ? (after.active ? 'ACTIVATED' : 'DEACTIVATED')
           : (suspending
             ? 'SUSPENDED'
-            : after.reviewStatus))
+            : (isReviewApproval(before, after)
+                && before.active == false
+                && after.active == true
+              ? 'APPROVED_AND_ACTIVATED'
+              : after.reviewStatus)))
         && (!activeChange || (
           event.reason is string
           && event.reason.size() >= 1
@@ -1215,6 +1221,159 @@ service cloud.firestore {
             && event.reviewedVersion == before.profileVersion)
           || (!decision
             && event.reviewedVersion == before.approvedVersion));
+    }
+
+    function isAdministrativeProfileAssistance(professionalId) {
+      let profilePath = /databases/$(database)/documents/professionalProfiles/$(professionalId);
+      let operationalPath = /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId);
+      let profileBefore = get(profilePath).data;
+      let profileAfter = getAfter(profilePath).data;
+      let before = get(operationalPath).data;
+      let after = getAfter(operationalPath).data;
+      let event = getAfter(
+        /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)/events/$(after.lastEventId)
+      ).data;
+      let nextVersion = before.profileVersion + 1;
+      let reanalysis = before.reviewStatus in ['APPROVED', 'UNDER_REVIEW'];
+
+      return isActiveAdmin()
+        && exists(profilePath)
+        && existsAfter(profilePath)
+        && exists(operationalPath)
+        && existsAfter(operationalPath)
+        && profileBefore.ownerId == professionalId
+        && profileAfter.ownerId == professionalId
+        && profileAfter.status == profileBefore.status
+        && profileAfter.createdAt == profileBefore.createdAt
+        && profileAfter.updatedAt == request.time
+        && profileAfter.diff(profileBefore).affectedKeys().hasOnly([
+          'publicName', 'headline', 'bio', 'experienceYears', 'updatedAt'
+        ])
+        && professionalReviewFieldsChanged(profileBefore, profileAfter)
+        && profileAfter.publicName is string
+        && profileAfter.publicName.size() <= 120
+        && profileAfter.headline is string
+        && profileAfter.headline.size() <= 120
+        && profileAfter.bio is string
+        && profileAfter.bio.size() <= 1200
+        && (profileAfter.experienceYears == null
+          || (profileAfter.experienceYears is int
+            && profileAfter.experienceYears >= 0
+            && profileAfter.experienceYears <= 80))
+        && hasValidOperationalReview(after, professionalId)
+        && after.professionalId == before.professionalId
+        && after.reviewStatus
+          == (reanalysis ? 'UNDER_REVIEW' : before.reviewStatus)
+        && after.active == before.active
+        && after.profileVersion == nextVersion
+        && after.submittedVersion == (reanalysis ? nextVersion : null)
+        && after.approvedVersion == before.approvedVersion
+        && after.revision == before.revision + 1
+        && after.professionalFeedback
+          == (reanalysis ? null : before.get('professionalFeedback', null))
+        && after.approvedCategoryIds == before.approvedCategoryIds
+        && after.approvedSpecialtyIds == before.approvedSpecialtyIds
+        && after.approvedBaseCityIbgeCode == before.approvedBaseCityIbgeCode
+        && after.approvedSelectedCityIbgeCodes
+          == before.approvedSelectedCityIbgeCodes
+        && after.eligibleCityIbgeCodes == before.eligibleCityIbgeCodes
+        && after.diff(before).affectedKeys().hasOnly([
+          'schemaVersion', 'reviewStatus', 'profileVersion',
+          'submittedVersion', 'revision', 'lastEventId',
+          'professionalFeedback', 'updatedAt'
+        ])
+        && hasValidReviewEvent(professionalId, after.lastEventId)
+        && event.actorRole == 'ADMIN'
+        && event.action
+          == (reanalysis ? 'REANALYSIS_REQUIRED' : 'PROFILE_UPDATED')
+        && event.fromStatus == before.reviewStatus
+        && event.toStatus
+          == (reanalysis ? 'UNDER_REVIEW' : before.reviewStatus)
+        && event.profileVersion == nextVersion
+        && event.reviewedVersion == null
+        && event.reason == null
+        && hasValidInternalReviewEvent(
+          professionalId,
+          after.lastEventId,
+          (reanalysis ? 'REANALYSIS_REQUIRED' : 'PROFILE_UPDATED'),
+          null
+        );
+    }
+
+    function isOwnerProfessionalProfileUpdate(userId) {
+      return isDocumentOwner(userId)
+        && hasProfessionalRole(userId)
+        && resource.data.ownerId == userId
+        && request.resource.data.ownerId == userId
+        && resource.data.status != 'SUSPENDED'
+        && request.resource.data.status in ['DRAFT', 'PUBLISHED', 'PAUSED']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'publicName', 'headline', 'bio', 'categoryIds', 'specialtyIds',
+          'experienceYears', 'baseLocation', 'serviceMode', 'serviceRadiusKm',
+          'selectedCities', 'selectedCityIbgeCodes', 'availability',
+          'contactVisibility', 'phone', 'profileImage', 'portfolioImages',
+          'status', 'updatedAt'
+        ])
+        && hasValidProfessionalProfileUpdate()
+        && (request.resource.data.status == 'DRAFT'
+          || isPublishableProfessionalProfile())
+        && ((professionalReviewFieldsChanged(resource.data, request.resource.data)
+            && getAfter(
+              /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
+            ).data.revision == get(
+              /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
+            ).data.get('revision', 0) + 1)
+          || (!professionalReviewFieldsChanged(resource.data, request.resource.data)
+            && ((!exists(
+                /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
+              )
+              && (existsAfter(
+                  /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
+                )
+                || request.resource.data.status == resource.data.status))
+              || (exists(
+                  /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
+                )
+                && getAfter(
+                  /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
+                ).data == get(
+                  /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
+                ).data
+                && (request.resource.data.status == resource.data.status
+                  || !(get(
+                    /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
+                  ).data.reviewStatus in ['DRAFT', 'CHANGES_REQUESTED']))))));
+    }
+
+    function isAdministrativeProfileFieldUpdate(userId) {
+      let operationalPath = /databases/$(database)/documents/professionalOperationalProfiles/$(userId);
+
+      return isActiveAdmin()
+        && resource.data.ownerId == userId
+        && request.resource.data.ownerId == userId
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'publicName', 'headline', 'bio', 'experienceYears', 'updatedAt'
+        ])
+        && professionalReviewFieldsChanged(resource.data, request.resource.data)
+        && request.resource.data.publicName is string
+        && request.resource.data.publicName.size() <= 120
+        && request.resource.data.headline is string
+        && request.resource.data.headline.size() <= 120
+        && request.resource.data.bio is string
+        && request.resource.data.bio.size() <= 1200
+        && (request.resource.data.experienceYears == null
+          || (request.resource.data.experienceYears is int
+            && request.resource.data.experienceYears >= 0
+            && request.resource.data.experienceYears <= 80))
+        && exists(operationalPath)
+        && existsAfter(operationalPath)
+        && getAfter(operationalPath).data.profileVersion
+          == get(operationalPath).data.profileVersion + 1
+        && getAfter(operationalPath).data.revision
+          == get(operationalPath).data.revision + 1;
     }
 
     match /users/{userId} {
@@ -1293,8 +1452,21 @@ service cloud.firestore {
       allow get: if isDocumentOwner(professionalId) || isActiveAdmin();
       allow list: if isActiveAdmin();
       allow create: if isInitialProfessionalReview(professionalId);
-      allow update: if isProfessionalReviewTransition(professionalId)
-        || isAdministrativeReviewTransition(professionalId);
+      allow update: if (isDocumentOwner(professionalId)
+          && isProfessionalReviewTransition(professionalId))
+        || (isActiveAdmin()
+          && ((getAfter(
+                /databases/$(database)/documents/professionalProfiles/$(professionalId)
+              ).data == get(
+                /databases/$(database)/documents/professionalProfiles/$(professionalId)
+              ).data
+              && isAdministrativeReviewTransition(professionalId))
+            || (getAfter(
+                /databases/$(database)/documents/professionalProfiles/$(professionalId)
+              ).data != get(
+                /databases/$(database)/documents/professionalProfiles/$(professionalId)
+              ).data
+              && isAdministrativeProfileAssistance(professionalId))));
       allow delete: if false;
 
       match /events/{eventId} {
@@ -1310,20 +1482,14 @@ service cloud.firestore {
           && getAfter(
             /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)
           ).data.lastEventId == eventId
-          && ((!exists(
+          && (!exists(
               /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)
             )
-            && existsAfter(
+            || getAfter(
               /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)
-            ))
-            || (exists(
-                /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)
-              )
-              && getAfter(
-                /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)
-              ).data.revision == get(
-                /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)
-              ).data.revision + 1));
+            ).data != get(
+              /databases/$(database)/documents/professionalOperationalProfiles/$(professionalId)
+            ).data);
         allow update, delete: if false;
       }
     }
@@ -1552,6 +1718,7 @@ service cloud.firestore {
 
     match /professionalProfiles/{userId} {
       allow read: if isDocumentOwner(userId)
+        || isActiveAdmin()
         || (resource.data.status == 'PUBLISHED'
           && resource.data.get('serviceMode', null) in [
             'CITY_ONLY', 'RADIUS', 'SELECTED_CITIES'
@@ -1591,65 +1758,8 @@ service cloud.firestore {
           /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
         );
 
-      allow update: if isDocumentOwner(userId)
-        && hasProfessionalRole(userId)
-        && resource.data.ownerId == userId
-        && request.resource.data.ownerId == userId
-        && resource.data.status != 'SUSPENDED'
-        && request.resource.data.status in ['DRAFT', 'PUBLISHED', 'PAUSED']
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'publicName',
-          'headline',
-          'bio',
-          'categoryIds',
-          'specialtyIds',
-          'experienceYears',
-          'baseLocation',
-          'serviceMode',
-          'serviceRadiusKm',
-          'selectedCities',
-          'selectedCityIbgeCodes',
-          'availability',
-          'contactVisibility',
-          'phone',
-          'profileImage',
-          'portfolioImages',
-          'status',
-          'updatedAt'
-        ])
-        && hasValidProfessionalProfileUpdate()
-        && (request.resource.data.status == 'DRAFT'
-          || isPublishableProfessionalProfile())
-        && ((professionalReviewFieldsChanged(
-              resource.data, request.resource.data
-            )
-            && getAfter(
-              /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
-            ).data.revision == get(
-              /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
-            ).data.get('revision', 0) + 1)
-          || (!professionalReviewFieldsChanged(
-              resource.data, request.resource.data
-            )
-            && ((!exists(
-                /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
-              )
-              && (existsAfter(
-                  /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
-                )
-                || request.resource.data.status == resource.data.status))
-              || (exists(
-                  /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
-                )
-                && getAfter(
-                /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
-                ).data == get(
-                  /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
-                ).data
-                && (request.resource.data.status == resource.data.status
-                  || !(get(
-                    /databases/$(database)/documents/professionalOperationalProfiles/$(userId)
-                  ).data.reviewStatus in ['DRAFT', 'CHANGES_REQUESTED']))))));
+      allow update: if isOwnerProfessionalProfileUpdate(userId)
+        || isAdministrativeProfileFieldUpdate(userId);
 
       allow delete: if false;
     }

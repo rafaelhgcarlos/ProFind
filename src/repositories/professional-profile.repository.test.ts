@@ -310,9 +310,50 @@ describe('professionalProfileRepository', () => {
     expect(writtenData).not.toHaveProperty('file')
     expect(writtenData).not.toHaveProperty('base64')
     expect(writtenData?.phone).toBe(firebaseMocks.deletedField)
-    expect(firebaseMocks.batch.update).toHaveBeenCalledWith(
+    expect(firebaseMocks.batch.update).not.toHaveBeenCalledWith(
       firebaseMocks.userReference,
       expect.objectContaining({ professionalProfileStatus: 'complete' }),
+    )
+  })
+
+  it('não regrava dados privados nem o resumo quando somente imagens ou dados públicos mudam', async () => {
+    firebaseMocks.batch.get.mockImplementation(async (reference) => {
+      if (reference === firebaseMocks.profileReference) {
+        return {
+          exists: () => true,
+          data: () => ({ ...profileInput, status: 'PUBLISHED' }),
+        }
+      }
+      if (reference === firebaseMocks.privateProfileReference) {
+        return {
+          exists: () => true,
+          data: () => ({
+            ownerId: 'user-123',
+            phone: profileInput.phone,
+            privateLocation: profileInput.privateLocation,
+          }),
+        }
+      }
+      return { exists: () => false, data: () => undefined }
+    })
+
+    await professionalProfileRepository.save({
+      userId: 'user-123',
+      profile: {
+        ...profileInput,
+        headline: 'Eletricista residencial e comercial',
+      },
+      status: 'PUBLISHED',
+      exists: true,
+    })
+
+    expect(firebaseMocks.batch.set).not.toHaveBeenCalledWith(
+      firebaseMocks.privateProfileReference,
+      expect.anything(),
+    )
+    expect(firebaseMocks.batch.update).not.toHaveBeenCalledWith(
+      firebaseMocks.userReference,
+      expect.anything(),
     )
   })
 

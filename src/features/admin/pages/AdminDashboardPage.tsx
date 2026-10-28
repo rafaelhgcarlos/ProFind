@@ -1,4 +1,5 @@
 import { Activity, BookOpenText, ClipboardCheck, ShieldCheck } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import { AdminLayout } from '../../../components/layout/AdminLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
@@ -13,7 +14,8 @@ const areas = [
     description:
       'Revise cadastros, solicite ajustes e gerencie a aprovação dos profissionais.',
     icon: ClipboardCheck,
-    status: 'Em breve',
+    status: 'Disponível',
+    href: '/admin/profissionais',
   },
   {
     title: 'Catálogo de serviços',
@@ -21,6 +23,7 @@ const areas = [
       'Consulte e organize as categorias e especialidades disponíveis na plataforma.',
     icon: BookOpenText,
     status: 'Em breve',
+    href: null,
   },
   {
     title: 'Acompanhamento operacional',
@@ -28,6 +31,7 @@ const areas = [
       'Acompanhe solicitações, atendimentos, cancelamentos e substituições.',
     icon: Activity,
     status: 'Em breve',
+    href: null,
   },
 ] as const
 
@@ -54,7 +58,7 @@ export function AdminDashboardPage() {
               Central de administração
             </h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              As funcionalidades abaixo estarão disponíveis em breve.
+              Acesse as ferramentas disponíveis e acompanhe as próximas áreas do painel.
             </p>
           </div>
 
@@ -62,7 +66,7 @@ export function AdminDashboardPage() {
             {areas.map((area) => {
               const Icon = area.icon
               return (
-                <Card key={area.title} aria-disabled="true" className="h-full">
+                <Card key={area.title} aria-disabled={area.href ? undefined : true} className="h-full">
                   <CardHeader>
                     <div className="flex items-start justify-between gap-3">
                       <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -74,6 +78,11 @@ export function AdminDashboardPage() {
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm leading-6 text-muted-foreground">{area.description}</p>
+                    {area.href ? (
+                      <Link className="mt-4 inline-flex min-h-11 items-center font-semibold text-primary hover:underline" to={area.href}>
+                        Abrir análise
+                      </Link>
+                    ) : null}
                   </CardContent>
                 </Card>
               )

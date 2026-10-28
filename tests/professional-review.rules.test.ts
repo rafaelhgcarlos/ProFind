@@ -192,10 +192,18 @@ async function editReviewedProfile(
     const toStatus = ['REJECTED', 'SUSPENDED'].includes(fromStatus)
       ? fromStatus
       : 'UNDER_REVIEW'
-    const action =
-      fromStatus === 'APPROVED' || fromStatus === 'UNDER_REVIEW'
-        ? 'REANALYSIS_REQUIRED'
-        : 'PROFILE_UPDATED'
+    const action = fromStatus === 'CHANGES_REQUESTED'
+      ? 'PROFILE_RESUBMITTED'
+      : fromStatus === 'DRAFT'
+        ? 'PROFILE_SUBMITTED'
+        : fromStatus === 'APPROVED' || fromStatus === 'UNDER_REVIEW'
+          ? 'REANALYSIS_REQUIRED'
+          : 'PROFILE_UPDATED'
+    const reasonCode = action === 'PROFILE_RESUBMITTED'
+      ? 'PROFESSIONAL_RESUBMISSION'
+      : action === 'PROFILE_SUBMITTED'
+        ? 'PROFESSIONAL_SUBMISSION'
+        : 'PROFILE_DATA_CHANGED'
     transaction.update(profileReference, {
       ...changes,
       updatedAt: serverTimestamp(),
@@ -217,7 +225,7 @@ async function editReviewedProfile(
       actorId: professionalId,
       actorRole: 'PROFESSIONAL',
       action,
-      reasonCode: 'PROFILE_DATA_CHANGED',
+      reasonCode,
       fromStatus,
       toStatus,
       profileVersion,
@@ -527,6 +535,116 @@ describe('professional review domain and Security Rules', () => {
         profileVersion: 2,
       })
     })
+  })
+
+  it('persists avatar and three portfolio images in the complete profile transaction', async () => {
+    const image = (
+      purpose: 'PROFESSIONAL_AVATAR' | 'PROFESSIONAL_PORTFOLIO',
+      providerId: string,
+      order: number,
+      updatedAt: number,
+    ) => ({
+      provider: 'IMAGEKIT',
+      ownerId: professionalId,
+      purpose,
+      url: `https://ik.imagekit.io/example/profind/professionals/${professionalId}/${purpose === 'PROFESSIONAL_AVATAR' ? 'avatar' : 'portfolio'}/${providerId}.webp`,
+      providerId,
+      createdAt: updatedAt - 2_000,
+      updatedAt,
+      order,
+      altText: purpose === 'PROFESSIONAL_AVATAR' ? 'Imagem de perfil' : 'Serviço realizado',
+    })
+    await seedReview('UNDER_REVIEW', {
+      profile: {
+        profileImage: image('PROFESSIONAL_AVATAR', 'avatar-before', 0, 1_793_215_400_000),
+        portfolioImages: [
+          image('PROFESSIONAL_PORTFOLIO', 'portfolio-before-1', 0, 1_793_215_500_000),
+          image('PROFESSIONAL_PORTFOLIO', 'portfolio-before-2', 1, 1_793_215_600_000),
+        ],
+      },
+      operational: {
+        profileVersion: 4,
+        submittedVersion: 4,
+        revision: 5,
+        lastEventId: 'review-5',
+      },
+    })
+    await inspect((firestore) => setDoc(
+      doc(firestore, 'professionalPrivateProfiles', professionalId),
+      {
+        ownerId: professionalId,
+        phone: '12991706194',
+        privateLocation: { postalCode: '12517170', neighborhood: 'Parque Residencial' },
+        updatedAt: new Date('2026-10-28T18:00:00Z'),
+      },
+    ))
+    const professional = testEnvironment
+      .authenticatedContext(professionalId)
+      .firestore()
+    const nextAvatar = image('PROFESSIONAL_AVATAR', 'avatar-current', 0, 1_793_215_700_000)
+    const nextPortfolio = [
+      image('PROFESSIONAL_PORTFOLIO', 'portfolio-current-1', 0, 1_793_215_710_000),
+      image('PROFESSIONAL_PORTFOLIO', 'portfolio-current-2', 1, 1_793_215_720_000),
+      image('PROFESSIONAL_PORTFOLIO', 'portfolio-current-3', 2, 1_793_215_730_000),
+    ]
+
+    await expect(runTransaction(professional, async (transaction) => {
+      const profileReference = doc(professional, 'professionalProfiles', professionalId)
+      const privateReference = doc(professional, 'professionalPrivateProfiles', professionalId)
+      const userReference = doc(professional, 'users', professionalId)
+      const operationalReference = doc(
+        professional,
+        'professionalOperationalProfiles',
+        professionalId,
+      )
+      const [profileSnapshot, operationalSnapshot] = await Promise.all([
+        transaction.get(profileReference),
+        transaction.get(operationalReference),
+      ])
+      const currentOperational = operationalSnapshot.data()
+      if (!profileSnapshot.exists() || !currentOperational) throw new Error('fixture ausente')
+      transaction.update(profileReference, {
+        profileImage: nextAvatar,
+        portfolioImages: nextPortfolio,
+        updatedAt: serverTimestamp(),
+      })
+      transaction.set(privateReference, {
+        ownerId: professionalId,
+        phone: '12991706194',
+        privateLocation: { postalCode: '12517170', neighborhood: 'Parque Residencial atualizado' },
+        updatedAt: serverTimestamp(),
+      })
+      transaction.update(userReference, {
+        professionalProfileStatus: 'complete',
+        updatedAt: serverTimestamp(),
+      })
+      transaction.set(operationalReference, {
+        ...currentOperational,
+        reviewStatus: 'UNDER_REVIEW',
+        profileVersion: 5,
+        submittedVersion: 5,
+        revision: 6,
+        lastEventId: 'review-6',
+        professionalFeedback: null,
+        updatedAt: serverTimestamp(),
+      })
+      transaction.set(doc(operationalReference, 'events', 'review-6'), {
+        eventId: 'review-6',
+        entityType: 'PROFESSIONAL',
+        entityId: professionalId,
+        professionalId,
+        actorId: professionalId,
+        actorRole: 'PROFESSIONAL',
+        action: 'REANALYSIS_REQUIRED',
+        reasonCode: 'PROFILE_DATA_CHANGED',
+        fromStatus: 'UNDER_REVIEW',
+        toStatus: 'UNDER_REVIEW',
+        profileVersion: 5,
+        reviewedVersion: null,
+        reason: null,
+        createdAt: serverTimestamp(),
+      })
+    })).resolves.toBeUndefined()
   })
 
   it('keeps version, approval and reservations when only availability changes', async () => {
@@ -924,5 +1042,176 @@ describe('professional review domain and Security Rules', () => {
         ),
       ),
     )
+  })
+
+  it('runs adjustments, resubmission, approval with activation and suspension without removing confirmed work', async () => {
+    await seedReview()
+    const admin = reviewService(
+      testEnvironment.authenticatedContext(adminId).firestore(),
+      adminId,
+    )
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalId)
+      .firestore()
+
+    const adjustmentInput = {
+      professionalId,
+      expectedVersion: 1,
+      expectedRevision: 1,
+      decision: 'CHANGES_REQUESTED' as const,
+      feedback: 'Detalhe melhor a experiência profissional.',
+      internalNote: 'Revisão inicial da equipe.',
+    }
+    await expect(admin.decide(adjustmentInput)).resolves.toMatchObject({
+      reviewStatus: 'CHANGES_REQUESTED',
+      revision: 2,
+      idempotent: false,
+    })
+    await expect(admin.decide(adjustmentInput)).resolves.toMatchObject({
+      idempotent: true,
+    })
+
+    await editReviewedProfile(professionalFirestore, {
+      bio: 'Instalações, manutenção e reparos residenciais com oito anos de experiência.',
+    })
+    await expect(admin.decide({
+      professionalId,
+      expectedVersion: 1,
+      expectedRevision: 3,
+      decision: 'APPROVED',
+      activateOnApproval: true,
+    })).rejects.toMatchObject({ code: 'stale-version' })
+
+    await expect(admin.decide({
+      professionalId,
+      expectedVersion: 2,
+      expectedRevision: 3,
+      decision: 'APPROVED',
+      activateOnApproval: true,
+      internalNote: 'Versão corrigida conferida.',
+    })).resolves.toMatchObject({
+      reviewStatus: 'APPROVED',
+      active: true,
+      revision: 4,
+    })
+    await inspect(async (firestore) => {
+      const approvalEvent = await getDoc(doc(
+        firestore,
+        'professionalOperationalProfiles',
+        professionalId,
+        'events',
+        'review-4',
+      ))
+      expect(approvalEvent.data()).toMatchObject({
+        action: 'APPROVED_AND_ACTIVATED',
+        actorRole: 'ADMIN',
+        reviewedVersion: 2,
+      })
+    })
+
+    await inspect((firestore) => setDoc(doc(firestore, 'serviceRequests', 'confirmed-request'), {
+      requestId: 'confirmed-request',
+      clientId: 'client-1',
+      assignedProfessionalId: professionalId,
+      status: 'ASSIGNED',
+      serviceDate: '2026-11-10',
+      period: 'MORNING',
+    }))
+    const detailBeforeSuspension = await admin.findAdminDetail(professionalId)
+    expect(detailBeforeSuspension?.confirmedEngagements).toHaveLength(1)
+
+    await expect(admin.suspend({
+      professionalId,
+      expectedVersion: 2,
+      expectedRevision: 4,
+      reason: 'Suspensão administrativa com atendimento preservado.',
+      internalNote: 'Acompanhar o compromisso confirmado separadamente.',
+    })).resolves.toMatchObject({
+      reviewStatus: 'SUSPENDED',
+      active: false,
+      revision: 5,
+    })
+    await inspect(async (firestore) => {
+      expect((await getDoc(doc(firestore, 'serviceRequests', 'confirmed-request'))).exists()).toBe(true)
+    })
+  })
+
+  it('allows confirmed administrative assistance with versioning, private audit and idempotent retry', async () => {
+    await seedReview('DRAFT', {
+      profile: { status: 'DRAFT', publicName: 'Marina' },
+      operational: { active: false, submittedVersion: null },
+    })
+    const adminFirestore = testEnvironment.authenticatedContext(adminId).firestore()
+    const admin = reviewService(adminFirestore, adminId)
+    const common = reviewService(
+      testEnvironment.authenticatedContext(commonUserId).firestore(),
+      commonUserId,
+    )
+    const input = {
+      professionalId,
+      expectedVersion: 1,
+      expectedRevision: 1,
+      changes: {
+        publicName: 'Marina Souza',
+        headline: 'Eletricista residencial e comercial',
+        bio: 'Cadastro preenchido com auxílio da equipe.',
+        experienceYears: 9,
+      },
+      internalNote: 'Dados confirmados com a profissional por telefone.',
+    }
+
+    await expect(common.assistProfile(input)).rejects.toMatchObject({
+      code: 'permission-denied',
+    })
+    const first = await admin.assistProfile(input)
+    const retry = await admin.assistProfile(input)
+    expect(first).toMatchObject({ profileVersion: 2, revision: 2, idempotent: false })
+    expect(retry).toMatchObject({ profileVersion: 2, revision: 2, idempotent: true })
+
+    const detail = await admin.findAdminDetail(professionalId)
+    expect(detail?.profile).toMatchObject({
+      publicName: 'Marina Souza',
+      headline: 'Eletricista residencial e comercial',
+      experienceYears: 9,
+    })
+    expect(detail?.internalHistory).toEqual([
+      expect.objectContaining({
+        action: 'PROFILE_UPDATED',
+        note: 'Dados confirmados com a profissional por telefone.',
+      }),
+    ])
+    await assertFails(getDoc(doc(
+      testEnvironment.authenticatedContext(professionalId).firestore(),
+      'professionalReviewInternal',
+      professionalId,
+      'events',
+      first.eventId,
+    )))
+  })
+
+  it('lets only administrators list the filtered professional queue', async () => {
+    await seedReview()
+    const admin = reviewService(
+      testEnvironment.authenticatedContext(adminId).firestore(),
+      adminId,
+    )
+    const common = reviewService(
+      testEnvironment.authenticatedContext(commonUserId).firestore(),
+      commonUserId,
+    )
+    await expect(admin.listQueue({
+      statuses: ['UNDER_REVIEW'],
+      active: false,
+      pageSize: 10,
+    })).resolves.toMatchObject({
+      items: [expect.objectContaining({
+        publicName: 'Marina Souza',
+        operational: expect.objectContaining({ reviewStatus: 'UNDER_REVIEW' }),
+      })],
+      nextCursor: null,
+    })
+    await expect(common.listQueue({ pageSize: 10 })).rejects.toMatchObject({
+      code: 'permission-denied',
+    })
   })
 })

@@ -219,11 +219,11 @@ describe('layouts autenticados', () => {
 
     expect(screen.getByRole('navigation', { name: 'Administração' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Oportunidades' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /Análise/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Análise' })).not.toHaveLength(0)
     expect(screen.queryByRole('link', { name: /Catálogo/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Operação/i })).not.toBeInTheDocument()
-    for (const item of screen.getAllByText('Análise')) {
-      expect(item.parentElement).toHaveAttribute('aria-disabled', 'true')
+    for (const item of screen.getAllByRole('link', { name: 'Análise' })) {
+      expect(item).toHaveAttribute('href', '/admin/profissionais')
     }
   })
 

@@ -70,8 +70,6 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
       label: 'Análise',
       href: '/admin/profissionais',
       icon: ClipboardCheck,
-      disabled: true,
-      disabledReason: 'Disponível em breve.',
     },
     {
       label: 'Catálogo',

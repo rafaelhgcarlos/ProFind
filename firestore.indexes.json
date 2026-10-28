@@ -20,6 +20,39 @@
         { "fieldPath": "actorId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "professionalOperationalProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "reviewStatus", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "professionalOperationalProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "professionalOperationalProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "reviewStatus", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "serviceRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedProfessionalId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

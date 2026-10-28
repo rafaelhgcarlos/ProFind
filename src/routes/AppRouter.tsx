@@ -96,6 +96,12 @@ const AdminDashboardPage = lazy(() =>
   })),
 )
 
+const AdminProfessionalReviewPage = lazy(() =>
+  import('../features/admin/pages/AdminProfessionalReviewPage').then((module) => ({
+    default: module.AdminProfessionalReviewPage,
+  })),
+)
+
 function RouteFallback() {
   return (
     <div
@@ -152,6 +158,22 @@ export function AppRouter() {
             element={
               <Suspense fallback={<RouteFallback />}>
                 <AdminDashboardPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin/profissionais"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminProfessionalReviewPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin/profissionais/:professionalId"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminProfessionalReviewPage />
               </Suspense>
             }
           />

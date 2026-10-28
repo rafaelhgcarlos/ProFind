@@ -50,7 +50,7 @@ describe('AdminDashboardPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Central de administração')).toBeInTheDocument()
     expect(
-      screen.getByText('As funcionalidades abaixo estarão disponíveis em breve.'),
+      screen.getByText(/acesse as ferramentas disponíveis/i),
     ).toBeInTheDocument()
     expect(screen.getByText('Análise de profissionais')).toBeInTheDocument()
     expect(screen.getByText('Catálogo de serviços')).toBeInTheDocument()
@@ -64,9 +64,18 @@ describe('AdminDashboardPage', () => {
     expect(
       screen.getByText(/acompanhe solicitações, atendimentos, cancelamentos e substituições/i),
     ).toBeInTheDocument()
-    expect(within(screen.getByRole('main')).getAllByText('Em breve')).toHaveLength(3)
+    expect(within(screen.getByRole('main')).getAllByText('Em breve')).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Abrir análise' })).toHaveAttribute(
+      'href',
+      '/admin/profissionais',
+    )
     expect(screen.queryByText(/issue #/i)).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /Análise/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Análise' })).not.toHaveLength(0)
+    expect(
+      screen.getAllByRole('link', { name: 'Análise' }).every(
+        (link) => link.getAttribute('href') === '/admin/profissionais',
+      ),
+    ).toBe(true)
     expect(screen.queryByRole('link', { name: /Operação/i })).not.toBeInTheDocument()
   })
 })

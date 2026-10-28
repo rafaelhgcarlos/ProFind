@@ -391,8 +391,9 @@ export const professionalProfileRepository = {
     )
 
     await runTransaction(firestore, async (transaction) => {
-      const [profileSnapshot, operationalSnapshot] = await Promise.all([
+      const [profileSnapshot, privateProfileSnapshot, operationalSnapshot] = await Promise.all([
         transaction.get(profileReference),
+        transaction.get(privateProfileReference),
         transaction.get(operationalReference),
       ])
       const timestamp = serverTimestamp()
@@ -418,16 +419,39 @@ export const professionalProfileRepository = {
           updatedAt: timestamp,
         })
       }
-      transaction.set(privateProfileReference, {
-        ownerId: userId,
-        phone,
-        privateLocation,
-        updatedAt: timestamp,
-      })
-      transaction.update(userReference, {
-        professionalProfileStatus: userProfileStatusFor(status),
-        updatedAt: timestamp,
-      })
+      const currentPrivateProfile = privateProfileSnapshot.data()
+      const currentPrivateLocation = professionalPrivateLocation(
+        currentPrivateProfile?.privateLocation,
+      )
+      const privateProfileChanged =
+        !privateProfileSnapshot.exists() ||
+        currentPrivateProfile?.ownerId !== userId ||
+        currentPrivateProfile?.phone !== phone ||
+        currentPrivateLocation.postalCode !== privateLocation.postalCode ||
+        (currentPrivateLocation.neighborhood ?? '') !==
+          (privateLocation.neighborhood ?? '')
+      if (privateProfileChanged) {
+        transaction.set(privateProfileReference, {
+          ownerId: userId,
+          phone,
+          privateLocation,
+          updatedAt: timestamp,
+        })
+      }
+
+      const currentProfileStatus = currentProfile?.status
+      if (
+        !profileSnapshot.exists() ||
+        !isProfessionalProfileStatus(currentProfileStatus) ||
+        userProfileStatusFor(
+          currentProfileStatus === 'SUSPENDED' ? 'PAUSED' : currentProfileStatus,
+        ) !== userProfileStatusFor(status)
+      ) {
+        transaction.update(userReference, {
+          professionalProfileStatus: userProfileStatusFor(status),
+          updatedAt: timestamp,
+        })
+      }
 
       const currentOperational = operationalSnapshot.exists()
         ? operationalSnapshot.data()
