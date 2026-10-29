@@ -9,7 +9,8 @@ O catálogo público fica em duas coleções do Cloud Firestore:
 
 Os IDs são estáveis e não devem depender do nome exibido. `order` controla a
 ordenação crescente. Para retirar uma opção de novos fluxos sem apagar o
-histórico, altere `active` para `false`. Uma especialidade também deixa de ser
+histórico, altere `active` para `false`. Rótulos podem evoluir sem trocar os IDs.
+Uma especialidade também deixa de ser
 oferecida quando sua categoria está inativa.
 
 O cliente pode ler as duas coleções, mas as Security Rules recusam escritas.
@@ -28,4 +29,6 @@ npm run seed:catalog -- --project=SEU_PROJECT_ID
 Para o Firestore Emulator, configure `FIRESTORE_EMULATOR_HOST` e use um ID de
 projeto local. O seed usa IDs determinísticos e `merge`, portanto pode ser
 executado novamente sem duplicar documentos. Ele cria os dados iniciais da
-issue #7 para Construção Civil e Serviços Domésticos.
+issue #7 para Construção e manutenção e Serviços residenciais. A estrutura
+visual da #52 consome essas coleções diretamente; não mantém uma cópia do
+catálogo no frontend.

@@ -37,7 +37,11 @@ export interface OnboardingDependencies {
     roles: UserRole[],
     activeMode: UserRole,
   ): Promise<void>
-  updateActiveMode(userId: string, activeMode: UserRole): Promise<void>
+  updateActiveMode(
+    userId: string,
+    activeMode: UserRole,
+    professionalProfileStatus: UserProfile['professionalProfileStatus'],
+  ): Promise<void>
   addGrantedRole(userId: string, roles: UserRole[]): Promise<void>
 }
 
@@ -45,8 +49,12 @@ const defaultDependencies: OnboardingDependencies = {
   findUser: (userId) => userRepository.findById(userId),
   configureRoles: (userId, roles, activeMode) =>
     userRepository.configureRoles(userId, roles, activeMode),
-  updateActiveMode: (userId, activeMode) =>
-    userRepository.updateActiveMode(userId, activeMode),
+  updateActiveMode: (userId, activeMode, professionalProfileStatus) =>
+    userRepository.updateActiveMode(
+      userId,
+      activeMode,
+      professionalProfileStatus,
+    ),
   addGrantedRole: (userId, roles) =>
     userRepository.addGrantedRole(userId, roles),
 }
@@ -109,6 +117,18 @@ export async function loadUserProfile(
       )
     }
 
+    if (profile.roles.length > 0 && !hasCompletedOnboarding(profile)) {
+      const activeMode = profile.roles.includes('client')
+        ? 'client'
+        : profile.roles[0]
+      await dependencies.updateActiveMode(
+        userId,
+        activeMode,
+        profile.professionalProfileStatus,
+      )
+      return { ...profile, activeMode }
+    }
+
     return profile
   } catch (error) {
     throw normalizeOnboardingError(error)
@@ -163,7 +183,11 @@ export async function switchActiveMode(
   if (profile.activeMode === nextMode) return profile
 
   try {
-    await dependencies.updateActiveMode(profile.userId, nextMode)
+    await dependencies.updateActiveMode(
+      profile.userId,
+      nextMode,
+      profile.professionalProfileStatus,
+    )
   } catch (error) {
     throw normalizeOnboardingError(error)
   }

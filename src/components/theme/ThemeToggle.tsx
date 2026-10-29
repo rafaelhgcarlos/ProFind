@@ -29,7 +29,7 @@ export function ThemeToggle() {
   const CurrentIcon = resolvedTheme === 'dark' ? Moon : Sun
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -39,7 +39,11 @@ export function ThemeToggle() {
           <CurrentIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" aria-label="Escolher aparência">
+      <DropdownMenuContent
+        align="end"
+        collisionPadding={8}
+        aria-label="Escolher aparência"
+      >
         <DropdownMenuLabel>Aparência</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={theme}

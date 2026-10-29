@@ -10,16 +10,16 @@ const mocks = vi.hoisted(() => ({
   serverTimestamp: vi.fn(),
   set: vi.fn(),
   update: vi.fn(),
-  commit: vi.fn(),
-  writeBatch: vi.fn(),
+  transactionGet: vi.fn(),
+  runTransaction: vi.fn(),
   getFirebaseFirestore: vi.fn(),
 }))
 
 vi.mock('firebase/firestore', () => ({
   doc: mocks.doc,
   getDoc: mocks.getDoc,
+  runTransaction: mocks.runTransaction,
   serverTimestamp: mocks.serverTimestamp,
-  writeBatch: mocks.writeBatch,
 }))
 
 vi.mock('../lib/firebase', () => ({
@@ -43,12 +43,14 @@ describe('clientProfileRepository', () => {
     vi.clearAllMocks()
     mocks.getFirebaseFirestore.mockReturnValue(mocks.firestore)
     mocks.serverTimestamp.mockReturnValue(mocks.timestamp)
-    mocks.commit.mockResolvedValue(undefined)
-    mocks.writeBatch.mockReturnValue({
-      set: mocks.set,
-      update: mocks.update,
-      commit: mocks.commit,
-    })
+    mocks.transactionGet.mockResolvedValue({ exists: () => false })
+    mocks.runTransaction.mockImplementation(async (_firestore, callback) =>
+      callback({
+        get: mocks.transactionGet,
+        set: mocks.set,
+        update: mocks.update,
+      }),
+    )
   })
 
   it('lê somente telefone e referência CLIENT_AVATAR do proprietário', async () => {
@@ -123,10 +125,11 @@ describe('clientProfileRepository', () => {
       { path: 'users/client-123' },
       { name: 'Marina Souza', updatedAt: mocks.timestamp },
     )
-    expect(mocks.commit).toHaveBeenCalledOnce()
+    expect(mocks.runTransaction).toHaveBeenCalledOnce()
   })
 
   it('edita o mesmo documento sem recriar a identidade', async () => {
+    mocks.transactionGet.mockResolvedValue({ exists: () => true })
     await clientProfileRepository.save({
       userId: 'client-123',
       profile: { name: 'Marina Souza', phone: '11999998888', profileImage: null },
@@ -138,6 +141,27 @@ describe('clientProfileRepository', () => {
       {
         ownerId: 'client-123',
         phone: '11999998888',
+        profileImage: null,
+        updatedAt: mocks.timestamp,
+      },
+    )
+  })
+
+  it('consulta o estado persistido para repetir uma criação sem perder createdAt', async () => {
+    mocks.transactionGet.mockResolvedValue({ exists: () => true })
+
+    await clientProfileRepository.save({
+      userId: 'client-123',
+      profile: { name: 'Marina Souza', phone: '', profileImage: null },
+      exists: false,
+    })
+
+    expect(mocks.set).not.toHaveBeenCalled()
+    expect(mocks.update).toHaveBeenCalledWith(
+      { path: 'clientProfiles/client-123' },
+      {
+        ownerId: 'client-123',
+        phone: '',
         profileImage: null,
         updatedAt: mocks.timestamp,
       },

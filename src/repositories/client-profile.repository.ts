@@ -1,8 +1,8 @@
 import {
   doc,
   getDoc,
+  runTransaction,
   serverTimestamp,
-  writeBatch,
 } from 'firebase/firestore'
 
 import { getFirebaseFirestore } from '../lib/firebase'
@@ -80,28 +80,29 @@ export const clientProfileRepository = {
     }
   },
 
-  async save({ userId, profile, exists }: SaveClientProfileInput) {
+  async save({ userId, profile }: SaveClientProfileInput) {
     const firestore = getFirebaseFirestore()
-    const batch = writeBatch(firestore)
-    const timestamp = serverTimestamp()
     const profileReference = doc(firestore, 'clientProfiles', userId)
     const userReference = doc(firestore, 'users', userId)
-    const profileData = {
-      ownerId: userId,
-      phone: profile.phone,
-      profileImage: persistedImageReference(profile.profileImage),
-      updatedAt: timestamp,
-    }
+    await runTransaction(firestore, async (transaction) => {
+      const snapshot = await transaction.get(profileReference)
+      const timestamp = serverTimestamp()
+      const profileData = {
+        ownerId: userId,
+        phone: profile.phone,
+        profileImage: persistedImageReference(profile.profileImage),
+        updatedAt: timestamp,
+      }
 
-    if (exists) {
-      batch.update(profileReference, profileData)
-    } else {
-      batch.set(profileReference, { ...profileData, createdAt: timestamp })
-    }
-    batch.update(userReference, {
-      name: profile.name,
-      updatedAt: timestamp,
+      if (snapshot.exists()) {
+        transaction.update(profileReference, profileData)
+      } else {
+        transaction.set(profileReference, { ...profileData, createdAt: timestamp })
+      }
+      transaction.update(userReference, {
+        name: profile.name,
+        updatedAt: timestamp,
+      })
     })
-    await batch.commit()
   },
 }

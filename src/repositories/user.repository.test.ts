@@ -109,12 +109,17 @@ describe('userRepository', () => {
   })
 
   it('altera somente o modo ativo e o timestamp', async () => {
-    await userRepository.updateActiveMode('user-123', 'professional')
+    await userRepository.updateActiveMode(
+      'user-123',
+      'professional',
+      'complete',
+    )
 
     expect(firebaseMocks.updateDoc).toHaveBeenCalledWith(
       firebaseMocks.reference,
       {
         activeMode: 'professional',
+        professionalProfileStatus: 'complete',
         updatedAt: firebaseMocks.timestamp,
       },
     )

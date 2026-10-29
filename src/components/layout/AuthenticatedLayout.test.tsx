@@ -70,18 +70,28 @@ describe('layouts autenticados', () => {
     expect(
       screen.getByRole('navigation', { name: 'Área do cliente — navegação mobile' }),
     ).toBeInTheDocument()
-    expect(screen.getAllByRole('link', { name: 'Buscar' })).toHaveLength(2)
+    expect(screen.getAllByRole('link', { name: 'Solicitar serviço' })).toHaveLength(2)
+    expect(screen.queryByText('Mensagens')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Meus pedidos')).toHaveLength(2)
   })
 
-  it('prioriza oportunidades no modo profissional', () => {
+  it('mantém cadastro, análise e ajuda acessíveis e oportunidades condicionadas', () => {
     renderLayout(
       '/profissional',
-      <ProfessionalLayout pageTitle="Oportunidades">
+      <ProfessionalLayout pageTitle="Início">
         Conteúdo profissional
       </ProfessionalLayout>,
     )
 
-    expect(screen.getAllByRole('link', { name: 'Oportunidades' })).toHaveLength(2)
+    expect(screen.getAllByRole('link', { name: 'Perfil' })).toHaveLength(2)
+    expect(screen.getAllByRole('link', { name: 'Análise' })).toHaveLength(2)
+    expect(screen.getAllByRole('link', { name: 'Ajuda' })).toHaveLength(2)
+    expect(screen.queryByRole('link', { name: 'Oportunidades' })).not.toBeInTheDocument()
+    expect(screen.getByTitle(/profissionais elegíveis.*próxima etapa/i)).toHaveAttribute(
+      'title',
+      expect.stringMatching(/profissionais elegíveis.*próxima etapa/i),
+    )
+    expect(screen.queryByText('Mensagens')).not.toBeInTheDocument()
     expect(screen.getByText('Conteúdo profissional')).toBeInTheDocument()
   })
 
@@ -196,6 +206,54 @@ describe('layouts autenticados', () => {
     )
   })
 
+  it('reabre o menu da conta sem bloquear a rolagem e preserva foco e posição', async () => {
+    const user = userEvent.setup()
+    const initialScrollY = 960
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: initialScrollY,
+    })
+    renderLayout(
+      '/cliente/perfil',
+      <ClientLayout pageTitle="Perfil">
+        <button type="button">Conteúdo fora do menu</button>
+        <div style={{ height: 2400 }}>Página longa</div>
+      </ClientLayout>,
+    )
+
+    const trigger = screen.getByRole('button', {
+      name: /Abrir menu da conta/i,
+    })
+
+    await user.click(trigger)
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(document.body).not.toHaveAttribute('data-scroll-locked')
+    expect(window.scrollY).toBe(initialScrollY)
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    expect(window.scrollY).toBe(initialScrollY)
+
+    await user.click(trigger)
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(document.body).not.toHaveAttribute('data-scroll-locked')
+
+    await user.click(screen.getByRole('button', { name: 'Conteúdo fora do menu' }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(window.scrollY).toBe(initialScrollY)
+
+    trigger.focus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Meu perfil' })).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    expect(window.scrollY).toBe(initialScrollY)
+  })
+
   it('mantém o logout recuperável quando o fluxo existente falha', async () => {
     const logout = vi.fn().mockRejectedValue(new Error('Falha temporária ao sair.'))
     const user = userEvent.setup()
@@ -229,11 +287,11 @@ describe('layouts autenticados', () => {
 
   it('mantém a tarefa atual destacada em rotas aninhadas', () => {
     renderLayout(
-      '/cliente/buscar/filtros',
-      <ClientLayout pageTitle="Buscar">Conteúdo da busca</ClientLayout>,
+      '/cliente/perfil/dados',
+      <ClientLayout pageTitle="Perfil">Conteúdo do perfil</ClientLayout>,
     )
 
-    for (const link of screen.getAllByRole('link', { name: 'Buscar' })) {
+    for (const link of screen.getAllByRole('link', { name: 'Perfil' })) {
       expect(link).toHaveAttribute('aria-current', 'page')
     }
 

@@ -197,7 +197,7 @@ describe('ClientProfilePage', () => {
     expect(screen.getByText(/cabeçalho já foi atualizado/i)).toBeInTheDocument()
   })
 
-  it('mantém os dados digitados quando a gravação falha', async () => {
+  it('mantém os dados digitados quando a gravação falha e permite tentar novamente', async () => {
     const user = userEvent.setup()
     vi.mocked(saveClientProfile).mockRejectedValueOnce(
       new Error('Verifique sua conexão e tente novamente.'),
@@ -210,6 +210,11 @@ describe('ClientProfilePage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/conexão/i)
     expect(name).toHaveValue('Nome preservado')
+
+    await user.click(screen.getByRole('button', { name: 'Salvar perfil' }))
+
+    await waitFor(() => expect(saveClientProfile).toHaveBeenCalledTimes(2))
+    expect(screen.getByText(/cabeçalho já foi atualizado/i)).toBeInTheDocument()
   })
 
   it('valida nome e telefone antes de gravar', async () => {

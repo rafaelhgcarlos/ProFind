@@ -174,8 +174,9 @@ describe('ProfileProvider', () => {
   it('sincroniza nome e foto do cliente no contexto imediatamente após salvar', async () => {
     const clientUser = {
       ...profile,
-      roles: ['client'] as UserProfile['roles'],
+      roles: ['client', 'professional'] as UserProfile['roles'],
       activeMode: 'client' as const,
+      professionalProfileStatus: 'complete' as const,
     }
     vi.mocked(loadUserProfile).mockResolvedValue(clientUser)
     vi.mocked(loadClientProfileState).mockResolvedValue({
@@ -188,6 +189,7 @@ describe('ProfileProvider', () => {
       return (
         <>
           <p>{context.profile?.name ?? context.status}</p>
+          <p>{context.profile?.professionalProfileStatus}</p>
           <p>{context.clientProfile?.profileImage?.url ?? 'sem-foto'}</p>
           <button
             type="button"
@@ -228,6 +230,7 @@ describe('ProfileProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sincronizar' }))
     expect(screen.getByText('Marina Santos')).toBeInTheDocument()
     expect(screen.getByText('https://images.example/client.webp')).toBeInTheDocument()
+    expect(screen.getByText('complete')).toBeInTheDocument()
   })
 
   it('restaura a foto persistida ao criar uma nova sessão', async () => {

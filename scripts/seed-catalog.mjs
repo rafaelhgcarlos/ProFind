@@ -12,8 +12,8 @@ if (!projectId) {
 }
 
 const categories = [
-  { id: 'construction', name: 'Construção Civil', active: true, order: 10 },
-  { id: 'domestic-services', name: 'Serviços Domésticos', active: true, order: 20 },
+  { id: 'construction', name: 'Construção e manutenção', active: true, order: 10 },
+  { id: 'domestic-services', name: 'Serviços residenciais', active: true, order: 20 },
 ]
 
 const specialties = [
@@ -22,7 +22,7 @@ const specialties = [
   { id: 'electrician', categoryId: 'construction', name: 'Eletricista', active: true, order: 30 },
   { id: 'plumber', categoryId: 'construction', name: 'Encanador', active: true, order: 40 },
   { id: 'construction-other', categoryId: 'construction', name: 'Outros', active: true, order: 50 },
-  { id: 'cleaner', categoryId: 'domestic-services', name: 'Diarista/Faxineiro', active: true, order: 10 },
+  { id: 'cleaner', categoryId: 'domestic-services', name: 'Diarista', active: true, order: 10 },
   { id: 'gardener', categoryId: 'domestic-services', name: 'Jardineiro', active: true, order: 20 },
   { id: 'cook', categoryId: 'domestic-services', name: 'Cozinheiro', active: true, order: 30 },
   { id: 'domestic-services-other', categoryId: 'domestic-services', name: 'Outros', active: true, order: 40 },

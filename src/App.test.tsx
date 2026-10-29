@@ -62,7 +62,7 @@ describe('AppRouter', () => {
 
     expect(
       screen.getByRole('heading', {
-        name: /encontre o profissional certo, perto de você/i,
+        name: /solicite o que precisa.*coordena a procura/i,
       }),
     ).toBeInTheDocument()
     expect(

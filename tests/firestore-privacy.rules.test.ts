@@ -209,6 +209,56 @@ describe('Firestore privacy rules for professional profiles', () => {
     )
   })
 
+  it('preserves an unchanged legacy client avatar but rejects new legacy metadata', async () => {
+    await seedProfiles()
+    const legacyAvatar = {
+      ownerId,
+      purpose: 'CLIENT_AVATAR',
+      url: 'https://images.example/legacy-client.webp',
+      providerId: 'legacy-client-avatar',
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_000_000,
+    }
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'clientProfiles', ownerId), {
+        ownerId,
+        phone: '',
+        profileImage: legacyAvatar,
+        createdAt: new Date('2025-01-01T12:00:00Z'),
+        updatedAt: new Date('2025-01-01T12:00:00Z'),
+      })
+    })
+    const owner = testEnvironment.authenticatedContext(ownerId).firestore()
+
+    await assertSucceeds(
+      updateDoc(doc(owner, 'clientProfiles', ownerId), {
+        phone: '11999998888',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(doc(owner, 'clientProfiles', ownerId), {
+        profileImage: {
+          ...legacyAvatar,
+          providerId: 'forged-legacy-avatar',
+        },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    const otherOwner = testEnvironment
+      .authenticatedContext(otherUserId)
+      .firestore()
+    await assertFails(
+      setDoc(doc(otherOwner, 'clientProfiles', otherUserId), {
+        ownerId: otherUserId,
+        phone: '',
+        profileImage: { ...legacyAvatar, ownerId: otherUserId },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
   it('keeps the entire client profile private and owner-only', async () => {
     await seedProfiles()
     const owner = testEnvironment.authenticatedContext(ownerId).firestore()
@@ -259,6 +309,56 @@ describe('Firestore privacy rules for professional profiles', () => {
         updatedAt: serverTimestamp(),
       }),
     )
+
+    const operationalSnapshot = await getDoc(
+      doc(owner, 'professionalOperationalProfiles', ownerId),
+    )
+    expect(operationalSnapshot.data()).toMatchObject({
+      reviewStatus: 'APPROVED',
+      active: true,
+      profileVersion: 1,
+      approvedVersion: 1,
+    })
+  })
+
+  it('does not invalidate professional approval when the client avatar changes', async () => {
+    await seedProfiles()
+    const owner = testEnvironment.authenticatedContext(ownerId).firestore()
+    const reference = doc(owner, 'clientProfiles', ownerId)
+    await assertSucceeds(
+      setDoc(reference, {
+        ownerId,
+        phone: '',
+        profileImage: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    )
+
+    await assertSucceeds(
+      updateDoc(reference, {
+        profileImage: {
+          provider: 'IMAGEKIT',
+          ownerId,
+          purpose: 'CLIENT_AVATAR',
+          url: 'https://images.example/client-only.webp',
+          providerId: 'client-only-avatar',
+          createdAt: 1_795_000_000_000,
+          updatedAt: 1_795_000_000_000,
+        },
+        updatedAt: serverTimestamp(),
+      }),
+    )
+
+    const operationalSnapshot = await getDoc(
+      doc(owner, 'professionalOperationalProfiles', ownerId),
+    )
+    expect(operationalSnapshot.data()).toMatchObject({
+      reviewStatus: 'APPROVED',
+      active: true,
+      profileVersion: 1,
+      approvedVersion: 1,
+    })
   })
 
   it('rejects duplicate identity and raw image data in the private client profile', async () => {
@@ -708,6 +808,52 @@ describe('Firestore rules for administrative access', () => {
 })
 
 describe('consolidated authorization and repository queries', () => {
+  it('repairs a legacy account with an existing role and no active mode', async () => {
+    const legacyClientId = 'legacy-client-without-mode'
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', legacyClientId), {
+        name: 'Cliente Legado',
+        email: 'legado@example.com',
+        roles: ['client'],
+      })
+    })
+    const legacyClient = testEnvironment
+      .authenticatedContext(legacyClientId)
+      .firestore()
+
+    await assertSucceeds(
+      updateDoc(doc(legacyClient, 'users', legacyClientId), {
+        activeMode: 'client',
+        professionalProfileStatus: 'not-started',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('allows onboarding to replace an orphaned legacy mode when roles are empty', async () => {
+    const legacyOnboardingId = 'legacy-onboarding-with-orphaned-mode'
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', legacyOnboardingId), {
+        name: 'Cadastro Legado',
+        email: 'cadastro-legado@example.com',
+        roles: [],
+        activeMode: 'professional',
+        professionalProfileStatus: 'not-started',
+      })
+    })
+    const legacyOnboarding = testEnvironment
+      .authenticatedContext(legacyOnboardingId)
+      .firestore()
+
+    await assertSucceeds(
+      updateDoc(doc(legacyOnboarding, 'users', legacyOnboardingId), {
+        roles: ['client', 'professional'],
+        activeMode: 'client',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
   it('allows the first role setup but denies later role expansion without a grant', async () => {
     const onboardingUserId = 'first-onboarding-user'
     const existingClientId = 'existing-client-user'

@@ -2,14 +2,14 @@ import {
   Activity,
   BookOpenText,
   BriefcaseBusiness,
+  CircleHelp,
   ClipboardCheck,
   ClipboardList,
   Compass,
   Home,
   Images,
   LogOut,
-  MessageCircle,
-  Search,
+  PlusCircle,
   ShieldCheck,
   UserRound,
   type LucideIcon,
@@ -40,28 +40,56 @@ export type AuthenticatedMode = 'client' | 'professional' | 'admin'
 const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
   client: [
     { label: 'Início', href: '/cliente', icon: Home },
-    { label: 'Buscar', href: '/cliente/buscar', icon: Search },
-    { label: 'Pedidos', href: '/cliente/pedidos', icon: ClipboardList },
-    { label: 'Mensagens', href: '/cliente/mensagens', icon: MessageCircle },
+    {
+      label: 'Solicitar serviço',
+      href: '/cliente#catalogo-servicos',
+      icon: PlusCircle,
+    },
+    {
+      label: 'Meus pedidos',
+      href: '/cliente#solicitacoes',
+      icon: ClipboardList,
+      disabled: true,
+      disabledReason: 'Em breve você poderá acompanhar seus pedidos por aqui.',
+    },
     { label: 'Perfil', href: '/cliente/perfil', icon: UserRound },
   ],
   professional: [
     { label: 'Início', href: '/profissional', icon: Home },
+    { label: 'Perfil', href: '/profissional/perfil', icon: UserRound },
     {
       label: 'Análise',
       href: '/profissional/analise',
       icon: ClipboardCheck,
-      showOnMobile: false,
     },
-    { label: 'Oportunidades', href: '/profissional/oportunidades', icon: Compass },
-    { label: 'Serviços', href: '/profissional/servicos', icon: BriefcaseBusiness },
-    { label: 'Mensagens', href: '/profissional/mensagens', icon: MessageCircle },
-    { label: 'Perfil', href: '/profissional/perfil', icon: UserRound },
     {
       label: 'Portfólio',
       href: '/profissional/portfolio',
       icon: Images,
       showOnMobile: false,
+    },
+    {
+      label: 'Oportunidades',
+      href: '/profissional',
+      icon: Compass,
+      showOnMobile: false,
+      disabled: true,
+      disabledReason:
+        'Disponível para profissionais elegíveis em uma próxima etapa.',
+    },
+    {
+      label: 'Atendimentos',
+      href: '/profissional',
+      icon: BriefcaseBusiness,
+      showOnMobile: false,
+      disabled: true,
+      disabledReason:
+        'Em breve você poderá acompanhar seus atendimentos por aqui.',
+    },
+    {
+      label: 'Ajuda',
+      href: '/profissional#ajuda-cadastro',
+      icon: CircleHelp,
     },
   ],
   admin: [
@@ -168,20 +196,20 @@ export function AuthenticatedLayout({
         if (item.disabled) {
           return (
             <span
-              key={item.href}
+              key={`${item.href}-${item.label}`}
               aria-disabled="true"
               title={item.disabledReason}
               className="relative flex min-h-16 min-w-0 max-w-full cursor-not-allowed flex-col items-center justify-center gap-1 overflow-hidden rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground opacity-55"
             >
               <Icon className="size-5" aria-hidden="true" />
               <span className="max-w-full truncate">{item.label}</span>
-              <span className="sr-only">Em breve</span>
+              <span className="sr-only">{item.disabledReason}</span>
             </span>
           )
         }
         return (
           <Link
-            key={item.href}
+            key={`${item.href}-${item.label}`}
             to={item.href}
             aria-current={active ? 'page' : undefined}
             className={cn(
@@ -226,7 +254,7 @@ export function AuthenticatedLayout({
             if (item.disabled) {
               return (
                 <span
-                  key={item.href}
+                  key={`${item.href}-${item.label}`}
                   aria-disabled="true"
                   title={item.disabledReason}
                   className="flex min-h-11 cursor-not-allowed items-center gap-3 rounded-md border-l-[3px] border-transparent px-3 text-sm font-medium text-muted-foreground opacity-55"
@@ -234,14 +262,15 @@ export function AuthenticatedLayout({
                   <Icon className="size-5" aria-hidden="true" />
                   <span>{item.label}</span>
                   <span className="ml-auto text-[0.65rem] font-semibold uppercase tracking-wide">
-                    Em breve
+                    Pendente
                   </span>
+                  <span className="sr-only">{item.disabledReason}</span>
                 </span>
               )
             }
             return (
               <Link
-                key={item.href}
+                key={`${item.href}-${item.label}`}
                 to={item.href}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
@@ -283,7 +312,10 @@ export function AuthenticatedLayout({
             <Brand compact />
           </div>
           <div className="hidden min-w-0 lg:block">
-            <p className="text-xs font-medium text-muted-foreground">{modeLabels[mode]}</p>
+            <p className="text-xs font-medium text-muted-foreground">
+              {modeLabels[mode]} <span aria-hidden="true">/</span>{' '}
+              <span className="text-foreground/75">{pageTitle}</span>
+            </p>
             <h1 className="break-words font-bold">{pageTitle}</h1>
           </div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
@@ -293,7 +325,11 @@ export function AuthenticatedLayout({
               <p className="max-w-48 truncate text-sm font-semibold">{userName}</p>
               <p className="text-xs text-muted-foreground">Conta ativa</p>
             </div>
-            <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
+            <DropdownMenu
+              modal={false}
+              open={accountMenuOpen}
+              onOpenChange={setAccountMenuOpen}
+            >
                 <DropdownMenuTrigger asChild>
                   <button type="button" aria-label={`Abrir menu da conta de ${userName}`} className="rounded-full focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30">
                     <Avatar className="border border-primary/20">
@@ -302,10 +338,20 @@ export function AuthenticatedLayout({
                     </Avatar>
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" collisionPadding={8}>
                   <DropdownMenuLabel className="max-w-48 truncate">{userName}</DropdownMenuLabel>
                   {mode !== 'admin' ? (
-                    <DropdownMenuItem asChild><Link to="/conta">Ir para minha área</Link></DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link
+                        to={
+                          mode === 'client'
+                            ? '/cliente/perfil'
+                            : '/profissional/perfil'
+                        }
+                      >
+                        Meu perfil
+                      </Link>
+                    </DropdownMenuItem>
                   ) : null}
                   {authentication?.status === 'authenticated' ? (
                     <DropdownMenuItem

@@ -64,7 +64,7 @@ export function ModeSwitcher() {
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
@@ -78,7 +78,11 @@ export function ModeSwitcher() {
           <ChevronDown aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-52">
+      <DropdownMenuContent
+        align="end"
+        collisionPadding={8}
+        className="min-w-52"
+      >
         <DropdownMenuLabel>Usar o ProFind como</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={currentMode}

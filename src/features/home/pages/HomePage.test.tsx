@@ -16,12 +16,12 @@ vi.mock('../use-catalog', () => ({
 
 const catalog = {
   categories: [
-    { id: 'construction', name: 'Construção Civil', active: true, order: 10 },
-    { id: 'domestic', name: 'Serviços Domésticos', active: true, order: 20 },
+    { id: 'construction', name: 'Construção e manutenção', active: true, order: 10 },
+    { id: 'domestic', name: 'Serviços residenciais', active: true, order: 20 },
   ],
   specialties: [
     { id: 'electrician', categoryId: 'construction', name: 'Eletricista', active: true, order: 10 },
-    { id: 'cleaner', categoryId: 'domestic', name: 'Diarista/Faxineiro', active: true, order: 10 },
+    { id: 'cleaner', categoryId: 'domestic', name: 'Diarista', active: true, order: 10 },
   ],
 }
 
@@ -44,13 +44,16 @@ describe('HomePage catalog', () => {
 
     render(<MemoryRouter><HomePage /></MemoryRouter>)
 
-    expect(screen.getByRole('button', { name: /Construção Civil/ })).toHaveTextContent('Eletricista')
-    expect(screen.getByRole('button', { name: /Serviços Domésticos/ })).toHaveTextContent('Diarista/Faxineiro')
-    expect(document.querySelector('option[value="Eletricista"]')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Construção e manutenção/ })).toHaveTextContent('Eletricista')
+    expect(screen.getByRole('button', { name: /Serviços residenciais/ })).toHaveTextContent('Diarista')
+    expect(screen.queryByRole('link', { name: /comparar profissionais/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /mensagens/i })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /Construção Civil/ }))
+    await user.click(screen.getByRole('button', { name: /Construção e manutenção/ }))
 
-    expect(screen.getByLabelText('Qual serviço você precisa?')).toHaveValue('Construção Civil')
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /Construção e manutenção selecionado.*em breve será possível continuar/i,
+    )
   })
 
   it('oferece nova tentativa quando o catálogo falha', async () => {

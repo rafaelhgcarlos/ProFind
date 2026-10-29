@@ -81,9 +81,14 @@ export const userRepository = {
     })
   },
 
-  updateActiveMode(userId: string, activeMode: UserRole) {
+  updateActiveMode(
+    userId: string,
+    activeMode: UserRole,
+    professionalProfileStatus: UserProfile['professionalProfileStatus'],
+  ) {
     return updateDoc(doc(getFirebaseFirestore(), 'users', userId), {
       activeMode,
+      professionalProfileStatus,
       updatedAt: serverTimestamp(),
     })
   },

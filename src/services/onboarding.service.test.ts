@@ -98,6 +98,7 @@ describe('onboardingService', () => {
     expect(dependencies.updateActiveMode).toHaveBeenCalledWith(
       'user-123',
       'professional',
+      'not-started',
     )
     expect(dependencies.configureRoles).not.toHaveBeenCalled()
   })
@@ -127,6 +128,47 @@ describe('onboardingService', () => {
       code: 'network-error',
       message: expect.stringMatching(/conexão/i),
     })
+  })
+
+  it('recupera conta legada com papéis sem modo ativo sem reabrir o onboarding', async () => {
+    const legacyProfile: UserProfile = {
+      ...baseProfile,
+      roles: ['client', 'professional'],
+      activeMode: null,
+      professionalProfileStatus: 'complete',
+    }
+    const dependencies = createDependencies(legacyProfile)
+
+    await expect(loadUserProfile('user-123', dependencies)).resolves.toEqual({
+      ...legacyProfile,
+      activeMode: 'client',
+    })
+    expect(dependencies.updateActiveMode).toHaveBeenCalledWith(
+      'user-123',
+      'client',
+      'complete',
+    )
+    expect(dependencies.configureRoles).not.toHaveBeenCalled()
+  })
+
+  it('mantém o papel profissional de uma conta legada sem modo ativo', async () => {
+    const legacyProfile: UserProfile = {
+      ...baseProfile,
+      roles: ['professional'],
+      activeMode: null,
+      professionalProfileStatus: 'incomplete',
+    }
+    const dependencies = createDependencies(legacyProfile)
+
+    await expect(loadUserProfile('user-123', dependencies)).resolves.toEqual({
+      ...legacyProfile,
+      activeMode: 'professional',
+    })
+    expect(dependencies.updateActiveMode).toHaveBeenCalledWith(
+      'user-123',
+      'professional',
+      'incomplete',
+    )
   })
 
   it('prepara a adição validada de um novo papel sem alterar o modo ou o perfil profissional', async () => {

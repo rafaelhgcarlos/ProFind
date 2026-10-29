@@ -90,6 +90,12 @@ const ClientProfilePage = lazy(() =>
   ),
 )
 
+const ClientHomePage = lazy(() =>
+  import('../features/client-home/pages/ClientHomePage').then((module) => ({
+    default: module.ClientHomePage,
+  })),
+)
+
 const AdminDashboardPage = lazy(() =>
   import('../features/admin/pages/AdminDashboardPage').then((module) => ({
     default: module.AdminDashboardPage,
@@ -195,7 +201,7 @@ export function AppRouter() {
               path="/cliente"
               element={
                 <Suspense fallback={<RouteFallback />}>
-                  <ModeHomePage mode="client" />
+                  <ClientHomePage />
                 </Suspense>
               }
             />

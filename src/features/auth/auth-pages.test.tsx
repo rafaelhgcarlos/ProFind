@@ -26,7 +26,10 @@ function createAuth(overrides: Partial<AuthenticationContextValue> = {}): Authen
   }
 }
 
-function renderPage(route: string, auth: AuthenticationContextValue) {
+function renderPage(
+  route: string | { pathname: string; state?: unknown },
+  auth: AuthenticationContextValue,
+) {
   return render(
     <ThemeProvider>
       <TooltipProvider>
@@ -35,6 +38,7 @@ function renderPage(route: string, auth: AuthenticationContextValue) {
             <Routes>
               <Route path="/entrar" element={<LoginPage />} />
               <Route path="/recuperar-senha" element={<PasswordRecoveryPage />} />
+              <Route path="/cliente/perfil" element={<p>Perfil pretendido</p>} />
               <Route element={<ProtectedRoute />}>
                 <Route path="/conta" element={<AccountPage />} />
               </Route>
@@ -58,6 +62,25 @@ describe('fluxos de autenticação', () => {
     }))
 
     expect(await screen.findByText(/sua sessão expirou/i)).toBeInTheDocument()
+  })
+
+  it('retoma a rota interna pretendida depois do login', async () => {
+    const user = userEvent.setup()
+    const login = vi.fn().mockResolvedValue(undefined)
+    renderPage(
+      {
+        pathname: '/entrar',
+        state: { from: '/cliente/perfil?origem=sessao#dados' },
+      },
+      createAuth({ login }),
+    )
+
+    await user.type(screen.getByLabelText(/^e-mail$/i), 'ana@example.com')
+    await user.type(screen.getByLabelText(/^senha$/i), 'senha-segura')
+    await user.click(screen.getByRole('button', { name: /^entrar$/i }))
+
+    expect(await screen.findByText('Perfil pretendido')).toBeInTheDocument()
+    expect(login).toHaveBeenCalledWith('ana@example.com', 'senha-segura')
   })
 
   it('não renderiza conteúdo privado enquanto valida a sessão', () => {

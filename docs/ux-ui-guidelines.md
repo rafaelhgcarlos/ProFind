@@ -29,10 +29,10 @@ experiência sem substituir as regras de negócio de cada feature.
 
 ## Linguagem visual
 
-- Moderna, acolhedora e profissional, com aparência de marketplace de serviços.
+- Moderna, acolhedora e profissional, com aparência de serviço coordenado.
 - Hierarquia construída primeiro com tipografia, espaçamento e contraste.
 - Cards reservados a entidades ou agrupamentos que precisam ser percebidos como
-  uma unidade, como profissional, oportunidade, proposta ou contrato.
+  uma unidade, como categoria, oportunidade, solicitação ou atendimento.
 - Bordas, sombras e gradientes discretos; animações curtas e funcionais.
 - Lucide React é a fonte única de ícones. Ações não universais combinam ícone e
   texto; botões apenas com ícone sempre recebem nome acessível.
@@ -43,15 +43,16 @@ experiência sem substituir as regras de negócio de cada feature.
 
 | Contexto | Informação prioritária | Ação principal |
 | --- | --- | --- |
-| Descoberta de profissionais | Foto, nome, especialidade, avaliação, área atendida e resumo de experiência | `Solicitar orçamento` |
-| Oportunidades | Tipo de serviço, localização aproximada, prazo e orçamento quando informado | `Ver serviço` ou `Enviar proposta` |
-| Propostas | Preço, prazo, disponibilidade, reputação e histórico comparáveis na mesma superfície | Ação definida pelo estágio da proposta |
+| Início do cliente | Orientação e categorias/especialidades do catálogo ativo | Escolher uma especialidade |
+| Solicitação | Especialidade, endereço do atendimento, data e período | Enviar solicitação |
+| Oportunidades | Tipo de serviço, localização aproximada e período | Aceitar ou recusar conforme a elegibilidade |
+| Acompanhamento | Estado persistido da procura, atribuição ou atendimento | Ação definida pelo estado real |
 | Contratação e pagamento | Resumo do acordo e status confirmado pelo backend/provedor | Ação financeira explícita |
-| Chat | Conversa em primeiro plano, com contexto compacto do serviço ou contrato | Enviar mensagem |
 
-Nunca apresentar contratação ou pagamento como confirmado antes da resposta da
-fonte responsável. Diferenças relevantes entre propostas não devem ficar
-escondidas em modais.
+Nunca apresentar solicitação, atribuição, contratação ou pagamento como
+confirmado antes da resposta da fonte responsável. O cliente solicita uma
+especialidade; mensagens, favoritos, comparação de profissionais e orçamento
+direcionado não fazem parte da navegação do MVP.
 
 ## Estados e mensagens
 

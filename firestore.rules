@@ -407,11 +407,9 @@ service cloud.firestore {
 
     function hasNoConfiguredRoles() {
       let roles = resource.data.get('roles', []);
-      let activeMode = resource.data.get('activeMode', null);
 
       return roles is list
-        && roles.size() == 0
-        && activeMode == null;
+        && roles.size() == 0;
     }
 
     function hasRoleEnablementGrant(userId, role) {
@@ -483,7 +481,21 @@ service cloud.firestore {
         && image.updatedAt >= image.createdAt;
     }
 
-    function hasValidClientProfile(data, userId) {
+    function hasValidLegacyClientAvatar(image, userId) {
+      return image.keys().size() == 6
+        && image.keys().hasOnly([
+          'ownerId', 'purpose', 'url', 'providerId', 'createdAt', 'updatedAt'
+        ])
+        && image.ownerId == userId
+        && image.purpose == 'CLIENT_AVATAR'
+        && image.url.matches('^https://.+')
+        && image.url.size() <= 2048
+        && image.providerId.matches('^.{1,300}$')
+        && image.createdAt > 0
+        && image.updatedAt >= image.createdAt;
+    }
+
+    function hasValidClientProfileShape(data, userId) {
       return data.keys().hasAll([
           'ownerId', 'phone', 'profileImage', 'createdAt', 'updatedAt'
         ])
@@ -493,10 +505,20 @@ service cloud.firestore {
         && data.ownerId == userId
         && data.phone is string
         && (data.phone == '' || data.phone.matches('^[0-9]{10,11}$'))
-        && (data.profileImage == null
-          || hasValidClientAvatar(data.profileImage, userId))
         && data.createdAt is timestamp
         && data.updatedAt == request.time;
+    }
+
+    function hasValidClientProfile(data, userId) {
+      return hasValidClientProfileShape(data, userId)
+        && (data.profileImage == null
+          || hasValidClientAvatar(data.profileImage, userId));
+    }
+
+    function hasValidLegacyClientProfile(data, userId) {
+      return hasValidClientProfileShape(data, userId)
+        && data.profileImage != null
+        && hasValidLegacyClientAvatar(data.profileImage, userId);
     }
 
     function hasValidProfessionalProfileFields() {
@@ -1711,7 +1733,9 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'phone', 'profileImage', 'updatedAt'
         ])
-        && hasValidClientProfile(request.resource.data, userId);
+        && (hasValidClientProfile(request.resource.data, userId)
+          || (request.resource.data.profileImage == resource.data.profileImage
+            && hasValidLegacyClientProfile(request.resource.data, userId)));
 
       allow delete: if false;
     }
