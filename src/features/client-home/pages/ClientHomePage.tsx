@@ -10,7 +10,7 @@ import {
   Wrench,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { ClientLayout } from '../../../components/layout/ClientLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
@@ -86,14 +86,6 @@ export function ClientHomePage() {
     [catalogState, search],
   )
 
-  function focusCatalog() {
-    document.getElementById('catalogo-servicos')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    })
-    searchInput.current?.focus({ preventScroll: true })
-  }
-
   useEffect(() => {
     if (location.hash === '#catalogo-servicos') {
       document.getElementById('catalogo-servicos')?.scrollIntoView({
@@ -139,17 +131,12 @@ export function ClientHomePage() {
               Escolha uma especialidade para começar.
             </p>
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <Button
-                type="button"
-                className="w-full sm:w-auto"
-                onClick={focusCatalog}
-              >
-                Solicitar serviço
-                <ArrowRight aria-hidden="true" />
+              <Button className="w-full sm:w-auto" asChild>
+                <Link to="/cliente/solicitar">
+                  Solicitar serviço
+                  <ArrowRight aria-hidden="true" />
+                </Link>
               </Button>
-              <p className="text-xs leading-5 text-brand-panel-foreground/70">
-                Em breve você poderá solicitar serviços por aqui.
-              </p>
             </div>
           </div>
         </section>
@@ -309,24 +296,12 @@ export function ClientHomePage() {
               <Clock3 aria-hidden="true" />
               <AlertTitle>{selectedSpecialty.name} selecionado</AlertTitle>
               <AlertDescription>
-                <p>
-                  Em breve você poderá continuar e informar o local, a data e o
-                  período do atendimento.
-                </p>
-                <Button
-                  type="button"
-                  className="mt-3"
-                  disabled
-                  aria-describedby="client-request-pending"
-                >
-                  Continuar para a solicitação
+                <p>Continue para informar o local, a data e o período do atendimento.</p>
+                <Button className="mt-3" asChild>
+                  <Link to={`/cliente/solicitar?specialty=${encodeURIComponent(selectedSpecialty.id)}`}>
+                    Continuar para a solicitação
+                  </Link>
                 </Button>
-                <p
-                  id="client-request-pending"
-                  className="mt-2 text-xs text-muted-foreground"
-                >
-                  Disponível em breve.
-                </p>
               </AlertDescription>
             </Alert>
           ) : null}

@@ -1,10 +1,9 @@
-import { ChevronDown, CircleAlert, LogOut } from 'lucide-react'
+import { ChevronDown, LogOut } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { useAuth } from '../../features/auth/use-auth'
 import { useProfile } from '../../features/onboarding/use-profile'
-import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
 import { Button } from '../ui/button'
 import {
@@ -60,7 +59,7 @@ export function PublicAccountActions({ navigation }: PublicAccountActionsProps) 
 
       {isAuthenticated ? (
         <div className="hidden md:block">
-          <DropdownMenu>
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
@@ -75,7 +74,7 @@ export function PublicAccountActions({ navigation }: PublicAccountActionsProps) 
                 <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" collisionPadding={8}>
               <DropdownMenuLabel className="max-w-48 truncate">{displayName}</DropdownMenuLabel>
               <DropdownMenuItem asChild><Link to="/conta">Acessar minha conta</Link></DropdownMenuItem>
               <DropdownMenuItem
@@ -124,13 +123,6 @@ export function PublicAccountActions({ navigation }: PublicAccountActionsProps) 
         ) : undefined}
       />
 
-      {logoutError && isAuthenticated ? (
-        <Alert variant="destructive" className="absolute top-full right-4 z-50 mt-2 hidden w-[min(22rem,calc(100vw-2rem))] shadow-soft md:grid">
-          <CircleAlert aria-hidden="true" />
-          <AlertTitle>Não foi possível sair</AlertTitle>
-          <AlertDescription>{logoutError}</AlertDescription>
-        </Alert>
-      ) : null}
     </>
   )
 }

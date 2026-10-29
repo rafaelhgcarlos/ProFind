@@ -96,6 +96,12 @@ const ClientHomePage = lazy(() =>
   })),
 )
 
+const ServiceRequestPage = lazy(() =>
+  import('../features/service-request/pages/ServiceRequestPage').then((module) => ({
+    default: module.ServiceRequestPage,
+  })),
+)
+
 const AdminDashboardPage = lazy(() =>
   import('../features/admin/pages/AdminDashboardPage').then((module) => ({
     default: module.AdminDashboardPage,
@@ -210,6 +216,14 @@ export function AppRouter() {
               element={
                 <Suspense fallback={<RouteFallback />}>
                   <ClientProfilePage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/cliente/solicitar"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ServiceRequestPage />
                 </Suspense>
               }
             />

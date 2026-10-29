@@ -147,6 +147,62 @@ describe('PublicLayout', () => {
     expect(screen.getAllByText('Marina Souza').length).toBeGreaterThan(0)
   })
 
+  it('reabre o menu da conta após rolagem sem bloquear ou deslocar a página', async () => {
+    const user = userEvent.setup()
+    const initialScrollY = 1800
+    const originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: initialScrollY,
+    })
+
+    try {
+      renderWithSession({ status: 'authenticated', user: authenticatedUser })
+      const trigger = screen.getByRole('button', {
+        name: 'Abrir menu da conta de marina@example.com',
+      })
+      const header = document.querySelector('header')
+
+      expect(header).toHaveClass('sticky', 'top-0')
+      expect(window.scrollY).toBe(initialScrollY)
+
+      await user.click(trigger)
+      expect(screen.getByRole('menu')).toBeInTheDocument()
+      expect(document.body).not.toHaveAttribute('data-scroll-locked')
+      expect(window.scrollY).toBe(initialScrollY)
+      expect(header).toHaveClass('sticky', 'top-0')
+
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+      expect(trigger).toHaveFocus()
+      expect(window.scrollY).toBe(initialScrollY)
+
+      await user.click(trigger)
+      expect(screen.getByRole('menu')).toBeInTheDocument()
+      expect(document.body).not.toHaveAttribute('data-scroll-locked')
+
+      await user.click(screen.getByText('Conteúdo'))
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+      expect(window.scrollY).toBe(initialScrollY)
+
+      trigger.focus()
+      await user.keyboard('{Enter}')
+      expect(screen.getByRole('menu')).toBeInTheDocument()
+      expect(
+        screen.getByRole('menuitem', { name: 'Acessar minha conta' }),
+      ).toHaveFocus()
+
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+      expect(trigger).toHaveFocus()
+      expect(window.scrollY).toBe(initialScrollY)
+    } finally {
+      if (originalScrollY) {
+        Object.defineProperty(window, 'scrollY', originalScrollY)
+      }
+    }
+  })
+
   it('bloqueia logout repetido e apresenta erro para nova tentativa no menu mobile', async () => {
     const user = userEvent.setup()
     let rejectLogout: (error: Error) => void = () => undefined

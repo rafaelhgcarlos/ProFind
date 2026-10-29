@@ -76,6 +76,28 @@ export function getServicePeriodWindow(
   return { startsAt, endsAt, acceptUntil }
 }
 
+export function getServiceRequestSchedulingWindow(
+  serviceDate: string,
+  period: ServicePeriod,
+  now = new Date(),
+) {
+  const window = getServicePeriodWindow(serviceDate, period)
+  if (!isAcceptanceAllowed(now, window.acceptUntil)) {
+    throw new Error(
+      `Escolha um período com pelo menos ${ACCEPTANCE_CUTOFF_MINUTES} minutos de antecedência.`,
+    )
+  }
+  const horizon = new Date(
+    now.getTime() + MAX_SCHEDULING_HORIZON_DAYS * 24 * 60 * 60_000,
+  )
+  if (window.startsAt.getTime() > horizon.getTime()) {
+    throw new Error(
+      `Escolha uma data dentro dos próximos ${MAX_SCHEDULING_HORIZON_DAYS} dias.`,
+    )
+  }
+  return window
+}
+
 export function serviceSlotId(serviceDate: string, period: ServicePeriod) {
   dateParts(serviceDate)
   return `${serviceDate}_${period}`

@@ -366,6 +366,242 @@ service cloud.firestore {
         && event.createdAt == request.time;
     }
 
+    function hasAtomicCreationDocuments(requestId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let privatePath = /databases/$(database)/documents/serviceRequestPrivate/$(requestId);
+      let roundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/round-1;
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/created;
+
+      return !exists(requestPath)
+        && !exists(privatePath)
+        && !exists(roundPath)
+        && !exists(eventPath)
+        && existsAfter(requestPath)
+        && existsAfter(privatePath)
+        && existsAfter(roundPath)
+        && existsAfter(eventPath);
+    }
+
+    function isReadyClientForCreation(summary) {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      let clientProfilePath = /databases/$(database)/documents/clientProfiles/$(request.auth.uid);
+      let user = get(userPath).data;
+      let clientProfile = get(clientProfilePath).data;
+
+      return exists(userPath)
+        && exists(clientProfilePath)
+        && user.roles is list
+        && 'client' in user.roles
+        && user.name is string
+        && user.name.size() >= 2
+        && user.name.size() <= 120
+        && clientProfile.ownerId == request.auth.uid
+        && clientProfile.phone is string
+        && summary.clientId == request.auth.uid;
+    }
+
+    function hasActiveCreationCatalog(summary) {
+      let categoryPath = /databases/$(database)/documents/categories/$(summary.categoryId);
+      let specialtyPath = /databases/$(database)/documents/specialties/$(summary.specialtyId);
+
+      return exists(categoryPath)
+        && get(categoryPath).data.active == true
+        && exists(specialtyPath)
+        && get(specialtyPath).data.active == true
+        && get(specialtyPath).data.categoryId == summary.categoryId;
+    }
+
+    function isValidCreatedSummary(requestId, summary) {
+      return requestId.matches('^[A-Za-z0-9_-]{20,80}$')
+        && summary.keys().hasOnly([
+          'requestId', 'operationKey', 'clientId', 'categoryId',
+          'specialtyId', 'cityIbgeCode', 'serviceDate', 'period',
+          'periodStartAt', 'acceptUntil', 'status', 'round',
+          'currentRoundId', 'assignedProfessionalId',
+          'currentAssignmentId', 'reopenReason', 'excludedProfessionalIds',
+          'createdAt', 'updatedAt'
+        ])
+        && summary.requestId == requestId
+        && summary.operationKey == requestId
+        && summary.cityIbgeCode.matches('^[0-9]{7}$')
+        && summary.serviceDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && summary.period in ['MORNING', 'AFTERNOON', 'EVENING']
+        && summary.periodStartAt is timestamp
+        && summary.acceptUntil is timestamp
+        && summary.acceptUntil == summary.periodStartAt - duration.value(30, 'm')
+        && request.time < summary.acceptUntil
+        && summary.periodStartAt <= request.time + duration.value(90, 'd')
+        && summary.status == 'OPEN'
+        && summary.round == 1
+        && summary.currentRoundId == 'round-1'
+        && summary.assignedProfessionalId == null
+        && summary.currentAssignmentId == null
+        && summary.reopenReason == null
+        && summary.excludedProfessionalIds == []
+        && summary.createdAt == request.time
+        && summary.updatedAt == request.time;
+    }
+
+    function isValidPrivateAddress(address, cityIbgeCode) {
+      return address is map
+        && address.street is string
+        && address.street.size() >= 1
+        && address.number is string
+        && address.number.size() >= 1
+        && address.complement is string
+        && address.neighborhood is string
+        && address.neighborhood.size() >= 1
+        && address.city is string
+        && address.city.size() >= 1
+        && address.stateCode.matches('^[A-Z]{2}$')
+        && address.postalCode.matches('^[0-9]{8}$')
+        && address.ibgeCode == cityIbgeCode;
+    }
+
+    function isValidCreatedPrivate(requestId, summary, privateData) {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let clientProfile = get(/databases/$(database)/documents/clientProfiles/$(request.auth.uid)).data;
+
+      return privateData.requestId == requestId
+        && privateData.operationKey == requestId
+        && privateData.clientId == request.auth.uid
+        && privateData.contactName == user.name
+        && privateData.contactPhone == clientProfile.phone
+        && privateData.notes.size() >= 10
+        && privateData.notes.size() <= 1000
+        && isValidPrivateAddress(privateData.address, summary.cityIbgeCode)
+        && privateData.createdAt == request.time
+        && privateData.updatedAt == request.time;
+    }
+
+    function isValidInitialRound(requestId, round) {
+      return round.roundId == 'round-1'
+        && round.requestId == requestId
+        && round.round == 1
+        && round.status == 'OPEN'
+        && round.reason == 'INITIAL'
+        && round.excludedProfessionalIds == []
+        && round.previousAssignmentId == null
+        && round.openedAt == request.time
+        && round.closedAt == null
+        && round.closedReason == null
+        && round.updatedAt == request.time;
+    }
+
+    function isValidCreationEvent(requestId, event) {
+      return event.eventId == 'created'
+        && event.entityType == 'SERVICE_REQUEST'
+        && event.entityId == requestId
+        && event.requestId == requestId
+        && event.type == 'REQUEST_CREATED'
+        && event.reasonCode == 'CLIENT_REQUEST'
+        && event.actorId == request.auth.uid
+        && event.actorRole == 'CLIENT'
+        && event.round == 1
+        && event.assignmentId == null
+        && event.fromStatus == 'OPEN'
+        && event.toStatus == 'OPEN'
+        && event.createdAt == request.time;
+    }
+
+    function isServiceRequestCreation(requestId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let summary = getAfter(requestPath).data;
+
+      return request.auth != null
+        && hasAtomicCreationDocuments(requestId)
+        && isReadyClientForCreation(summary)
+        && hasActiveCreationCatalog(summary)
+        && isValidCreatedSummary(requestId, summary);
+    }
+
+    function isServiceRequestCreationCompanion(requestId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let summary = getAfter(requestPath).data;
+
+      return request.auth != null
+        && !exists(requestPath)
+        && existsAfter(requestPath)
+        && summary.requestId == requestId
+        && summary.operationKey == requestId
+        && summary.clientId == request.auth.uid
+        && summary.status == 'OPEN'
+        && summary.createdAt == request.time;
+    }
+
+    function hasValidClientCancellationDocuments(requestId, clientId, before) {
+      let roundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(before.currentRoundId);
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/cancelled-by-client;
+      let oldRound = get(roundPath).data;
+      let round = getAfter(roundPath).data;
+      let event = getAfter(eventPath).data;
+
+      return exists(roundPath)
+        && !exists(eventPath)
+        && existsAfter(roundPath)
+        && existsAfter(eventPath)
+        && oldRound.status == 'OPEN'
+        && round.diff(oldRound).affectedKeys().hasOnly([
+          'status', 'closedAt', 'closedReason', 'updatedAt'
+        ])
+        && round.status == 'CLOSED'
+        && round.closedAt == request.time
+        && round.closedReason == 'CLIENT_CANCELLATION'
+        && round.updatedAt == request.time
+        && event.keys().hasOnly([
+          'eventId', 'entityType', 'entityId', 'requestId', 'type',
+          'reasonCode', 'actorId', 'actorRole', 'round', 'assignmentId',
+          'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == 'cancelled-by-client'
+        && event.entityType == 'SERVICE_REQUEST'
+        && event.entityId == requestId
+        && event.requestId == requestId
+        && event.type == 'REQUEST_CANCELLED'
+        && event.reasonCode == 'CLIENT_CANCELLATION'
+        && event.actorId == clientId
+        && event.actorRole == 'CLIENT'
+        && event.round == before.round
+        && event.assignmentId == null
+        && event.fromStatus == 'OPEN'
+        && event.toStatus == 'CANCELLED'
+        && event.createdAt == request.time;
+    }
+
+    function isClientCancellationTransition(requestId, clientId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == clientId
+        && before.clientId == clientId
+        && before.status == 'OPEN'
+        && before.assignedProfessionalId == null
+        && before.currentAssignmentId == null
+        && after.status == 'CANCELLED'
+        && after.updatedAt == request.time
+        && after.diff(before).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && hasValidClientCancellationDocuments(
+          requestId,
+          clientId,
+          before
+        );
+    }
+
+    function isClientCancellationCompanion(requestId, clientId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == clientId
+        && before.clientId == clientId
+        && before.status == 'OPEN'
+        && after.status == 'CANCELLED'
+        && after.updatedAt == request.time;
+    }
+
     function canReadServiceRequest(requestId) {
       let summary = get(
         /databases/$(database)/documents/serviceRequests/$(requestId)
@@ -1575,25 +1811,36 @@ service cloud.firestore {
               resource.data,
               request.auth.uid
             )));
-      allow get: if canReadServiceRequest(requestId);
-      allow create, delete: if false;
+      allow get: if request.auth != null
+        && (resource == null || canReadServiceRequest(requestId));
+      allow create: if isServiceRequestCreation(requestId);
+      allow delete: if false;
       allow update: if request.auth != null
         && (isAcceptanceTransition(requestId, request.auth.uid)
-          || isCancellationTransition(requestId, request.auth.uid));
+          || isCancellationTransition(requestId, request.auth.uid)
+          || isClientCancellationTransition(requestId, request.auth.uid));
 
       match /rounds/{roundId} {
-        allow get: if canReadServiceRequest(requestId);
+        allow get: if request.auth != null
+          && (resource == null || canReadServiceRequest(requestId));
         allow list: if false;
-        allow create: if request.auth != null
-          && isCancellationTransition(requestId, request.auth.uid)
-          && getAfter(
-            /databases/$(database)/documents/serviceRequests/$(requestId)
-          ).data.currentRoundId == roundId;
+        allow create: if (roundId == 'round-1'
+            && isServiceRequestCreationCompanion(requestId)
+            && isValidInitialRound(requestId, request.resource.data))
+          || (request.auth != null
+            && isCancellationTransition(requestId, request.auth.uid)
+            && getAfter(
+              /databases/$(database)/documents/serviceRequests/$(requestId)
+            ).data.currentRoundId == roundId);
         allow update: if request.auth != null
-          && isAcceptanceTransition(requestId, request.auth.uid)
-          && get(
-            /databases/$(database)/documents/serviceRequests/$(requestId)
-          ).data.currentRoundId == roundId;
+          && ((isAcceptanceTransition(requestId, request.auth.uid)
+              && get(
+                /databases/$(database)/documents/serviceRequests/$(requestId)
+              ).data.currentRoundId == roundId)
+            || (isClientCancellationCompanion(requestId, request.auth.uid)
+              && get(
+                /databases/$(database)/documents/serviceRequests/$(requestId)
+              ).data.currentRoundId == roundId));
         allow delete: if false;
 
         match /refusals/{professionalId} {
@@ -1610,7 +1857,8 @@ service cloud.firestore {
 
       match /assignments/{assignmentId} {
         allow get: if request.auth != null
-          && (isActiveAdmin()
+          && (resource == null
+            || isActiveAdmin()
             || (resource != null
               && (request.auth.uid == resource.data.clientId
                 || request.auth.uid == resource.data.professionalId)));
@@ -1630,7 +1878,8 @@ service cloud.firestore {
 
       match /events/{eventId} {
         allow get: if request.auth != null
-          && (isActiveAdmin()
+          && (resource == null
+            || isActiveAdmin()
             || (resource != null
               && request.auth.uid == resource.data.actorId)
             || request.auth.uid == get(
@@ -1646,7 +1895,11 @@ service cloud.firestore {
             || request.auth.uid == resource.data.actorId);
         allow create: if request.auth != null
           && request.resource.data.eventId == eventId
-          && ((request.resource.data.type == 'REQUEST_ASSIGNED'
+          && ((request.resource.data.type == 'REQUEST_CREATED'
+              && eventId == 'created'
+              && isServiceRequestCreationCompanion(requestId)
+              && isValidCreationEvent(requestId, request.resource.data))
+            || (request.resource.data.type == 'REQUEST_ASSIGNED'
               && isAcceptanceTransition(requestId, request.auth.uid))
             || (request.resource.data.type == 'PROFESSIONAL_REFUSED'
               && isRefusalCreate(
@@ -1658,7 +1911,13 @@ service cloud.firestore {
               ))
             || (request.resource.data.type
                 == 'PROFESSIONAL_CANCELLED_AND_REOPENED'
-              && isCancellationTransition(requestId, request.auth.uid)));
+              && isCancellationTransition(requestId, request.auth.uid))
+            || (request.resource.data.type == 'REQUEST_CANCELLED'
+              && eventId == 'cancelled-by-client'
+              && isClientCancellationCompanion(
+                requestId,
+                request.auth.uid
+              )));
         allow update, delete: if false;
       }
     }
@@ -1667,7 +1926,8 @@ service cloud.firestore {
     // O antigo responsável perde a leitura assim que a solicitação é reaberta.
     match /serviceRequestPrivate/{requestId} {
       allow get: if request.auth != null
-        && exists(
+        && (resource == null
+          || (exists(
           /databases/$(database)/documents/serviceRequests/$(requestId)
         )
         && (request.auth.uid == get(
@@ -1676,8 +1936,16 @@ service cloud.firestore {
           || request.auth.uid == get(
             /databases/$(database)/documents/serviceRequests/$(requestId)
           ).data.assignedProfessionalId
-          || isActiveAdmin());
-      allow list, write: if false;
+          || isActiveAdmin())));
+      allow create: if isServiceRequestCreationCompanion(requestId)
+        && isValidCreatedPrivate(
+          requestId,
+          getAfter(
+            /databases/$(database)/documents/serviceRequests/$(requestId)
+          ).data,
+          request.resource.data
+        );
+      allow list, update, delete: if false;
     }
 
     match /professionalReservations/{professionalId}/slots/{slotId} {

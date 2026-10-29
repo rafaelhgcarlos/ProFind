@@ -1,8 +1,8 @@
 # Estrutura autenticada do MVP
 
-Este documento registra a primeira etapa visual da Issue #52, alinhada ao plano
-da Issue #50. A entrega organiza a navegação e o início do cliente sem antecipar
-os fluxos de solicitação, distribuição ou acompanhamento.
+Este documento registra a estrutura visual iniciada na Issue #52, alinhada ao
+plano da Issue #50, e sua integração com a criação de solicitações. Distribuição
+e acompanhamento permanecem fora desta etapa.
 
 ## Estrutura compartilhada
 
@@ -23,14 +23,14 @@ os fluxos de solicitação, distribuição ou acompanhamento.
 ### Cliente
 
 - **Início:** saudação, orientação e catálogo real.
-- **Solicitar serviço:** leva por hash ao catálogo na mesma página e posiciona o
-  foco no filtro. A seleção é apenas local e informa que nenhum pedido foi criado.
-- **Meus pedidos:** aparece como integração pendente das Issues #11 e #18.
+- **Solicitar serviço:** abre o formulário e preserva a especialidade escolhida
+  no catálogo, inclusive quando o login é necessário.
+- **Meus pedidos:** aparece como integração pendente da Issue #18.
 - **Perfil:** mantém a rota existente `/cliente/perfil`.
 
 O início lê categorias e especialidades pelo serviço de catálogo existente. Não
 há cópia de categorias no componente, pedido fictício, profissional escolhido ou
-confirmação simulada. Endereço continuará pertencendo à futura solicitação, não
+confirmação simulada. Endereço pertence à solicitação, não
 ao perfil privado do cliente.
 
 ### Profissional
@@ -50,11 +50,8 @@ retirados da jornada e da navegação do MVP.
 
 ## Dependências que permanecem abertas
 
-- **#11:** formulário, validação e persistência da solicitação, inclusive
-  especialidade, endereço, data e período, além da retomada da intenção após o
-  login.
 - **#13:** oportunidades reais, elegibilidade e ações do profissional.
 - **#18:** acompanhamento de solicitações e atendimentos persistidos.
 
-Até essas integrações, a interface identifica cada área como pendente e não cria
-rotas sem conteúdo, dados artificiais ou estados de sucesso locais.
+A interface mantém as áreas futuras sem rotas vazias, dados artificiais ou
+estados de sucesso locais.

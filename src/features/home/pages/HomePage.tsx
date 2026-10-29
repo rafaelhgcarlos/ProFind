@@ -10,6 +10,7 @@ import { Button } from '../../../components/ui/button'
 import { EmptyState } from '../../../components/ui/empty-state'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
+import type { CatalogSpecialty } from '../../../types/catalog'
 import { CategoryTile } from '../components/CategoryTile'
 import { useCatalog } from '../use-catalog'
 
@@ -24,12 +25,12 @@ export function HomePage() {
   const [service, setService] = useState('')
   const catalogState = useCatalog()
   const specialtiesByCategory = useMemo(() => {
-    const grouped = new Map<string, string[]>()
+    const grouped = new Map<string, Array<Pick<CatalogSpecialty, 'id' | 'name'>>>()
 
     for (const specialty of catalogState.catalog?.specialties ?? []) {
-      const names = grouped.get(specialty.categoryId) ?? []
-      names.push(specialty.name)
-      grouped.set(specialty.categoryId, names)
+      const items = grouped.get(specialty.categoryId) ?? []
+      items.push({ id: specialty.id, name: specialty.name })
+      grouped.set(specialty.categoryId, items)
     }
 
     return grouped
@@ -45,10 +46,10 @@ export function HomePage() {
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-muted-foreground">Escolha uma especialidade e, no fluxo de solicitação, informe local, data e período sem comparar propostas ou escolher um prestador.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Button size="lg" className="w-full sm:w-auto" asChild><a href="#servicos">Solicitar serviço <ArrowRight aria-hidden="true" /></a></Button>
+              <Button size="lg" className="w-full sm:w-auto" asChild><Link to="/cliente/solicitar">Solicitar serviço <ArrowRight aria-hidden="true" /></Link></Button>
               <Button size="lg" variant="outline" className="w-full sm:w-auto" asChild><Link to="/cadastro">Sou profissional</Link></Button>
             </div>
-            <p className="mt-5 text-sm leading-6 text-muted-foreground">Você já pode criar sua conta e explorar o catálogo. Em breve será possível enviar uma solicitação por aqui.</p>
+            <p className="mt-5 text-sm leading-6 text-muted-foreground">Entre ou crie sua conta para enviar uma solicitação com seus dados protegidos.</p>
           </div>
           <div className="relative isolate hidden min-h-[25rem] overflow-hidden rounded-xl bg-brand-panel p-7 text-brand-panel-foreground lg:block" aria-hidden="true">
             <div className="absolute -top-24 -right-18 size-64 rounded-full border border-brand-panel-foreground/20" />
@@ -69,7 +70,7 @@ export function HomePage() {
       <section id="servicos" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div className="max-w-2xl"><p className="text-sm font-semibold text-primary">Categorias de serviços</p><h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Qual serviço faz falta hoje?</h2><p className="mt-3 leading-7 text-muted-foreground">Explore as categorias disponíveis e veja as especialidades oferecidas em cada uma.</p></div>
-          <Button asChild variant="outline" className="self-start sm:self-auto"><Link to="/cadastro">Começar agora <ArrowRight className="size-4" aria-hidden="true" /></Link></Button>
+          <Button asChild variant="outline" className="self-start sm:self-auto"><Link to="/cliente/solicitar">Começar agora <ArrowRight className="size-4" aria-hidden="true" /></Link></Button>
         </div>
         {catalogState.status === 'loading' ? (
           <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4" role="status" aria-label="Carregando categorias">
@@ -100,11 +101,11 @@ export function HomePage() {
               <CategoryTile
                 key={category.id}
                 name={category.name}
-                description={specialtiesByCategory.get(category.id)?.join(' · ')}
+                description={specialtiesByCategory.get(category.id)?.map((item) => item.name).join(' · ')}
                 icon={Wrench}
-                active={service === category.name}
+                active={service === category.id}
                 onSelect={() => {
-                  setService(category.name)
+                  setService(category.id)
                 }}
               />
             ))}
@@ -113,9 +114,18 @@ export function HomePage() {
         {service ? (
           <Alert className="mt-6" aria-live="polite">
             <CircleAlert aria-hidden="true" />
-            <AlertTitle>{service} selecionado</AlertTitle>
+            <AlertTitle>{catalogState.catalog?.categories.find((category) => category.id === service)?.name} selecionado</AlertTitle>
             <AlertDescription>
-              Em breve será possível continuar e informar os detalhes da solicitação.
+              <p>Escolha uma especialidade para continuar:</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {specialtiesByCategory.get(service)?.map((specialty) => (
+                  <Button key={specialty.id} asChild variant="outline" size="sm">
+                    <Link to={`/cliente/solicitar?specialty=${encodeURIComponent(specialty.id)}`}>
+                      {specialty.name}
+                    </Link>
+                  </Button>
+                ))}
+              </div>
             </AlertDescription>
           </Alert>
         ) : null}

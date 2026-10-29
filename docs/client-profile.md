@@ -89,6 +89,5 @@ reconstrói com timestamps numéricos e o header volta a usar sua URL HTTPS.
 
 ## Limites
 
-Endereço do atendimento pertence à futura solicitação de serviço (#11), não ao
-perfil. Esta entrega não cria perfil público de cliente, não coleta documentos
-ou CNPJ e não antecipa o formulário da #11 nem a reformulação completa da #52.
+Endereço do atendimento pertence à solicitação de serviço, não ao perfil.
+O perfil não é público e não coleta documentos ou CNPJ.

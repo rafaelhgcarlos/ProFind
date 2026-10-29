@@ -17,12 +17,16 @@ export const DISTRIBUTION_ROUND_REASONS = [
 ] as const
 export const ASSIGNMENT_STATUSES = ['ACTIVE', 'CANCELLED', 'COMPLETED'] as const
 export const SERVICE_EVENT_TYPES = [
+  'REQUEST_CREATED',
+  'REQUEST_CANCELLED',
   'REQUEST_ASSIGNED',
   'PROFESSIONAL_REFUSED',
   'PROFESSIONAL_CANCELLED_AND_REOPENED',
 ] as const
 
 export const SERVICE_EVENT_REASON_CODES = [
+  'CLIENT_REQUEST',
+  'CLIENT_CANCELLATION',
   'PROFESSIONAL_ACCEPTANCE',
   'PROFESSIONAL_REFUSAL',
   'PROFESSIONAL_CANCELLATION',
@@ -43,6 +47,7 @@ export type ServiceEventReasonCode =
 
 export interface ServiceRequestSummary {
   requestId: string
+  operationKey: string
   clientId: string
   categoryId: string
   specialtyId: string
@@ -62,6 +67,7 @@ export interface ServiceRequestSummary {
 
 export interface ServiceRequestPrivateData {
   requestId: string
+  operationKey: string
   clientId: string
   contactName: string
   contactPhone: string
@@ -153,7 +159,7 @@ export interface ServiceRequestEvent {
   type: ServiceEventType
   reasonCode: ServiceEventReasonCode
   actorId: string
-  actorRole: 'PROFESSIONAL'
+  actorRole: 'CLIENT' | 'PROFESSIONAL'
   round: number
   assignmentId: string | null
   fromStatus: ServiceRequestStatus
@@ -164,6 +170,9 @@ export interface ServiceRequestEvent {
 
 export type ServiceRequestErrorCode =
   | 'unauthenticated'
+  | 'validation'
+  | 'profile-incomplete'
+  | 'already-created'
   | 'not-found'
   | 'not-open'
   | 'round-changed'

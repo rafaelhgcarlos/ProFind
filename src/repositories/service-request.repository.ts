@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
@@ -30,11 +31,12 @@ import {
   type ProfessionalOperationalProfile,
   type ServicePeriod,
   type ServiceRequestEvent,
+  type ServiceRequestPrivateData,
   type ServiceRequestSummary,
 } from '../types/service-request'
 
 export interface TransactionCoordinator {
-  afterRead(operation: 'accept' | 'refuse' | 'cancel', key: string): Promise<void>
+  afterRead(operation: 'create' | 'client-cancel' | 'accept' | 'refuse' | 'cancel', key: string): Promise<void>
 }
 
 interface RepositoryDependencies {
@@ -58,6 +60,32 @@ export interface ServiceHistoryQuery {
 }
 
 export const OPPORTUNITY_QUERY_LIMIT = 50
+
+export interface CreateRequestInput {
+  operationKey: string
+  clientId: string
+  categoryId: string
+  specialtyId: string
+  cityIbgeCode: string
+  serviceDate: string
+  period: ServicePeriod
+  periodStartAt: Date
+  acceptUntil: Date
+  contactName: string
+  contactPhone: string
+  description: string
+  address: ServiceRequestPrivateData['address']
+}
+
+export interface CreatedRequestResult {
+  request: ServiceRequestSummary
+  idempotent: boolean
+}
+
+export interface CancelledClientRequestResult {
+  request: ServiceRequestSummary
+  idempotent: boolean
+}
 
 export interface AcceptRequestInput {
   requestId: string
@@ -134,6 +162,7 @@ function requestFromSnapshot(
 
   return {
     requestId: snapshot.id,
+    operationKey: stringValue(data, 'operationKey'),
     clientId: stringValue(data, 'clientId'),
     categoryId: stringValue(data, 'categoryId'),
     specialtyId: stringValue(data, 'specialtyId'),
@@ -165,7 +194,11 @@ function serviceEventFromSnapshot(
   const type = stringValue(data, 'type') as ServiceRequestEvent['type']
   const requestId = stringValue(data, 'requestId')
   const fallbackReason =
-    type === 'REQUEST_ASSIGNED'
+    type === 'REQUEST_CREATED'
+      ? 'CLIENT_REQUEST'
+      : type === 'REQUEST_CANCELLED'
+        ? 'CLIENT_CANCELLATION'
+      : type === 'REQUEST_ASSIGNED'
       ? 'PROFESSIONAL_ACCEPTANCE'
       : type === 'PROFESSIONAL_REFUSED'
         ? 'PROFESSIONAL_REFUSAL'
@@ -179,7 +212,7 @@ function serviceEventFromSnapshot(
     type,
     reasonCode: (stringValue(data, 'reasonCode') || fallbackReason) as ServiceRequestEvent['reasonCode'],
     actorId: stringValue(data, 'actorId'),
-    actorRole: 'PROFESSIONAL',
+    actorRole: data.actorRole === 'CLIENT' ? 'CLIENT' : 'PROFESSIONAL',
     round: typeof data.round === 'number' ? data.round : 0,
     assignmentId: nullableString(data, 'assignmentId'),
     fromStatus: stringValue(data, 'fromStatus') as ServiceRequestEvent['fromStatus'],
@@ -302,6 +335,222 @@ export function createServiceRequestRepository({
   now = () => new Date(),
   coordinator,
 }: RepositoryDependencies) {
+  async function getOwnRequest(requestId: string, clientId: string) {
+    const snapshot = await getDoc(doc(firestore, 'serviceRequests', requestId))
+    const request = requestFromSnapshot(snapshot)
+    if (request.clientId !== clientId) {
+      throw new ServiceRequestError('not-found', 'Solicitação não encontrada.')
+    }
+    return request
+  }
+
+  async function createRequest(
+    input: CreateRequestInput,
+  ): Promise<CreatedRequestResult> {
+    const requestId = input.operationKey
+    return runTransaction(firestore, async (transaction) => {
+      const requestReference = doc(firestore, 'serviceRequests', requestId)
+      const privateReference = doc(firestore, 'serviceRequestPrivate', requestId)
+      const roundReference = doc(requestReference, 'rounds', 'round-1')
+      const eventReference = doc(requestReference, 'events', 'created')
+      const requestSnapshot = await transaction.get(requestReference)
+
+      await coordinator?.afterRead('create', requestId)
+
+      if (requestSnapshot.exists()) {
+        const existing = requestFromSnapshot(requestSnapshot)
+        if (
+          existing.clientId !== input.clientId ||
+          existing.operationKey !== input.operationKey
+        ) {
+          throw new ServiceRequestError(
+            'already-created',
+            'Esta chave de envio já foi usada em outra solicitação.',
+          )
+        }
+        return { request: existing, idempotent: true }
+      }
+
+      const timestamp = serverTimestamp()
+      transaction.set(requestReference, {
+        requestId,
+        operationKey: input.operationKey,
+        clientId: input.clientId,
+        categoryId: input.categoryId,
+        specialtyId: input.specialtyId,
+        cityIbgeCode: input.cityIbgeCode,
+        serviceDate: input.serviceDate,
+        period: input.period,
+        periodStartAt: Timestamp.fromDate(input.periodStartAt),
+        acceptUntil: Timestamp.fromDate(input.acceptUntil),
+        status: 'OPEN',
+        round: 1,
+        currentRoundId: 'round-1',
+        assignedProfessionalId: null,
+        currentAssignmentId: null,
+        reopenReason: null,
+        excludedProfessionalIds: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      transaction.set(privateReference, {
+        requestId,
+        operationKey: input.operationKey,
+        clientId: input.clientId,
+        contactName: input.contactName,
+        contactPhone: input.contactPhone,
+        notes: input.description,
+        address: { ...input.address, complement: input.address.complement ?? '' },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      transaction.set(roundReference, {
+        roundId: 'round-1',
+        requestId,
+        round: 1,
+        status: 'OPEN',
+        reason: 'INITIAL',
+        excludedProfessionalIds: [],
+        previousAssignmentId: null,
+        openedAt: timestamp,
+        closedAt: null,
+        closedReason: null,
+        updatedAt: timestamp,
+      })
+      transaction.set(eventReference, {
+        eventId: 'created',
+        entityType: 'SERVICE_REQUEST',
+        entityId: requestId,
+        requestId,
+        type: 'REQUEST_CREATED',
+        reasonCode: 'CLIENT_REQUEST',
+        actorId: input.clientId,
+        actorRole: 'CLIENT',
+        round: 1,
+        assignmentId: null,
+        fromStatus: 'OPEN',
+        toStatus: 'OPEN',
+        createdAt: timestamp,
+      })
+
+      return {
+        request: {
+          requestId,
+          operationKey: input.operationKey,
+          clientId: input.clientId,
+          categoryId: input.categoryId,
+          specialtyId: input.specialtyId,
+          cityIbgeCode: input.cityIbgeCode,
+          serviceDate: input.serviceDate,
+          period: input.period,
+          periodStartAt: input.periodStartAt,
+          acceptUntil: input.acceptUntil,
+          status: 'OPEN',
+          round: 1,
+          currentRoundId: 'round-1',
+          assignedProfessionalId: null,
+          currentAssignmentId: null,
+          reopenReason: null,
+          excludedProfessionalIds: [],
+        },
+        idempotent: false,
+      }
+    })
+  }
+
+  async function cancelOwnRequest(
+    requestId: string,
+    clientId: string,
+  ): Promise<CancelledClientRequestResult> {
+    return runTransaction(firestore, async (transaction) => {
+      const requestReference = doc(firestore, 'serviceRequests', requestId)
+      const requestSnapshot = await transaction.get(requestReference)
+      const request = requestFromSnapshot(requestSnapshot)
+      if (request.clientId !== clientId) {
+        throw new ServiceRequestError('not-found', 'Solicitação não encontrada.')
+      }
+
+      const eventReference = doc(
+        requestReference,
+        'events',
+        'cancelled-by-client',
+      )
+      if (request.status === 'CANCELLED') {
+        const eventSnapshot = await transaction.get(eventReference)
+        if (
+          !eventSnapshot.exists() ||
+          eventSnapshot.data().type !== 'REQUEST_CANCELLED' ||
+          eventSnapshot.data().actorId !== clientId
+        ) {
+          throw new ServiceRequestError(
+            'unknown',
+            'O histórico do cancelamento está inconsistente.',
+          )
+        }
+        return { request, idempotent: true }
+      }
+      if (request.status !== 'OPEN') {
+        throw new ServiceRequestError(
+          'not-open',
+          'Somente uma solicitação em procura pode ser cancelada aqui.',
+        )
+      }
+
+      const roundReference = doc(
+        requestReference,
+        'rounds',
+        request.currentRoundId,
+      )
+      const [roundSnapshot, eventSnapshot] = await Promise.all([
+        transaction.get(roundReference),
+        transaction.get(eventReference),
+      ])
+      await coordinator?.afterRead('client-cancel', requestId)
+      if (
+        !roundSnapshot.exists() ||
+        roundSnapshot.data().status !== 'OPEN' ||
+        eventSnapshot.exists()
+      ) {
+        throw new ServiceRequestError(
+          'round-changed',
+          'A rodada da solicitação foi alterada.',
+        )
+      }
+
+      const timestamp = serverTimestamp()
+      transaction.update(requestReference, {
+        status: 'CANCELLED',
+        updatedAt: timestamp,
+      })
+      transaction.update(roundReference, {
+        status: 'CLOSED',
+        closedAt: timestamp,
+        closedReason: 'CLIENT_CANCELLATION',
+        updatedAt: timestamp,
+      })
+      transaction.set(eventReference, {
+        eventId: 'cancelled-by-client',
+        entityType: 'SERVICE_REQUEST',
+        entityId: requestId,
+        requestId,
+        type: 'REQUEST_CANCELLED',
+        reasonCode: 'CLIENT_CANCELLATION',
+        actorId: clientId,
+        actorRole: 'CLIENT',
+        round: request.round,
+        assignmentId: null,
+        fromStatus: 'OPEN',
+        toStatus: 'CANCELLED',
+        createdAt: timestamp,
+      })
+
+      return {
+        request: { ...request, status: 'CANCELLED' },
+        idempotent: false,
+      }
+    })
+  }
+
   async function listRequestHistory(input: ServiceHistoryQuery) {
     const constraints = [
       ...(input.actorId ? [where('actorId', '==', input.actorId)] : []),
@@ -800,6 +1049,9 @@ export function createServiceRequestRepository({
   }
 
   return {
+    getOwnRequest,
+    createRequest,
+    cancelOwnRequest,
     listRequestHistory,
     listOpenOpportunities,
     acceptRequest,

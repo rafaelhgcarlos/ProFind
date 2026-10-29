@@ -52,7 +52,11 @@ describe('HomePage catalog', () => {
     await user.click(screen.getByRole('button', { name: /Construção e manutenção/ }))
 
     expect(screen.getByRole('status')).toHaveTextContent(
-      /Construção e manutenção selecionado.*em breve será possível continuar/i,
+      /Construção e manutenção selecionado.*escolha uma especialidade/i,
+    )
+    expect(screen.getByRole('link', { name: 'Eletricista' })).toHaveAttribute(
+      'href',
+      '/cliente/solicitar?specialty=electrician',
     )
   })
 

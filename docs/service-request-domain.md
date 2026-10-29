@@ -35,7 +35,7 @@ Política centralizada em `service-period-policy.ts`:
 - O profissional designado pode cancelar somente antes de `periodStartAt`.
 - Não há job de expiração. Depois de `acceptUntil`, novos aceites são negados; a solicitação permanece disponível para futura intervenção administrativa.
 - Uma reserva usa a chave determinística `{YYYY-MM-DD}_{PERIOD}`. O mesmo profissional não consegue manter duas reservas nessa chave.
-- O horizonte recomendado para criação é de 90 dias. A validação de criação será integrada pelo fluxo da #11.
+- A criação valida um horizonte máximo de 90 dias e exige que o envio ocorra antes do corte de 30 minutos do período.
 - O modelo não cobre horários arbitrários, duração variável, sobreposição parcial ou serviços com vários dias.
 
 ## Estados e transições
@@ -44,6 +44,7 @@ Política centralizada em `service-period-policy.ts`:
 |---|---|---|---|
 | `OPEN` | Aceite por profissional elegível | `ASSIGNED` | solicitação, fechamento da rodada, atribuição, reserva e evento |
 | `OPEN` | Recusa pelo profissional | `OPEN` | recusa da rodada e evento; não altera terceiros |
+| `OPEN` | Cancelamento pelo cliente dono | `CANCELLED` | solicitação, fechamento da rodada atual e evento |
 | `ASSIGNED` | Cancelamento pelo responsável antes do início | `OPEN` | solicitação, atribuição encerrada, remoção da reserva, nova rodada e evento |
 | `ASSIGNED` | Início, integração futura | `IN_PROGRESS` | fora desta entrega |
 | `IN_PROGRESS` | Conclusão, integração futura | `COMPLETED` | fora desta entrega |
@@ -76,6 +77,7 @@ Mudanças relevantes no perfil incrementam `profileVersion`, registram um evento
 - A reserva é criada em um caminho único por profissional/slot.
 - `actorId`, `professionalId`, `clientId`, rodada e ponteiros devem concordar entre todos os documentos.
 - Recusas e eventos são imutáveis e usam caminhos da rodada atual.
+- O cliente só cancela o próprio pedido enquanto ele está `OPEN`; a rodada e o evento de cancelamento pertencem ao mesmo commit.
 - A nova rodada não consulta nem copia recusas antigas.
 - Quem cancelou fica em `excludedProfessionalIds` somente na rodada imediatamente seguinte.
 - O cancelamento exige a atribuição esperada. Um retry encontra o evento antigo e retorna sucesso idempotente sem tocar em uma atribuição posterior.
@@ -137,7 +139,7 @@ Não há script de migração nesta entrega e nenhum dado remoto é alterado.
 
 - #43/#51: versão do perfil, submissão e invalidação da aprovação após edição relevante.
 - #32: criação e manutenção administrativa do contrato operacional.
-- #11/#14: criação da solicitação e disponibilidade/compatibilidade.
+- #14: disponibilidade e compatibilidade profissional.
 - #17/#13: feed e aceite pela interface.
 - #21: experiência de cancelamento e substituição.
 - #34: pendências e intervenção administrativa.

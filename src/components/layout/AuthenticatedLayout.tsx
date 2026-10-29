@@ -42,7 +42,7 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
     { label: 'Início', href: '/cliente', icon: Home },
     {
       label: 'Solicitar serviço',
-      href: '/cliente#catalogo-servicos',
+      href: '/cliente/solicitar',
       icon: PlusCircle,
     },
     {

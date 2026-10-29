@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ACCEPTANCE_CUTOFF_MINUTES,
   getServicePeriodWindow,
+  getServiceRequestSchedulingWindow,
   serviceSlotId,
   SERVICE_TIME_ZONE,
 } from './service-period-policy'
@@ -25,5 +26,23 @@ describe('service period policy', () => {
     expect(() => getServicePeriodWindow(date, 'AFTERNOON')).toThrow(
       'Data de atendimento inválida.',
     )
+  })
+
+  it('rejeita período depois do corte e datas além de 90 dias', () => {
+    expect(() =>
+      getServiceRequestSchedulingWindow(
+        '2026-11-05',
+        'MORNING',
+        new Date('2026-11-05T10:30:00.000Z'),
+      ),
+    ).toThrow('pelo menos 30 minutos')
+
+    expect(() =>
+      getServiceRequestSchedulingWindow(
+        '2027-02-10',
+        'MORNING',
+        new Date('2026-11-05T09:00:00.000Z'),
+      ),
+    ).toThrow('próximos 90 dias')
   })
 })

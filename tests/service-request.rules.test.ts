@@ -74,6 +74,10 @@ function serviceFor(
     firestore,
     getActorId: () => actorId,
     coordinator,
+    listCatalog: async () => ({
+      categories: [{ id: categoryId, name: 'Manutenção', active: true, order: 1 }],
+      specialties: [{ id: specialtyId, categoryId, name: 'Eletricista', active: true, order: 1 }],
+    }),
   })
 }
 
@@ -156,6 +160,7 @@ function requestSummary(
   const timestamp = new Date()
   return {
     requestId,
+    operationKey: requestId,
     clientId,
     categoryId,
     specialtyId,
@@ -204,6 +209,8 @@ async function seedScenario(requestIds = ['request-1']) {
       [professionalC, ['professional']],
     ] as const) {
       await setDoc(doc(firestore, 'users', userId), {
+        name: userId === clientId ? 'Cliente Exemplo' : `Profissional ${userId}`,
+        email: `${userId}@example.com`,
         roles,
         activeMode: roles[0],
         professionalProfileStatus:
@@ -213,6 +220,24 @@ async function seedScenario(requestIds = ['request-1']) {
     await setDoc(doc(firestore, 'adminAccess', adminId), {
       active: true,
       schemaVersion: 1,
+    })
+    await setDoc(doc(firestore, 'categories', categoryId), {
+      name: 'Manutenção',
+      active: true,
+      order: 1,
+    })
+    await setDoc(doc(firestore, 'specialties', specialtyId), {
+      categoryId,
+      name: 'Eletricista',
+      active: true,
+      order: 1,
+    })
+    await setDoc(doc(firestore, 'clientProfiles', clientId), {
+      ownerId: clientId,
+      phone: '',
+      profileImage: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     })
 
     for (const professionalId of [professionalA, professionalB, professionalC]) {
@@ -259,6 +284,7 @@ async function seedScenario(requestIds = ['request-1']) {
       )
       await setDoc(doc(firestore, 'serviceRequestPrivate', requestId), {
         requestId,
+        operationKey: requestId,
         clientId,
         contactName: 'Cliente Exemplo',
         contactPhone: '11999998888',
@@ -303,6 +329,194 @@ afterAll(async () => {
 })
 
 describe('service request transactional proof', () => {
+  function creationInput(operationKey = 'request-operation-key-000001') {
+    return {
+      operationKey,
+      specialtyId,
+      description: 'Preciso revisar duas tomadas que deixaram de funcionar.',
+      city: 'Campinas',
+      stateCode: 'SP',
+      cityIbgeCode,
+      street: 'Rua das Flores',
+      number: '100',
+      complement: '',
+      neighborhood: 'Centro',
+      postalCode: '13000000',
+      serviceDate,
+      period: 'MORNING' as const,
+      contactName: 'Cliente Exemplo',
+      contactPhone: '',
+    }
+  }
+
+  it('cria resumo, dados privados, rodada e histórico atomicamente e recupera o pedido', async () => {
+    await seedScenario([])
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const service = serviceFor(clientFirestore, clientId)
+
+    const result = await service.createRequest(creationInput())
+
+    expect(result.idempotent).toBe(false)
+    expect(result.request).toMatchObject({ status: 'OPEN', round: 1, clientId })
+    await expect(service.getOwnRequest(result.request.requestId)).resolves.toMatchObject({
+      requestId: result.request.requestId,
+      status: 'OPEN',
+    })
+    let persisted: Record<string, Record<string, unknown> | undefined> = {}
+    await inspect(async (firestore) => {
+      persisted = {
+        summary: (await getDoc(doc(firestore, 'serviceRequests', result.request.requestId))).data(),
+        privateData: (await getDoc(doc(firestore, 'serviceRequestPrivate', result.request.requestId))).data(),
+        round: (await getDoc(doc(firestore, 'serviceRequests', result.request.requestId, 'rounds', 'round-1'))).data(),
+        event: (await getDoc(doc(firestore, 'serviceRequests', result.request.requestId, 'events', 'created'))).data(),
+      }
+    })
+    expect(persisted.summary).not.toHaveProperty('address')
+    expect(persisted.summary).not.toHaveProperty('contactPhone')
+    expect(persisted.privateData?.address).toMatchObject({ street: 'Rua das Flores' })
+    expect(persisted.round).toMatchObject({ status: 'OPEN', reason: 'INITIAL' })
+    expect(persisted.event).toMatchObject({ type: 'REQUEST_CREATED', actorRole: 'CLIENT' })
+    const opportunities = await serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    ).listOpenOpportunities({
+      categoryId,
+      specialtyId,
+      cityIbgeCode,
+      serviceDate,
+      period: 'MORNING',
+    })
+    expect(opportunities.map((request) => request.requestId)).toEqual([
+      result.request.requestId,
+    ])
+  })
+
+  it('torna clique duplo e retry idempotentes sem duplicar documentos', async () => {
+    await seedScenario([])
+    const service = serviceFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+    )
+    const input = creationInput('request-operation-key-000002')
+
+    const results = await Promise.all([service.createRequest(input), service.createRequest(input)])
+    expect(results.map((result) => result.idempotent)).toEqual([false, false])
+    await expect(service.createRequest(input)).resolves.toMatchObject({ idempotent: true })
+    let counts = { requests: 0, events: 0 }
+    await inspect(async (firestore) => {
+      counts = {
+        requests: (await getDocs(collection(firestore, 'serviceRequests'))).size,
+        events: (await getDocs(collection(firestore, 'serviceRequests', input.operationKey, 'events'))).size,
+      }
+    })
+    expect(counts).toEqual({ requests: 1, events: 1 })
+  })
+
+  it('rejeita catálogo inativo, criação parcial e acesso cruzado aos dados privados', async () => {
+    await seedScenario([])
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const service = serviceFor(clientFirestore, clientId)
+    await inspect((firestore) => updateDoc(doc(firestore, 'specialties', specialtyId), { active: false }))
+    await expect(service.createRequest(creationInput('request-operation-key-000003'))).rejects.toMatchObject({ code: 'permission-denied' })
+
+    await inspect((firestore) => updateDoc(doc(firestore, 'specialties', specialtyId), { active: true }))
+    const batch = writeBatch(clientFirestore)
+    batch.set(doc(clientFirestore, 'serviceRequests', 'request-operation-key-000004'), {
+      ...requestSummary('request-operation-key-000004'),
+      operationKey: 'request-operation-key-000004',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    await assertFails(batch.commit())
+
+    const created = await service.createRequest(creationInput('request-operation-key-000005'))
+    const privateReference = doc(clientFirestore, 'serviceRequestPrivate', created.request.requestId)
+    await assertSucceeds(getDoc(privateReference))
+    await assertFails(
+      getDoc(doc(testEnvironment.authenticatedContext(professionalA).firestore(), 'serviceRequestPrivate', created.request.requestId)),
+    )
+    await assertFails(
+      getDoc(doc(testEnvironment.authenticatedContext('other-client').firestore(), 'serviceRequestPrivate', created.request.requestId)),
+    )
+  })
+
+  it('exige somente a prontidão persistida do cliente, sem telefone ou avatar', async () => {
+    await seedScenario([])
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const service = serviceFor(clientFirestore, clientId)
+
+    await expect(
+      service.createRequest(creationInput('request-operation-key-000006')),
+    ).resolves.toMatchObject({ request: { status: 'OPEN' } })
+
+    await testEnvironment.clearFirestore()
+    await seedScenario([])
+    await inspect((firestore) =>
+      deleteDoc(doc(firestore, 'clientProfiles', clientId)),
+    )
+    await expect(
+      serviceFor(
+        testEnvironment.authenticatedContext(clientId).firestore(),
+        clientId,
+      ).createRequest(creationInput('request-operation-key-000007')),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+  })
+
+  it('permite somente ao dono cancelar o pedido OPEN com rodada e histórico atômicos', async () => {
+    await seedScenario([])
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const service = serviceFor(clientFirestore, clientId)
+    const created = await service.createRequest(
+      creationInput('request-operation-key-000008'),
+    )
+
+    await expect(
+      serviceFor(
+        testEnvironment.authenticatedContext('other-client').firestore(),
+        'other-client',
+      ).cancelOwnRequest(created.request.requestId),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+
+    const cancelled = await service.cancelOwnRequest(created.request.requestId)
+    expect(cancelled).toMatchObject({
+      idempotent: false,
+      request: { status: 'CANCELLED', clientId },
+    })
+    await expect(
+      service.cancelOwnRequest(created.request.requestId),
+    ).resolves.toMatchObject({ idempotent: true, request: { status: 'CANCELLED' } })
+
+    let persisted: Record<string, Record<string, unknown> | undefined> = {}
+    await inspect(async (firestore) => {
+      persisted = {
+        round: (await getDoc(doc(firestore, 'serviceRequests', created.request.requestId, 'rounds', 'round-1'))).data(),
+        event: (await getDoc(doc(firestore, 'serviceRequests', created.request.requestId, 'events', 'cancelled-by-client'))).data(),
+      }
+    })
+    expect(persisted.round).toMatchObject({ status: 'CLOSED', closedReason: 'CLIENT_CANCELLATION' })
+    expect(persisted.event).toMatchObject({ type: 'REQUEST_CANCELLED', actorRole: 'CLIENT' })
+    await expect(
+      service.listRequestHistory({ requestId: created.request.requestId }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'REQUEST_CREATED', actorRole: 'CLIENT' }),
+        expect.objectContaining({ type: 'REQUEST_CANCELLED', actorRole: 'CLIENT' }),
+      ]),
+    )
+    await expect(
+      serviceFor(
+        testEnvironment.authenticatedContext(professionalA).firestore(),
+        professionalA,
+      ).listOpenOpportunities({
+        categoryId,
+        specialtyId,
+        cityIbgeCode,
+        serviceDate,
+        period: 'MORNING',
+      }),
+    ).resolves.toEqual([])
+  })
+
   it('permite a query proposta somente para profissional aprovado e mantém o resumo sem dados privados', async () => {
     await seedScenario()
     const approved = serviceFor(

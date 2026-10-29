@@ -118,7 +118,7 @@ describe('ClientHomePage', () => {
     ).toHaveFocus()
   })
 
-  it('filtra com teclado, prepara a seleção e não simula uma solicitação', async () => {
+  it('filtra com teclado e preserva a especialidade ao abrir a solicitação', async () => {
     const user = userEvent.setup()
     renderPage()
 
@@ -131,12 +131,11 @@ describe('ClientHomePage', () => {
     await user.keyboard('{Enter}')
 
     expect(gardener).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('status')).toHaveTextContent(
-      /em breve você poderá continuar.*local.*data.*período/i,
+    expect(screen.getByRole('status')).toHaveTextContent(/continue para informar.*local.*data.*período/i)
+    expect(screen.getByRole('link', { name: 'Continuar para a solicitação' })).toHaveAttribute(
+      'href',
+      '/cliente/solicitar?specialty=gardener',
     )
-    expect(
-      screen.getByRole('button', { name: 'Continuar para a solicitação' }),
-    ).toBeDisabled()
   })
 
   it('trata nenhum resultado e permite limpar o filtro', async () => {
