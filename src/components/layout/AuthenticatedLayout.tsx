@@ -78,12 +78,9 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
     },
     {
       label: 'Oportunidades',
-      href: '/profissional',
+      href: '/profissional/oportunidades',
       icon: Compass,
       showOnMobile: false,
-      disabled: true,
-      disabledReason:
-        'Disponível para profissionais elegíveis em uma próxima etapa.',
     },
     {
       label: 'Atendimentos',

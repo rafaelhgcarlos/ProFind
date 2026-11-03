@@ -26,7 +26,10 @@ import {
 } from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
-import type { TransactionCoordinator } from '../src/repositories/service-request.repository'
+import type {
+  OpportunityFeedPageSnapshot,
+  TransactionCoordinator,
+} from '../src/repositories/service-request.repository'
 import { createProfessionalAvailabilityRepository } from '../src/repositories/professional-availability.repository'
 import { createProfessionalAvailabilityService } from '../src/services/professional-availability.service'
 import { createProfessionalReviewService } from '../src/services/professional-review.service'
@@ -37,7 +40,10 @@ import {
   roundDocumentId,
   serviceSlotId,
 } from '../src/services/service-period-policy'
-import { ServiceRequestError } from '../src/types/service-request'
+import {
+  ServiceRequestError,
+  type OpportunityFeedCursor,
+} from '../src/types/service-request'
 
 const projectId = 'profind-service-request-rules-test'
 const clientId = 'client-owner'
@@ -84,6 +90,55 @@ function serviceFor(
       specialties: [{ id: specialtyId, categoryId, name: 'Eletricista', active: true, order: 1 }],
     }),
   })
+}
+
+function feedFor(
+  service: ReturnType<typeof serviceFor>,
+  pageSize = 12,
+  cursor: OpportunityFeedCursor | null = null,
+) {
+  const snapshots: OpportunityFeedPageSnapshot[] = []
+  const waiters: Array<{
+    predicate(snapshot: OpportunityFeedPageSnapshot): boolean
+    resolve(snapshot: OpportunityFeedPageSnapshot): void
+    reject(error: unknown): void
+  }> = []
+  let subscriptionError: unknown
+  let eligible = false
+  const unsubscribe = service.subscribeOpportunityFeed({
+    pageSize,
+    cursor,
+    onAccessChange(value) {
+      eligible = value
+    },
+    onPage(snapshot) {
+      snapshots.push(snapshot)
+      for (const waiter of [...waiters]) {
+        if (!waiter.predicate(snapshot)) continue
+        waiters.splice(waiters.indexOf(waiter), 1)
+        waiter.resolve(snapshot)
+      }
+    },
+    onError(error) {
+      subscriptionError = error
+      for (const waiter of waiters.splice(0)) waiter.reject(error)
+    },
+  })
+
+  return {
+    unsubscribe,
+    isEligible: () => eligible,
+    waitForPage(
+      predicate: (snapshot: OpportunityFeedPageSnapshot) => boolean,
+    ) {
+      const existing = snapshots.find(predicate)
+      if (existing) return Promise.resolve(existing)
+      if (subscriptionError) return Promise.reject(subscriptionError)
+      return new Promise<OpportunityFeedPageSnapshot>((resolve, reject) => {
+        waiters.push({ predicate, resolve, reject })
+      })
+    },
+  }
 }
 
 function coordinatedBarrier(parties: number): TransactionCoordinator {
@@ -602,6 +657,149 @@ describe('service request transactional proof', () => {
         ),
       ),
     )
+  })
+
+  it('sincroniza o feed de A/B/C e remove a oportunidade após o primeiro aceite confirmado', async () => {
+    await seedScenario()
+    const professionals = [professionalA, professionalB, professionalC].map(
+      (professionalId) =>
+        serviceFor(
+          testEnvironment.authenticatedContext(professionalId).firestore(),
+          professionalId,
+        ),
+    )
+    const feeds = professionals.map((service) => feedFor(service))
+
+    try {
+      const initialPages = await Promise.all(
+        feeds.map((feed) =>
+          feed.waitForPage((snapshot) =>
+            snapshot.page.items.some((item) => item.requestId === 'request-1'),
+          ),
+        ),
+      )
+      expect(
+        initialPages.every((snapshot) => snapshot.page.items.length === 1),
+      ).toBe(true)
+      expect(feeds.every((feed) => feed.isEligible())).toBe(true)
+
+      await professionals[1].acceptOpportunity({
+        requestId: 'request-1',
+        expectedRound: 1,
+      })
+      await Promise.all(
+        feeds.map((feed) =>
+          feed.waitForPage(
+            (snapshot) =>
+              !snapshot.page.items.some(
+                (item) => item.requestId === 'request-1',
+              ),
+          ),
+        ),
+      )
+      await expect(
+        professionals[0].acceptOpportunity({
+          requestId: 'request-1',
+          expectedRound: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'opportunity-taken' })
+    } finally {
+      feeds.forEach((feed) => feed.unsubscribe())
+    }
+  })
+
+  it('mantém a recusa isolada ao profissional e à rodada no feed', async () => {
+    await seedScenario()
+    const firstService = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const secondService = serviceFor(
+      testEnvironment.authenticatedContext(professionalB).firestore(),
+      professionalB,
+    )
+    await firstService.declineOpportunity({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+
+    const firstFeed = feedFor(firstService)
+    const secondFeed = feedFor(secondService)
+    try {
+      const [firstPage, secondPage] = await Promise.all([
+        firstFeed.waitForPage((snapshot) => snapshot.page.items.length === 0),
+        secondFeed.waitForPage((snapshot) =>
+          snapshot.page.items.some((item) => item.requestId === 'request-1'),
+        ),
+      ])
+      expect(firstPage.page.items).toEqual([])
+      expect(secondPage.page.items.map((item) => item.requestId)).toEqual([
+        'request-1',
+      ])
+    } finally {
+      firstFeed.unsubscribe()
+      secondFeed.unsubscribe()
+    }
+  })
+
+  it('limpa o feed em tempo real quando o profissional perde elegibilidade', async () => {
+    await seedScenario()
+    const service = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const feed = feedFor(service)
+    try {
+      await feed.waitForPage((snapshot) =>
+        snapshot.page.items.some((item) => item.requestId === 'request-1'),
+      )
+      await inspect((firestore) =>
+        updateDoc(
+          doc(
+            firestore,
+            'professionalOperationalProfiles',
+            professionalA,
+          ),
+          { reviewStatus: 'SUSPENDED', active: false },
+        ),
+      )
+      await feed.waitForPage((snapshot) => snapshot.page.items.length === 0)
+      expect(feed.isEligible()).toBe(false)
+    } finally {
+      feed.unsubscribe()
+    }
+  })
+
+  it('pagina listeners reais com cursor versionado e sem duplicar oportunidades', async () => {
+    const requestIds = Array.from(
+      { length: 13 },
+      (_, index) => `request-${String(index + 1).padStart(2, '0')}`,
+    )
+    await seedScenario(requestIds)
+    const service = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const firstFeed = feedFor(service, 5)
+    let secondFeed: ReturnType<typeof feedFor> | null = null
+    try {
+      const firstPage = await firstFeed.waitForPage(
+        (snapshot) => snapshot.page.items.length === 5,
+      )
+      expect(firstPage.page.nextCursor).not.toBeNull()
+      secondFeed = feedFor(service, 5, firstPage.page.nextCursor)
+      const secondPage = await secondFeed.waitForPage(
+        (snapshot) => snapshot.page.items.length === 5,
+      )
+      const ids = [
+        ...firstPage.page.items.map((item) => item.requestId),
+        ...secondPage.page.items.map((item) => item.requestId),
+      ]
+      expect(new Set(ids).size).toBe(ids.length)
+    } finally {
+      firstFeed.unsubscribe()
+      secondFeed?.unsubscribe()
+    }
   })
 
   it('remove do retorno slots indisponíveis, reservados, recusados e pedidos vencidos', async () => {

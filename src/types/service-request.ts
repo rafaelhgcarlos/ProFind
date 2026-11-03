@@ -34,6 +34,7 @@ export const SERVICE_EVENT_REASON_CODES = [
 
 export const SERVICE_EVENT_HISTORY_LIMIT = 50
 export const OPPORTUNITY_QUERY_VERSION = 1 as const
+export const OPPORTUNITY_FEED_CURSOR_VERSION = 1 as const
 
 export type ServiceRequestStatus = (typeof SERVICE_REQUEST_STATUSES)[number]
 export type ServicePeriod = (typeof SERVICE_PERIODS)[number]
@@ -147,6 +148,16 @@ export interface OpportunityPageCursor {
 export interface OpportunityPage {
   items: ProfessionalOpportunitySummary[]
   nextCursor: OpportunityPageCursor | null
+}
+
+export interface OpportunityFeedCursor {
+  version: typeof OPPORTUNITY_FEED_CURSOR_VERSION
+  page: number
+}
+
+export interface OpportunityFeedPage {
+  items: ProfessionalOpportunitySummary[]
+  nextCursor: OpportunityFeedCursor | null
 }
 
 export interface ProfessionalReservation {

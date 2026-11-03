@@ -5,6 +5,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   runTransaction,
@@ -15,6 +16,7 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type Firestore,
+  type Unsubscribe,
 } from 'firebase/firestore'
 
 import {
@@ -38,7 +40,10 @@ import {
 import {
   ServiceRequestError,
   SERVICE_EVENT_HISTORY_LIMIT,
+  OPPORTUNITY_FEED_CURSOR_VERSION,
   OPPORTUNITY_QUERY_VERSION,
+  type OpportunityFeedCursor,
+  type OpportunityFeedPage,
   type OpportunityPage,
   type OpportunityPageCursor,
   type ProfessionalOpportunitySummary,
@@ -47,6 +52,7 @@ import {
   type ServiceRequestPrivateData,
   type ServiceRequestSummary,
 } from '../types/service-request'
+import type { ServiceCatalog } from '../types/catalog'
 
 export interface TransactionCoordinator {
   afterRead(operation: 'create' | 'client-cancel' | 'accept' | 'refuse' | 'cancel', key: string): Promise<void>
@@ -68,6 +74,23 @@ export interface OpportunityQuery {
   cursor?: OpportunityPageCursor | null
 }
 
+export interface OpportunityFeedPageInput {
+  catalog: ServiceCatalog
+  pageSize?: number
+  cursor?: OpportunityFeedCursor | null
+}
+
+export interface OpportunityFeedPageSnapshot {
+  page: OpportunityFeedPage
+  fromCache: boolean
+}
+
+export interface OpportunityFeedListeners {
+  onAccessChange(eligible: boolean): void
+  onPage(snapshot: OpportunityFeedPageSnapshot): void
+  onError(error: unknown): void
+}
+
 export interface ServiceHistoryQuery {
   requestId: string
   actorId?: string
@@ -75,6 +98,7 @@ export interface ServiceHistoryQuery {
 }
 
 export const OPPORTUNITY_QUERY_LIMIT = 50
+export const OPPORTUNITY_FEED_PAGE_SIZE = 12
 
 export interface CreateRequestInput {
   operationKey: string
@@ -507,6 +531,24 @@ export function createServiceRequestRepository({
     )
   }
 
+  async function diagnoseClientCancellation(
+    requestId: string,
+    clientId: string,
+  ) {
+    const request = requestFromSnapshot(
+      await getDoc(doc(firestore, 'serviceRequests', requestId)),
+    )
+    if (request.clientId !== clientId) {
+      throw new ServiceRequestError('not-found', 'Solicitação não encontrada.')
+    }
+    if (request.status !== 'OPEN') {
+      throw new ServiceRequestError(
+        'not-open',
+        'Esta solicitação não está mais aberta para cancelamento.',
+      )
+    }
+  }
+
   async function getOwnRequest(requestId: string, clientId: string) {
     const snapshot = await getDoc(doc(firestore, 'serviceRequests', requestId))
     const request = requestFromSnapshot(snapshot)
@@ -876,6 +918,281 @@ export function createServiceRequestRepository({
               requestId: lastRequest.requestId,
             }
           : null,
+    }
+  }
+
+  function subscribeOpportunityFeedPage(
+    input: OpportunityFeedPageInput,
+    professionalId: string,
+    listeners: OpportunityFeedListeners,
+  ): Unsubscribe {
+    const feedPage = input.cursor?.page ?? 1
+    if (
+      input.cursor &&
+      (input.cursor.version !== OPPORTUNITY_FEED_CURSOR_VERSION ||
+        !Number.isSafeInteger(input.cursor.page) ||
+        input.cursor.page < 1)
+    ) {
+      throw new ServiceRequestError(
+        'validation',
+        'O cursor do feed de oportunidades é inválido.',
+      )
+    }
+    const pageLimit = opportunityPageSize(
+      input.pageSize ?? OPPORTUNITY_FEED_PAGE_SIZE,
+    )
+    const cumulativeLimit = Math.min(
+      pageLimit * feedPage,
+      OPPORTUNITY_QUERY_LIMIT,
+    )
+    const pageStart = (feedPage - 1) * pageLimit
+    const operationalReference = doc(
+      firestore,
+      'professionalOperationalProfiles',
+      professionalId,
+    )
+    const profileReference = doc(
+      firestore,
+      'professionalProfiles',
+      professionalId,
+    )
+    let operationalSnapshot: DocumentSnapshot<DocumentData> | null = null
+    let profileSnapshot: DocumentSnapshot<DocumentData> | null = null
+    let accessFingerprint = ''
+    let stopped = false
+    let emission = 0
+    let queryUnsubscribers: Unsubscribe[] = []
+
+    const clearRequestListeners = () => {
+      emission += 1
+      for (const unsubscribe of queryUnsubscribers) unsubscribe()
+      queryUnsubscribers = []
+    }
+
+    const emitEmptyPage = () => {
+      listeners.onPage({
+        page: { items: [], nextCursor: null },
+        fromCache: false,
+      })
+    }
+
+    const rebuildRequestListeners = () => {
+      if (stopped || !operationalSnapshot || !profileSnapshot) return
+      const operationalProfile = opportunityOperationalProfile(
+        operationalSnapshot.data(),
+      )
+      const professionalProfile = opportunityProfessionalProfile(
+        profileSnapshot.data(),
+      )
+      const eligible = hasCurrentApprovedProfessionalAccess({
+        professionalId,
+        operationalProfile,
+        professionalProfile,
+      })
+      listeners.onAccessChange(eligible)
+
+      if (!eligible || !operationalProfile) {
+        accessFingerprint = ''
+        clearRequestListeners()
+        emitEmptyPage()
+        return
+      }
+
+      const scopes = input.catalog.specialties
+        .filter(
+          (specialty) =>
+            operationalProfile.approvedCategoryIds.includes(
+              specialty.categoryId,
+            ) &&
+            operationalProfile.approvedSpecialtyIds.includes(specialty.id),
+        )
+        .flatMap((specialty) =>
+          operationalProfile.eligibleCityIbgeCodes.map((cityIbgeCode) => ({
+            categoryId: specialty.categoryId,
+            specialtyId: specialty.id,
+            cityIbgeCode,
+          })),
+        )
+      const nextFingerprint = JSON.stringify({
+        version: operationalProfile.profileVersion,
+        approvedVersion: operationalProfile.approvedVersion,
+        scopes,
+        feedPage,
+        pageLimit,
+      })
+      if (nextFingerprint === accessFingerprint) return
+
+      accessFingerprint = nextFingerprint
+      clearRequestListeners()
+      if (scopes.length === 0) {
+        emitEmptyPage()
+        return
+      }
+
+      const queryStates = new Map<
+        string,
+        {
+          ready: boolean
+          fromCache: boolean
+          documents: DocumentSnapshot<DocumentData>[]
+        }
+      >()
+      const currentEmission = emission
+
+      const emitMergedPage = async () => {
+        if (
+          stopped ||
+          currentEmission !== emission ||
+          Array.from(queryStates.values()).some((state) => !state.ready)
+        ) {
+          return
+        }
+
+        const requestsById = new Map<string, ServiceRequestSummary>()
+        for (const state of queryStates.values()) {
+          for (const document of state.documents) {
+            const request = requestFromSnapshot(document)
+            requestsById.set(request.requestId, request)
+          }
+        }
+        const requests = Array.from(requestsById.values()).sort(
+          (left, right) =>
+            left.acceptUntil.getTime() - right.acceptUntil.getTime() ||
+            left.requestId.localeCompare(right.requestId),
+        )
+        const items: ProfessionalOpportunitySummary[] = []
+
+        for (const request of requests) {
+          const slotId = serviceSlotId(request.serviceDate, request.period)
+          const [availability, reservation, refusal] = await Promise.all([
+            getDoc(
+              doc(
+                firestore,
+                'professionalAvailability',
+                professionalId,
+                'slots',
+                slotId,
+              ),
+            ),
+            getDoc(
+              doc(
+                firestore,
+                'professionalReservations',
+                professionalId,
+                'slots',
+                slotId,
+              ),
+            ),
+            getDoc(
+              doc(
+                firestore,
+                'serviceRequests',
+                request.requestId,
+                'rounds',
+                request.currentRoundId,
+                'refusals',
+                professionalId,
+              ),
+            ),
+          ])
+          if (stopped || currentEmission !== emission) return
+          if (
+            getOpportunityIneligibilityReason(request, {
+              professionalId,
+              operationalProfile,
+              professionalProfile,
+              availability: opportunityAvailabilitySlot(availability.data()),
+              reservationExists: reservation.exists(),
+              refusalExists: refusal.exists(),
+              now: now(),
+            }) === null
+          ) {
+            items.push(professionalOpportunitySummary(request))
+          }
+        }
+
+        const sourceMayHaveMore = Array.from(queryStates.values()).some(
+          (state) =>
+            state.documents.length === cumulativeLimit &&
+            cumulativeLimit < OPPORTUNITY_QUERY_LIMIT,
+        )
+        const pageItems = items.slice(pageStart, pageStart + pageLimit)
+        const hasMore =
+          items.length > pageStart + pageLimit || sourceMayHaveMore
+        listeners.onPage({
+          page: {
+            items: pageItems,
+            nextCursor:
+              hasMore
+                ? {
+                    version: OPPORTUNITY_FEED_CURSOR_VERSION,
+                    page: feedPage + 1,
+                  }
+                : null,
+          },
+          fromCache: Array.from(queryStates.values()).some(
+            (state) => state.fromCache,
+          ),
+        })
+      }
+
+      for (const scope of scopes) {
+        const scopeKey = `${scope.categoryId}:${scope.specialtyId}:${scope.cityIbgeCode}`
+        queryStates.set(scopeKey, {
+          ready: false,
+          fromCache: false,
+          documents: [],
+        })
+        const constraints = [
+          where('status', '==', 'OPEN'),
+          where('categoryId', '==', scope.categoryId),
+          where('specialtyId', '==', scope.specialtyId),
+          where('cityIbgeCode', '==', scope.cityIbgeCode),
+          limit(cumulativeLimit),
+        ]
+        queryUnsubscribers.push(
+          onSnapshot(
+            query(
+              collection(firestore, 'serviceRequests'),
+              ...constraints,
+            ),
+            (snapshot) => {
+              queryStates.set(scopeKey, {
+                ready: true,
+                fromCache: snapshot.metadata.fromCache,
+                documents: snapshot.docs,
+              })
+              void emitMergedPage().catch(listeners.onError)
+            },
+            listeners.onError,
+          ),
+        )
+      }
+    }
+
+    const accessError = (error: unknown) => listeners.onError(error)
+    const unsubscribeOperational = onSnapshot(
+      operationalReference,
+      (snapshot) => {
+        operationalSnapshot = snapshot
+        rebuildRequestListeners()
+      },
+      accessError,
+    )
+    const unsubscribeProfile = onSnapshot(
+      profileReference,
+      (snapshot) => {
+        profileSnapshot = snapshot
+        rebuildRequestListeners()
+      },
+      accessError,
+    )
+
+    return () => {
+      stopped = true
+      clearRequestListeners()
+      unsubscribeOperational()
+      unsubscribeProfile()
     }
   }
 
@@ -1371,11 +1688,13 @@ export function createServiceRequestRepository({
   return {
     assertProfessionalOpportunityAccess,
     diagnoseOpportunityAction,
+    diagnoseClientCancellation,
     getOwnRequest,
     createRequest,
     cancelOwnRequest,
     listRequestHistory,
     listOpenOpportunities,
+    subscribeOpportunityFeedPage,
     acceptOpportunity: acceptRequest,
     declineOpportunity: refuseRequest,
     acceptRequest,

@@ -60,12 +60,6 @@ const OnboardingPage = lazy(() =>
   })),
 )
 
-const ModeHomePage = lazy(() =>
-  import('../features/onboarding/pages/ModeHomePage').then((module) => ({
-    default: module.ModeHomePage,
-  })),
-)
-
 const ProfessionalProfilePage = lazy(() =>
   import('../features/professional-profile/pages/ProfessionalProfilePage').then(
     (module) => ({ default: module.ProfessionalProfilePage }),
@@ -88,6 +82,12 @@ const ProfessionalAvailabilityPage = lazy(() =>
   import(
     '../features/professional-availability/pages/ProfessionalAvailabilityPage'
   ).then((module) => ({ default: module.ProfessionalAvailabilityPage })),
+)
+
+const ProfessionalOpportunitiesPage = lazy(() =>
+  import(
+    '../features/opportunities/pages/ProfessionalOpportunitiesPage'
+  ).then((module) => ({ default: module.ProfessionalOpportunitiesPage })),
 )
 
 const ClientProfilePage = lazy(() =>
@@ -239,7 +239,15 @@ export function AppRouter() {
               path="/profissional"
               element={
                 <Suspense fallback={<RouteFallback />}>
-                  <ModeHomePage mode="professional" />
+                  <ProfessionalOpportunitiesPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/profissional/oportunidades"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ProfessionalOpportunitiesPage />
                 </Suspense>
               }
             />

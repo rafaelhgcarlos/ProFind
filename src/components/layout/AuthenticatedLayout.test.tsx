@@ -86,10 +86,9 @@ describe('layouts autenticados', () => {
     expect(screen.getAllByRole('link', { name: 'Perfil' })).toHaveLength(2)
     expect(screen.getAllByRole('link', { name: 'Análise' })).toHaveLength(2)
     expect(screen.getAllByRole('link', { name: 'Ajuda' })).toHaveLength(2)
-    expect(screen.queryByRole('link', { name: 'Oportunidades' })).not.toBeInTheDocument()
-    expect(screen.getByTitle(/profissionais elegíveis.*próxima etapa/i)).toHaveAttribute(
-      'title',
-      expect.stringMatching(/profissionais elegíveis.*próxima etapa/i),
+    expect(screen.getByRole('link', { name: 'Oportunidades' })).toHaveAttribute(
+      'href',
+      '/profissional/oportunidades',
     )
     expect(screen.queryByText('Mensagens')).not.toBeInTheDocument()
     expect(screen.getByText('Conteúdo profissional')).toBeInTheDocument()

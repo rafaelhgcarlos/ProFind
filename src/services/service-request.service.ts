@@ -8,6 +8,7 @@ import {
   type CancelAssignmentInput,
   type CreateRequestInput,
   type DeclineOpportunityInput,
+  type OpportunityFeedPageSnapshot,
   type OpportunityQuery,
   type RefuseRequestInput,
   type ServiceHistoryQuery,
@@ -16,7 +17,11 @@ import {
 import { listAvailableCatalog } from './catalog.service'
 import { getServiceRequestSchedulingWindow } from './service-period-policy'
 import type { ServiceCatalog } from '../types/catalog'
-import { ServiceRequestError, type ServicePeriod } from '../types/service-request'
+import {
+  ServiceRequestError,
+  type OpportunityFeedCursor,
+  type ServicePeriod,
+} from '../types/service-request'
 import { isIbgeMunicipalityCodeForState } from '../utils/ibge'
 
 export interface ServiceRequestServiceDependencies {
@@ -44,6 +49,14 @@ export interface ServiceRequestCreationInput {
   period: ServicePeriod
   contactName: string
   contactPhone: string
+}
+
+export interface OpportunityFeedSubscriptionInput {
+  pageSize?: number
+  cursor?: OpportunityFeedCursor | null
+  onAccessChange(eligible: boolean): void
+  onPage(snapshot: OpportunityFeedPageSnapshot): void
+  onError(error: ServiceRequestError): void
 }
 
 const operationKeyPattern = /^[a-zA-Z0-9_-]{20,80}$/
@@ -174,6 +187,13 @@ function normalizeOperationError(error: unknown) {
       { cause: error },
     )
   }
+  if (code === 'failed-precondition') {
+    return new ServiceRequestError(
+      'unavailable',
+      'A consulta ainda não está disponível neste ambiente. Verifique a configuração dos índices do Firestore.',
+      { cause: error },
+    )
+  }
   return new ServiceRequestError(
     'unknown',
     'Não foi possível concluir a operação.',
@@ -205,6 +225,26 @@ export function createServiceRequestService(
     try {
       return await operation()
     } catch (error) {
+      throw normalizeOperationError(error)
+    }
+  }
+
+  async function safelyCancelOwnRequest(
+    requestId: string,
+    clientId: string,
+  ) {
+    try {
+      return await repository.cancelOwnRequest(requestId, clientId)
+    } catch (error) {
+      if (externalErrorCode(error) === 'permission-denied') {
+        try {
+          await repository.diagnoseClientCancellation(requestId, clientId)
+        } catch (diagnosisError) {
+          if (diagnosisError instanceof ServiceRequestError) {
+            throw diagnosisError
+          }
+        }
+      }
       throw normalizeOperationError(error)
     }
   }
@@ -306,7 +346,7 @@ export function createServiceRequestService(
 
     cancelOwnRequest(requestId: string) {
       const clientId = actorId()
-      return safely(() => repository.cancelOwnRequest(requestId, clientId))
+      return safelyCancelOwnRequest(requestId, clientId)
     },
 
     listRequestHistory(input: Omit<ServiceHistoryQuery, 'actorId'> & { ownEventsOnly?: boolean }) {
@@ -325,6 +365,36 @@ export function createServiceRequestService(
       return safely(() =>
         repository.listOpenOpportunities(input, professionalId),
       )
+    },
+
+    subscribeOpportunityFeed(input: OpportunityFeedSubscriptionInput) {
+      const professionalId = actorId()
+      let active = true
+      let unsubscribe: (() => void) | undefined
+      void (dependencies.listCatalog?.() ?? listAvailableCatalog())
+        .then((catalog) => {
+          if (!active) return
+          unsubscribe = repository.subscribeOpportunityFeedPage(
+            {
+              catalog,
+              pageSize: input.pageSize,
+              cursor: input.cursor,
+            },
+            professionalId,
+            {
+              onAccessChange: input.onAccessChange,
+              onPage: input.onPage,
+              onError: (error) => input.onError(normalizeOperationError(error)),
+            },
+          )
+        })
+        .catch((error: unknown) => {
+          if (active) input.onError(normalizeOperationError(error))
+        })
+      return () => {
+        active = false
+        unsubscribe?.()
+      }
     },
 
     acceptOpportunity,
@@ -377,6 +447,9 @@ export const serviceRequestService = {
   },
   listOpenOpportunities(input: OpportunityQuery) {
     return getDefaultService().listOpenOpportunities(input)
+  },
+  subscribeOpportunityFeed(input: OpportunityFeedSubscriptionInput) {
+    return getDefaultService().subscribeOpportunityFeed(input)
   },
   acceptOpportunity(input: Omit<AcceptOpportunityInput, 'professionalId'>) {
     return getDefaultService().acceptOpportunity(input)

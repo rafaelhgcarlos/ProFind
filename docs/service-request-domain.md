@@ -155,6 +155,8 @@ Não há script de migração nesta entrega e nenhum dado remoto é alterado.
 - #32: criação e manutenção administrativa do contrato operacional.
 - #14: disponibilidade e compatibilidade profissional.
 - #17: use cases de aceite/recusa e provas concorrentes documentados em
-  `docs/opportunity-actions.md`; #13 permanece responsável pela interface do feed.
+  `docs/opportunity-actions.md`.
+- #13: feed profissional em tempo real, paginação e ciclo de listeners
+  documentados em `docs/opportunity-feed.md`.
 - #21: experiência de cancelamento e substituição.
 - #34: pendências e intervenção administrativa.
