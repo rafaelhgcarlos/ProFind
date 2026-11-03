@@ -97,15 +97,29 @@ As Rules usam leituras cruzadas (`get`, `getAfter`, `existsAfter`) e por isso as
 
 ## Consultas e índices
 
-A consulta proposta para o feed usa:
+A consulta versionada `OPPORTUNITY_QUERY_VERSION = 1` usa:
 
 - `status == OPEN`;
 - igualdade em `categoryId`, `specialtyId`, `cityIbgeCode`, `serviceDate` e `period`;
 - `acceptUntil > agora`;
-- ordenação crescente por `acceptUntil`.
-- limite de 50 documentos por consulta.
+- ordenação crescente por `acceptUntil` e pelo ID do documento;
+- cursor composto por versão, `acceptUntil` e `requestId`;
+- limite configurável de 1 a 50 documentos por consulta, exigido pelas Rules.
 
-O índice composto correspondente está em `firestore.indexes.json`. O emulador executa a consulta real. O resumo é deliberadamente seguro para leitura por qualquer profissional operacionalmente aprovado; autorização de aceite nunca depende de filtros do frontend.
+Antes da query, o repository lê somente o perfil operacional/público e os
+documentos determinísticos do slot do próprio profissional. Depois da página,
+lê a eventual recusa do profissional para cada resumo retornado. Não existe
+varredura global nem escrita por candidato. A política compartilhada remove do
+retorno recusas da rodada atual, o profissional excluído após cancelamento,
+slot indisponível ou reservado e pedido fora do prazo. A nova rodada não herda
+recusas anteriores.
+
+O índice composto correspondente, incluindo `__name__`, está versionado em
+`firestore.indexes.json`. O emulador executa a query real e prova o cursor. O
+retorno profissional é uma projeção que omite `clientId`, `operationKey`,
+endereço, contato e observações. As Rules autorizam somente profissionais com
+aprovação atual e ativa; a transação de aceite repete toda a política e continua
+sendo a autoridade final.
 
 ## Prova no emulador
 
@@ -140,6 +154,7 @@ Não há script de migração nesta entrega e nenhum dado remoto é alterado.
 - #43/#51: versão do perfil, submissão e invalidação da aprovação após edição relevante.
 - #32: criação e manutenção administrativa do contrato operacional.
 - #14: disponibilidade e compatibilidade profissional.
-- #17/#13: feed e aceite pela interface.
+- #17: use cases de aceite/recusa e provas concorrentes documentados em
+  `docs/opportunity-actions.md`; #13 permanece responsável pela interface do feed.
 - #21: experiência de cancelamento e substituição.
 - #34: pendências e intervenção administrativa.

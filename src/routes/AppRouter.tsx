@@ -84,6 +84,12 @@ const ProfessionalReviewPage = lazy(() =>
   ),
 )
 
+const ProfessionalAvailabilityPage = lazy(() =>
+  import(
+    '../features/professional-availability/pages/ProfessionalAvailabilityPage'
+  ).then((module) => ({ default: module.ProfessionalAvailabilityPage })),
+)
+
 const ClientProfilePage = lazy(() =>
   import('../features/client-profile/pages/ClientProfilePage').then(
     (module) => ({ default: module.ClientProfilePage }),
@@ -258,6 +264,14 @@ export function AppRouter() {
               element={
                 <Suspense fallback={<RouteFallback />}>
                   <ProfessionalReviewPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/profissional/disponibilidade"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ProfessionalAvailabilityPage />
                 </Suspense>
               }
             />

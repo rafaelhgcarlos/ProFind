@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  documentId,
   getDoc,
   getDocs,
   limit,
@@ -8,6 +9,7 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  startAfter,
   Timestamp,
   where,
   type DocumentData,
@@ -15,6 +17,14 @@ import {
   type Firestore,
 } from 'firebase/firestore'
 
+import {
+  getOpportunityIneligibilityReason,
+  hasCurrentApprovedProfessionalAccess,
+  opportunityAvailabilitySlot,
+  opportunityOperationalProfile,
+  opportunityProfessionalProfile,
+  type OpportunityEligibilityContext,
+} from '../services/opportunity-eligibility'
 import {
   assignmentDocumentId,
   assignmentEventId,
@@ -28,7 +38,10 @@ import {
 import {
   ServiceRequestError,
   SERVICE_EVENT_HISTORY_LIMIT,
-  type ProfessionalOperationalProfile,
+  OPPORTUNITY_QUERY_VERSION,
+  type OpportunityPage,
+  type OpportunityPageCursor,
+  type ProfessionalOpportunitySummary,
   type ServicePeriod,
   type ServiceRequestEvent,
   type ServiceRequestPrivateData,
@@ -51,6 +64,8 @@ export interface OpportunityQuery {
   cityIbgeCode: string
   serviceDate: string
   period: ServicePeriod
+  pageSize?: number
+  cursor?: OpportunityPageCursor | null
 }
 
 export interface ServiceHistoryQuery {
@@ -87,13 +102,15 @@ export interface CancelledClientRequestResult {
   idempotent: boolean
 }
 
-export interface AcceptRequestInput {
+export interface AcceptOpportunityInput {
   requestId: string
   professionalId: string
   expectedRound: number
 }
 
-export type RefuseRequestInput = AcceptRequestInput
+export type DeclineOpportunityInput = AcceptOpportunityInput
+export type AcceptRequestInput = AcceptOpportunityInput
+export type RefuseRequestInput = DeclineOpportunityInput
 
 export interface CancelAssignmentInput {
   requestId: string
@@ -231,79 +248,69 @@ function historyPageSize(pageSize?: number) {
   return Math.max(1, Math.min(Math.trunc(pageSize), SERVICE_EVENT_HISTORY_LIMIT))
 }
 
-function operationalProfile(data: DocumentData): ProfessionalOperationalProfile {
-  return {
-    professionalId: stringValue(data, 'professionalId'),
-    reviewStatus: stringValue(
-      data,
-      'reviewStatus',
-    ) as ProfessionalOperationalProfile['reviewStatus'],
-    active: data.active === true,
-    profileVersion: typeof data.profileVersion === 'number' ? data.profileVersion : 0,
-    approvedVersion:
-      typeof data.approvedVersion === 'number' ? data.approvedVersion : null,
-    approvedCategoryIds: stringArray(data, 'approvedCategoryIds'),
-    approvedSpecialtyIds: stringArray(data, 'approvedSpecialtyIds'),
-    approvedBaseCityIbgeCode: stringValue(data, 'approvedBaseCityIbgeCode'),
-    approvedSelectedCityIbgeCodes: stringArray(
-      data,
-      'approvedSelectedCityIbgeCodes',
-    ),
-    eligibleCityIbgeCodes: stringArray(data, 'eligibleCityIbgeCodes'),
-  }
-}
-
-function sameStrings(first: string[], second: unknown) {
-  return (
-    Array.isArray(second) &&
-    first.length === second.length &&
-    first.every((value, index) => second[index] === value)
-  )
-}
-
-function assertApprovedMatch(
-  request: ServiceRequestSummary,
+function eligibilityContext(
   professionalId: string,
   operationalData: DocumentData | undefined,
   profileData: DocumentData | undefined,
+  availabilityData: DocumentData | undefined,
+  reservationExists: boolean,
+  refusalExists: boolean,
+  currentTime: Date,
+): OpportunityEligibilityContext {
+  return {
+    professionalId,
+    operationalProfile: opportunityOperationalProfile(operationalData),
+    professionalProfile: opportunityProfessionalProfile(profileData),
+    availability: opportunityAvailabilitySlot(availabilityData),
+    reservationExists,
+    refusalExists,
+    now: currentTime,
+  }
+}
+
+function assertEligibleOpportunity(
+  request: ServiceRequestSummary,
+  context: OpportunityEligibilityContext,
 ) {
-  if (!operationalData || !profileData) {
+  const reason = getOpportunityIneligibilityReason(request, context)
+  if (!reason) return
+
+  if (reason === 'expired-request') {
     throw new ServiceRequestError(
-      'not-eligible',
-      'O profissional não possui aprovação operacional válida.',
+      'request-expired',
+      'O período permitido para aceitar esta solicitação terminou.',
     )
   }
-
-  const operational = operationalProfile(operationalData)
-  const profileBaseLocation = profileData.baseLocation as
-    | Record<string, unknown>
-    | undefined
-  const profileMatchesApprovedSnapshot =
-    profileData.ownerId === professionalId &&
-    sameStrings(operational.approvedCategoryIds, profileData.categoryIds) &&
-    sameStrings(operational.approvedSpecialtyIds, profileData.specialtyIds) &&
-    profileBaseLocation?.ibgeCode === operational.approvedBaseCityIbgeCode &&
-    sameStrings(
-      operational.approvedSelectedCityIbgeCodes,
-      profileData.selectedCityIbgeCodes ?? [],
-    )
-
-  if (
-    operational.professionalId !== professionalId ||
-    operational.reviewStatus !== 'APPROVED' ||
-    !operational.active ||
-    operational.approvedVersion === null ||
-    operational.approvedVersion !== operational.profileVersion ||
-    !profileMatchesApprovedSnapshot ||
-    !operational.approvedCategoryIds.includes(request.categoryId) ||
-    !operational.approvedSpecialtyIds.includes(request.specialtyId) ||
-    !operational.eligibleCityIbgeCodes.includes(request.cityIbgeCode)
-  ) {
+  if (reason === 'refused-round') {
     throw new ServiceRequestError(
-      'not-eligible',
-      'O profissional não atende aos critérios desta oportunidade.',
+      'already-refused',
+      'O profissional recusou esta rodada.',
     )
   }
+  if (reason === 'reserved-slot') {
+    throw new ServiceRequestError(
+      'slot-conflict',
+      'O período já está reservado.',
+    )
+  }
+  if (reason === 'professional-access') {
+    throw new ServiceRequestError(
+      'professional-restricted',
+      'Seu cadastro profissional não está aprovado, atualizado e ativo.',
+    )
+  }
+  if (reason === 'excluded-from-round') {
+    throw new ServiceRequestError(
+      'excluded-from-round',
+      'Você não participa desta rodada de distribuição.',
+    )
+  }
+  throw new ServiceRequestError(
+    'not-eligible',
+    reason === 'unavailable-slot'
+      ? 'O período não está disponível.'
+      : 'O profissional não atende aos critérios desta oportunidade.',
+  )
 }
 
 function assertOpenRound(request: ServiceRequestSummary, expectedRound: number) {
@@ -314,9 +321,15 @@ function assertOpenRound(request: ServiceRequestSummary, expectedRound: number) 
     )
   }
   if (request.status !== 'OPEN') {
+    if (request.status === 'ASSIGNED') {
+      throw new ServiceRequestError(
+        'opportunity-taken',
+        'Outro profissional já confirmou esta oportunidade.',
+      )
+    }
     throw new ServiceRequestError(
       'not-open',
-      'Esta solicitação não está mais aberta.',
+      'Esta oportunidade não está mais aberta para aceite.',
     )
   }
 }
@@ -330,11 +343,170 @@ function assertBeforeAcceptanceDeadline(request: ServiceRequestSummary, now: Dat
   }
 }
 
+function opportunityPageSize(pageSize?: number) {
+  if (pageSize === undefined || !Number.isFinite(pageSize)) {
+    return OPPORTUNITY_QUERY_LIMIT
+  }
+  return Math.max(1, Math.min(Math.trunc(pageSize), OPPORTUNITY_QUERY_LIMIT))
+}
+
+function assertValidOpportunityCursor(cursor?: OpportunityPageCursor | null) {
+  if (!cursor) return
+  if (
+    cursor.version !== OPPORTUNITY_QUERY_VERSION ||
+    !(cursor.acceptUntil instanceof Date) ||
+    Number.isNaN(cursor.acceptUntil.getTime()) ||
+    !cursor.requestId
+  ) {
+    throw new ServiceRequestError(
+      'validation',
+      'O cursor da consulta de oportunidades é inválido.',
+    )
+  }
+}
+
+function professionalOpportunitySummary(
+  request: ServiceRequestSummary,
+): ProfessionalOpportunitySummary {
+  return {
+    requestId: request.requestId,
+    categoryId: request.categoryId,
+    specialtyId: request.specialtyId,
+    cityIbgeCode: request.cityIbgeCode,
+    serviceDate: request.serviceDate,
+    period: request.period,
+    periodStartAt: request.periodStartAt,
+    acceptUntil: request.acceptUntil,
+    round: request.round,
+    reopenReason: request.reopenReason,
+  }
+}
+
 export function createServiceRequestRepository({
   firestore,
   now = () => new Date(),
   coordinator,
 }: RepositoryDependencies) {
+  async function assertProfessionalOpportunityAccess(professionalId: string) {
+    const [operationalSnapshot, profileSnapshot] = await Promise.all([
+      getDoc(
+        doc(
+          firestore,
+          'professionalOperationalProfiles',
+          professionalId,
+        ),
+      ),
+      getDoc(doc(firestore, 'professionalProfiles', professionalId)),
+    ])
+    const hasAccess = hasCurrentApprovedProfessionalAccess({
+      professionalId,
+      operationalProfile: opportunityOperationalProfile(
+        operationalSnapshot.data(),
+      ),
+      professionalProfile: opportunityProfessionalProfile(
+        profileSnapshot.data(),
+      ),
+    })
+    if (!hasAccess) {
+      throw new ServiceRequestError(
+        'professional-restricted',
+        'Seu cadastro profissional precisa estar aprovado, atualizado e ativo.',
+      )
+    }
+  }
+
+  async function diagnoseOpportunityAction(input: AcceptOpportunityInput) {
+    const requestReference = doc(
+      firestore,
+      'serviceRequests',
+      input.requestId,
+    )
+    const request = requestFromSnapshot(await getDoc(requestReference))
+    assertOpenRound(request, input.expectedRound)
+    if (request.clientId === input.professionalId) {
+      throw new ServiceRequestError(
+        'not-eligible',
+        'O cliente não pode aceitar o próprio pedido.',
+      )
+    }
+    if (request.excludedProfessionalIds.includes(input.professionalId)) {
+      throw new ServiceRequestError(
+        'excluded-from-round',
+        'Você não participa desta rodada de distribuição.',
+      )
+    }
+
+    const slotId = serviceSlotId(request.serviceDate, request.period)
+    const roundReference = doc(
+      requestReference,
+      'rounds',
+      request.currentRoundId,
+    )
+    const [
+      roundSnapshot,
+      operationalSnapshot,
+      profileSnapshot,
+      availabilitySnapshot,
+      refusalSnapshot,
+      reservationSnapshot,
+    ] = await Promise.all([
+      getDoc(roundReference),
+      getDoc(
+        doc(
+          firestore,
+          'professionalOperationalProfiles',
+          input.professionalId,
+        ),
+      ),
+      getDoc(
+        doc(firestore, 'professionalProfiles', input.professionalId),
+      ),
+      getDoc(
+        doc(
+          firestore,
+          'professionalAvailability',
+          input.professionalId,
+          'slots',
+          slotId,
+        ),
+      ),
+      getDoc(
+        doc(
+          roundReference,
+          'refusals',
+          input.professionalId,
+        ),
+      ),
+      getDoc(
+        doc(
+          firestore,
+          'professionalReservations',
+          input.professionalId,
+          'slots',
+          slotId,
+        ),
+      ),
+    ])
+    if (!roundSnapshot.exists() || roundSnapshot.data().status !== 'OPEN') {
+      throw new ServiceRequestError(
+        'round-changed',
+        'A rodada da oportunidade não está mais aberta.',
+      )
+    }
+    assertEligibleOpportunity(
+      request,
+      eligibilityContext(
+        input.professionalId,
+        operationalSnapshot.data(),
+        profileSnapshot.data(),
+        availabilitySnapshot.data(),
+        reservationSnapshot.exists(),
+        refusalSnapshot.exists(),
+        now(),
+      ),
+    )
+  }
+
   async function getOwnRequest(requestId: string, clientId: string) {
     const snapshot = await getDoc(doc(firestore, 'serviceRequests', requestId))
     const request = requestFromSnapshot(snapshot)
@@ -566,22 +738,145 @@ export function createServiceRequestRepository({
     return snapshot.docs.map(serviceEventFromSnapshot)
   }
 
-  async function listOpenOpportunities(input: OpportunityQuery) {
+  async function listOpenOpportunities(
+    input: OpportunityQuery,
+    professionalId: string,
+  ): Promise<OpportunityPage> {
+    assertValidOpportunityCursor(input.cursor)
+    const currentTime = now()
+    const slotId = serviceSlotId(input.serviceDate, input.period)
+    const operationalReference = doc(
+      firestore,
+      'professionalOperationalProfiles',
+      professionalId,
+    )
+    const profileReference = doc(
+      firestore,
+      'professionalProfiles',
+      professionalId,
+    )
+    const availabilityReference = doc(
+      firestore,
+      'professionalAvailability',
+      professionalId,
+      'slots',
+      slotId,
+    )
+    const reservationReference = doc(
+      firestore,
+      'professionalReservations',
+      professionalId,
+      'slots',
+      slotId,
+    )
+    const [operationalSnapshot, profileSnapshot, availabilitySnapshot, reservationSnapshot] =
+      await Promise.all([
+        getDoc(operationalReference),
+        getDoc(profileReference),
+        getDoc(availabilityReference),
+        getDoc(reservationReference),
+      ])
+    const baseContext = eligibilityContext(
+      professionalId,
+      operationalSnapshot.data(),
+      profileSnapshot.data(),
+      availabilitySnapshot.data(),
+      reservationSnapshot.exists(),
+      false,
+      currentTime,
+    )
+
+    if (!hasCurrentApprovedProfessionalAccess(baseContext)) {
+      throw new ServiceRequestError(
+        'not-eligible',
+        'Seu cadastro precisa estar aprovado, atual e ativo para consultar oportunidades.',
+      )
+    }
+    const operational = baseContext.operationalProfile!
+    if (
+      !operational.approvedCategoryIds.includes(input.categoryId) ||
+      !operational.approvedSpecialtyIds.includes(input.specialtyId) ||
+      !operational.eligibleCityIbgeCodes.includes(input.cityIbgeCode)
+    ) {
+      throw new ServiceRequestError(
+        'not-eligible',
+        'Os filtros não pertencem ao cadastro profissional aprovado.',
+      )
+    }
+    if (
+      !baseContext.availability ||
+      baseContext.availability.professionalId !== professionalId ||
+      baseContext.availability.serviceDate !== input.serviceDate ||
+      baseContext.availability.period !== input.period ||
+      !baseContext.availability.available ||
+      baseContext.reservationExists
+    ) {
+      return { items: [], nextCursor: null }
+    }
+
+    const pageLimit = opportunityPageSize(input.pageSize)
+    const constraints = [
+      where('status', '==', 'OPEN'),
+      where('categoryId', '==', input.categoryId),
+      where('specialtyId', '==', input.specialtyId),
+      where('cityIbgeCode', '==', input.cityIbgeCode),
+      where('serviceDate', '==', input.serviceDate),
+      where('period', '==', input.period),
+      where('acceptUntil', '>', Timestamp.fromDate(currentTime)),
+      orderBy('acceptUntil', 'asc'),
+      orderBy(documentId(), 'asc'),
+      ...(input.cursor
+        ? [
+            startAfter(
+              Timestamp.fromDate(input.cursor.acceptUntil),
+              input.cursor.requestId,
+            ),
+          ]
+        : []),
+      limit(pageLimit),
+    ]
     const snapshot = await getDocs(
-      query(
-        collection(firestore, 'serviceRequests'),
-        where('status', '==', 'OPEN'),
-        where('categoryId', '==', input.categoryId),
-        where('specialtyId', '==', input.specialtyId),
-        where('cityIbgeCode', '==', input.cityIbgeCode),
-        where('serviceDate', '==', input.serviceDate),
-        where('period', '==', input.period),
-        where('acceptUntil', '>', Timestamp.fromDate(now())),
-        orderBy('acceptUntil', 'asc'),
-        limit(OPPORTUNITY_QUERY_LIMIT),
+      query(collection(firestore, 'serviceRequests'), ...constraints),
+    )
+    const requests = snapshot.docs.map(requestFromSnapshot)
+    const refusalSnapshots = await Promise.all(
+      requests.map((request) =>
+        getDoc(
+          doc(
+            firestore,
+            'serviceRequests',
+            request.requestId,
+            'rounds',
+            request.currentRoundId,
+            'refusals',
+            professionalId,
+          ),
+        ),
       ),
     )
-    return snapshot.docs.map(requestFromSnapshot)
+    const items = requests
+      .filter(
+        (request, index) =>
+          getOpportunityIneligibilityReason(request, {
+            ...baseContext,
+            refusalExists: refusalSnapshots[index].exists(),
+            now: now(),
+          }) === null,
+      )
+      .map(professionalOpportunitySummary)
+    const lastRequest = requests.at(-1)
+
+    return {
+      items,
+      nextCursor:
+        requests.length === pageLimit && lastRequest
+          ? {
+              version: OPPORTUNITY_QUERY_VERSION,
+              acceptUntil: lastRequest.acceptUntil,
+              requestId: lastRequest.requestId,
+            }
+          : null,
+    }
   }
 
   async function acceptRequest({
@@ -639,7 +934,10 @@ export function createServiceRequestRepository({
         throw new ServiceRequestError('not-eligible', 'O cliente não pode aceitar o próprio pedido.')
       }
       if (request.excludedProfessionalIds.includes(professionalId)) {
-        throw new ServiceRequestError('not-eligible', 'O profissional está excluído desta rodada.')
+        throw new ServiceRequestError(
+          'excluded-from-round',
+          'Você não participa desta rodada de distribuição.',
+        )
       }
 
       const slotId = serviceSlotId(request.serviceDate, request.period)
@@ -691,26 +989,18 @@ export function createServiceRequestRepository({
       if (!roundSnapshot.exists() || roundData?.status !== 'OPEN') {
         throw new ServiceRequestError('round-changed', 'A rodada não está mais aberta.')
       }
-      assertApprovedMatch(
+      assertEligibleOpportunity(
         request,
-        professionalId,
-        operationalSnapshot.data(),
-        profileSnapshot.data(),
+        eligibilityContext(
+          professionalId,
+          operationalSnapshot.data(),
+          profileSnapshot.data(),
+          availabilitySnapshot.data(),
+          reservationSnapshot.exists(),
+          refusalSnapshot.exists(),
+          now(),
+        ),
       )
-      if (
-        !availabilitySnapshot.exists() ||
-        availabilitySnapshot.data().professionalId !== professionalId ||
-        availabilitySnapshot.data().available !== true
-      ) {
-        throw new ServiceRequestError('not-eligible', 'O período não está disponível.')
-      }
-      if (refusalSnapshot.exists()) {
-        throw new ServiceRequestError('already-refused', 'O profissional recusou esta rodada.')
-      }
-      if (reservationSnapshot.exists()) {
-        throw new ServiceRequestError('slot-conflict', 'O período já está reservado.')
-      }
-      assertBeforeAcceptanceDeadline(request, now())
 
       const assignmentId = expectedAssignmentId
       const eventId = assignmentEventId(expectedRound)
@@ -813,12 +1103,36 @@ export function createServiceRequestRepository({
         professionalId,
       )
       const profileReference = doc(firestore, 'professionalProfiles', professionalId)
-      const [roundSnapshot, refusalSnapshot, operationalSnapshot, profileSnapshot] =
+      const slotId = serviceSlotId(request.serviceDate, request.period)
+      const availabilityReference = doc(
+        firestore,
+        'professionalAvailability',
+        professionalId,
+        'slots',
+        slotId,
+      )
+      const reservationReference = doc(
+        firestore,
+        'professionalReservations',
+        professionalId,
+        'slots',
+        slotId,
+      )
+      const [
+        roundSnapshot,
+        refusalSnapshot,
+        operationalSnapshot,
+        profileSnapshot,
+        availabilitySnapshot,
+        reservationSnapshot,
+      ] =
         await Promise.all([
           transaction.get(roundReference),
           transaction.get(refusalReference),
           transaction.get(operationalReference),
           transaction.get(profileReference),
+          transaction.get(availabilityReference),
+          transaction.get(reservationReference),
         ])
 
       await coordinator?.afterRead('refuse', `${requestId}:${professionalId}`)
@@ -826,12 +1140,6 @@ export function createServiceRequestRepository({
       if (roundSnapshot.data()?.status !== 'OPEN') {
         throw new ServiceRequestError('round-changed', 'A rodada não está mais aberta.')
       }
-      assertApprovedMatch(
-        request,
-        professionalId,
-        operationalSnapshot.data(),
-        profileSnapshot.data(),
-      )
       if (refusalSnapshot.exists()) {
         const refusalEventId = stringValue(refusalSnapshot.data(), 'eventId')
         const eventSnapshot = await transaction.get(
@@ -848,6 +1156,18 @@ export function createServiceRequestRepository({
         }
         return { requestId, round: expectedRound, idempotent: true }
       }
+      assertEligibleOpportunity(
+        request,
+        eligibilityContext(
+          professionalId,
+          operationalSnapshot.data(),
+          profileSnapshot.data(),
+          availabilitySnapshot.data(),
+          reservationSnapshot.exists(),
+          false,
+          now(),
+        ),
+      )
 
       const eventId = refusalEventId(expectedRound, professionalId)
       const timestamp = serverTimestamp()
@@ -1049,11 +1369,15 @@ export function createServiceRequestRepository({
   }
 
   return {
+    assertProfessionalOpportunityAccess,
+    diagnoseOpportunityAction,
     getOwnRequest,
     createRequest,
     cancelOwnRequest,
     listRequestHistory,
     listOpenOpportunities,
+    acceptOpportunity: acceptRequest,
+    declineOpportunity: refuseRequest,
     acceptRequest,
     refuseRequest,
     cancelAssignment,

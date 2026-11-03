@@ -10,6 +10,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
   getDocs,
   limit,
@@ -26,6 +27,8 @@ import {
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import type { TransactionCoordinator } from '../src/repositories/service-request.repository'
+import { createProfessionalAvailabilityRepository } from '../src/repositories/professional-availability.repository'
+import { createProfessionalAvailabilityService } from '../src/services/professional-availability.service'
 import { createProfessionalReviewService } from '../src/services/professional-review.service'
 import { createServiceRequestService } from '../src/services/service-request.service'
 import {
@@ -69,11 +72,13 @@ function serviceFor(
   firestore: Firestore,
   actorId: string,
   coordinator?: TransactionCoordinator,
+  now?: () => Date,
 ) {
   return createServiceRequestService({
     firestore,
     getActorId: () => actorId,
     coordinator,
+    now,
     listCatalog: async () => ({
       categories: [{ id: categoryId, name: 'Manutenção', active: true, order: 1 }],
       specialties: [{ id: specialtyId, categoryId, name: 'Eletricista', active: true, order: 1 }],
@@ -386,7 +391,7 @@ describe('service request transactional proof', () => {
       serviceDate,
       period: 'MORNING',
     })
-    expect(opportunities.map((request) => request.requestId)).toEqual([
+    expect(opportunities.items.map((request) => request.requestId)).toEqual([
       result.request.requestId,
     ])
   })
@@ -514,7 +519,7 @@ describe('service request transactional proof', () => {
         serviceDate,
         period: 'MORNING',
       }),
-    ).resolves.toEqual([])
+    ).resolves.toMatchObject({ items: [] })
   })
 
   it('permite a query proposta somente para profissional aprovado e mantém o resumo sem dados privados', async () => {
@@ -535,11 +540,224 @@ describe('service request transactional proof', () => {
       period: 'MORNING',
     })
 
-    expect(opportunities).toHaveLength(1)
-    expect(opportunities[0]).not.toHaveProperty('address')
-    expect(opportunities[0]).not.toHaveProperty('contactPhone')
+    expect(opportunities.items).toHaveLength(1)
+    expect(opportunities.items[0]).not.toHaveProperty('address')
+    expect(opportunities.items[0]).not.toHaveProperty('contactPhone')
+    expect(opportunities.items[0]).not.toHaveProperty('clientId')
     await assertFails(
       getDocs(collection(unapprovedFirestore, 'serviceRequests')),
+    )
+  })
+
+  it('pagina a query real de oportunidades com cursor estável e limite obrigatório', async () => {
+    await seedScenario(['request-1', 'request-2'])
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(professionalFirestore, professionalA)
+    const firstPage = await professional.listOpenOpportunities({
+      categoryId,
+      specialtyId,
+      cityIbgeCode,
+      serviceDate,
+      period: 'MORNING',
+      pageSize: 1,
+    })
+
+    expect(firstPage.items.map((item) => item.requestId)).toEqual(['request-1'])
+    expect(firstPage.nextCursor).toMatchObject({ version: 1, requestId: 'request-1' })
+
+    const secondPage = await professional.listOpenOpportunities({
+      categoryId,
+      specialtyId,
+      cityIbgeCode,
+      serviceDate,
+      period: 'MORNING',
+      pageSize: 1,
+      cursor: firstPage.nextCursor,
+    })
+    expect(secondPage.items.map((item) => item.requestId)).toEqual(['request-2'])
+
+    await assertFails(
+      getDocs(
+        query(
+          collection(professionalFirestore, 'serviceRequests'),
+          where('status', '==', 'OPEN'),
+          where('categoryId', '==', categoryId),
+          where('specialtyId', '==', specialtyId),
+          where('cityIbgeCode', '==', cityIbgeCode),
+          where('serviceDate', '==', serviceDate),
+          where('period', '==', 'MORNING'),
+          where('acceptUntil', '>', new Date()),
+          orderBy('acceptUntil', 'asc'),
+          orderBy(documentId(), 'asc'),
+        ),
+      ),
+    )
+    await assertFails(
+      getDocs(
+        query(
+          collection(professionalFirestore, 'serviceRequests'),
+          limit(50),
+        ),
+      ),
+    )
+  })
+
+  it('remove do retorno slots indisponíveis, reservados, recusados e pedidos vencidos', async () => {
+    await seedScenario(['request-1', 'request-2'])
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(professionalFirestore, professionalA)
+    const queryInput = {
+      categoryId,
+      specialtyId,
+      cityIbgeCode,
+      serviceDate,
+      period: 'MORNING' as const,
+    }
+
+    await updateDoc(
+      doc(
+        professionalFirestore,
+        'professionalAvailability',
+        professionalA,
+        'slots',
+        slotId,
+      ),
+      { available: false, updatedAt: serverTimestamp() },
+    )
+    await expect(professional.listOpenOpportunities(queryInput)).resolves.toMatchObject({
+      items: [],
+      nextCursor: null,
+    })
+
+    await updateDoc(
+      doc(
+        professionalFirestore,
+        'professionalAvailability',
+        professionalA,
+        'slots',
+        slotId,
+      ),
+      { available: true, updatedAt: serverTimestamp() },
+    )
+    await professional.refuseRequest({ requestId: 'request-1', expectedRound: 1 })
+    const afterRefusal = await professional.listOpenOpportunities(queryInput)
+    expect(afterRefusal.items.map((item) => item.requestId)).toEqual(['request-2'])
+
+    await inspect((firestore) =>
+      setDoc(
+        doc(
+          firestore,
+          'professionalReservations',
+          professionalA,
+          'slots',
+          slotId,
+        ),
+        {
+          reservationId: slotId,
+          professionalId: professionalA,
+          requestId: 'request-2',
+          assignmentId: 'round-1',
+          serviceDate,
+          period: 'MORNING',
+          round: 1,
+          createdAt: new Date(),
+        },
+      ),
+    )
+    await expect(professional.listOpenOpportunities(queryInput)).resolves.toMatchObject({
+      items: [],
+      nextCursor: null,
+    })
+
+    await inspect((firestore) =>
+      deleteDoc(
+        doc(
+          firestore,
+          'professionalReservations',
+          professionalA,
+          'slots',
+          slotId,
+        ),
+      ),
+    )
+
+    const afterDeadline = serviceFor(
+      professionalFirestore,
+      professionalA,
+      undefined,
+      () => new Date(periodWindow.acceptUntil.getTime() + 1),
+    )
+    await expect(afterDeadline.listOpenOpportunities(queryInput)).resolves.toMatchObject({
+      items: [],
+    })
+  })
+
+  it('inclui pedido já aberto após ativação posterior, sem redistribuição por escrita', async () => {
+    await seedScenario()
+    await inspect((firestore) =>
+      updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalC),
+        { active: false },
+      ),
+    )
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalC).firestore(),
+      professionalC,
+    )
+    const queryInput = {
+      categoryId,
+      specialtyId,
+      cityIbgeCode,
+      serviceDate,
+      period: 'MORNING' as const,
+    }
+
+    await expect(professional.listOpenOpportunities(queryInput)).rejects.toMatchObject({
+      code: 'not-eligible',
+    })
+    await inspect((firestore) =>
+      updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalC),
+        { active: true },
+      ),
+    )
+    await expect(professional.listOpenOpportunities(queryInput)).resolves.toMatchObject({
+      items: [expect.objectContaining({ requestId: 'request-1' })],
+    })
+  })
+
+  it('bloqueia o feed após restrição e preserva o compromisso já atribuído', async () => {
+    await seedScenario()
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(professionalFirestore, professionalA)
+    await professional.acceptRequest({ requestId: 'request-1', expectedRound: 1 })
+    await inspect((firestore) =>
+      updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalA),
+        { reviewStatus: 'SUSPENDED', active: false },
+      ),
+    )
+
+    await expect(
+      professional.listOpenOpportunities({
+        categoryId,
+        specialtyId,
+        cityIbgeCode,
+        serviceDate,
+        period: 'MORNING',
+      }),
+    ).rejects.toMatchObject({ code: 'not-eligible' })
+    await assertSucceeds(
+      getDoc(doc(professionalFirestore, 'serviceRequests', 'request-1')),
+    )
+    await assertSucceeds(
+      getDoc(doc(professionalFirestore, 'serviceRequestPrivate', 'request-1')),
     )
   })
 
@@ -571,7 +789,10 @@ describe('service request transactional proof', () => {
         serviceDate,
         period: 'MORNING',
       }),
-    ).rejects.toMatchObject({ code: 'permission-denied' })
+    ).rejects.toMatchObject({ code: 'not-eligible' })
+    await assertFails(
+      getDoc(doc(mismatchedFirestore, 'serviceRequests', 'request-1')),
+    )
   })
 
   it.each([
@@ -601,7 +822,7 @@ describe('service request transactional proof', () => {
         serviceDate,
         period: 'MORNING',
       }),
-    ).rejects.toMatchObject({ code: 'permission-denied' })
+    ).rejects.toMatchObject({ code: 'not-eligible' })
   })
 
   it('coordena dois profissionais concorrentes e confirma somente um vencedor', async () => {
@@ -619,12 +840,16 @@ describe('service request transactional proof', () => {
     )
 
     const results = await Promise.allSettled([
-      first.acceptRequest({ requestId: 'request-1', expectedRound: 1 }),
-      second.acceptRequest({ requestId: 'request-1', expectedRound: 1 }),
+      first.acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+      second.acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
     ])
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
-    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    const rejected = results.find((result) => result.status === 'rejected')
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'opportunity-taken' },
+    })
     await inspect(async (firestore) => {
       const request = await getDoc(doc(firestore, 'serviceRequests', 'request-1'))
       const assignments = await getDocs(
@@ -633,12 +858,26 @@ describe('service request transactional proof', () => {
       const events = await getDocs(
         collection(firestore, 'serviceRequests', 'request-1', 'events'),
       )
+      const reservations = await Promise.all(
+        [professionalA, professionalB].map((professionalId) =>
+          getDoc(
+            doc(
+              firestore,
+              'professionalReservations',
+              professionalId,
+              'slots',
+              slotId,
+            ),
+          ),
+        ),
+      )
       expect(request.data()?.status).toBe('ASSIGNED')
       expect([professionalA, professionalB]).toContain(
         request.data()?.assignedProfessionalId,
       )
       expect(assignments.size).toBe(1)
       expect(events.size).toBe(1)
+      expect(reservations.filter((snapshot) => snapshot.exists())).toHaveLength(1)
     })
   })
 
@@ -657,11 +896,16 @@ describe('service request transactional proof', () => {
     )
 
     const results = await Promise.allSettled([
-      first.acceptRequest({ requestId: 'request-1', expectedRound: 1 }),
-      second.acceptRequest({ requestId: 'request-2', expectedRound: 1 }),
+      first.acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+      second.acceptOpportunity({ requestId: 'request-2', expectedRound: 1 }),
     ])
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = results.find((result) => result.status === 'rejected')
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'slot-conflict' },
+    })
     await inspect(async (firestore) => {
       const reservations = await getDocs(
         collection(
@@ -675,10 +919,230 @@ describe('service request transactional proof', () => {
         getDoc(doc(firestore, 'serviceRequests', 'request-1')),
         getDoc(doc(firestore, 'serviceRequests', 'request-2')),
       ])
+      const assignments = await Promise.all(
+        ['request-1', 'request-2'].map((requestId) =>
+          getDocs(
+            collection(
+              firestore,
+              'serviceRequests',
+              requestId,
+              'assignments',
+            ),
+          ),
+        ),
+      )
+      const events = await Promise.all(
+        ['request-1', 'request-2'].map((requestId) =>
+          getDocs(
+            collection(
+              firestore,
+              'serviceRequests',
+              requestId,
+              'events',
+            ),
+          ),
+        ),
+      )
       expect(reservations.size).toBe(1)
       expect(
         requests.filter((snapshot) => snapshot.data()?.status === 'ASSIGNED'),
       ).toHaveLength(1)
+      expect(assignments.reduce((total, snapshot) => total + snapshot.size, 0)).toBe(1)
+      expect(events.reduce((total, snapshot) => total + snapshot.size, 0)).toBe(1)
+    })
+  })
+
+  it('serializa aceite e cancelamento OPEN do cliente com exatamente um commit válido', async () => {
+    await seedScenario()
+    const barrier = coordinatedBarrier(2)
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      barrier,
+    )
+    const client = serviceFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+      barrier,
+    )
+
+    const results = await Promise.allSettled([
+      professional.acceptOpportunity({
+        requestId: 'request-1',
+        expectedRound: 1,
+      }),
+      client.cancelOwnRequest('request-1'),
+    ])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = results.find((result) => result.status === 'rejected')
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'not-open' },
+    })
+    await inspect(async (firestore) => {
+      const [request, round, assignments, events, reservation] =
+        await Promise.all([
+          getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+          getDoc(
+            doc(
+              firestore,
+              'serviceRequests',
+              'request-1',
+              'rounds',
+              'round-1',
+            ),
+          ),
+          getDocs(
+            collection(
+              firestore,
+              'serviceRequests',
+              'request-1',
+              'assignments',
+            ),
+          ),
+          getDocs(
+            collection(
+              firestore,
+              'serviceRequests',
+              'request-1',
+              'events',
+            ),
+          ),
+          getDoc(
+            doc(
+              firestore,
+              'professionalReservations',
+              professionalA,
+              'slots',
+              slotId,
+            ),
+          ),
+        ])
+
+      expect(round.data()).toMatchObject({ status: 'CLOSED' })
+      expect(events.size).toBe(1)
+      if (request.data()?.status === 'ASSIGNED') {
+        expect(request.data()?.assignedProfessionalId).toBe(professionalA)
+        expect(round.data()?.closedReason).toBe('ASSIGNED')
+        expect(assignments.size).toBe(1)
+        expect(reservation.exists()).toBe(true)
+        expect(events.docs[0].data().type).toBe('REQUEST_ASSIGNED')
+      } else {
+        expect(request.data()?.status).toBe('CANCELLED')
+        expect(round.data()?.closedReason).toBe('CLIENT_CANCELLATION')
+        expect(assignments.size).toBe(0)
+        expect(reservation.exists()).toBe(false)
+        expect(events.docs[0].data().type).toBe('REQUEST_CANCELLED')
+      }
+    })
+  })
+
+  it('só confirma sucesso depois que a transação conclui o commit', async () => {
+    await seedScenario()
+    let reportRead: (() => void) | undefined
+    let releaseCommit: (() => void) | undefined
+    const readCompleted = new Promise<void>((resolve) => {
+      reportRead = resolve
+    })
+    const commitRelease = new Promise<void>((resolve) => {
+      releaseCommit = resolve
+    })
+    const coordinator: TransactionCoordinator = {
+      async afterRead(operation) {
+        if (operation !== 'accept') return
+        reportRead?.()
+        await commitRelease
+      },
+    }
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      coordinator,
+    )
+    let settled = false
+    const acceptance = professional.acceptOpportunity({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    void acceptance.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+
+    await readCompleted
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    releaseCommit?.()
+    await expect(acceptance).resolves.toMatchObject({
+      requestId: 'request-1',
+      idempotent: false,
+    })
+    await inspect(async (firestore) => {
+      expect(
+        (await getDoc(doc(firestore, 'serviceRequests', 'request-1'))).data(),
+      ).toMatchObject({
+        status: 'ASSIGNED',
+        assignedProfessionalId: professionalA,
+      })
+    })
+  })
+
+  it('falha offline sem enfileirar aceite nem anunciar confirmação', async () => {
+    await seedScenario()
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = createServiceRequestService({
+      firestore: professionalFirestore,
+      getActorId: () => professionalA,
+      isOnline: () => false,
+    })
+
+    await expect(
+      professional.acceptOpportunity({
+        requestId: 'request-1',
+        expectedRound: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'offline' })
+
+    await inspect(async (firestore) => {
+      const [request, assignments, events, reservation] = await Promise.all([
+        getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+        getDocs(
+          collection(
+            firestore,
+            'serviceRequests',
+            'request-1',
+            'assignments',
+          ),
+        ),
+        getDocs(
+          collection(
+            firestore,
+            'serviceRequests',
+            'request-1',
+            'events',
+          ),
+        ),
+        getDoc(
+          doc(
+            firestore,
+            'professionalReservations',
+            professionalA,
+            'slots',
+            slotId,
+          ),
+        ),
+      ])
+      expect(request.data()?.status).toBe('OPEN')
+      expect(assignments.size).toBe(0)
+      expect(events.size).toBe(0)
+      expect(reservation.exists()).toBe(false)
     })
   })
 
@@ -714,6 +1178,68 @@ describe('service request transactional proof', () => {
     await assertFails(deleteDoc(doc(firstFirestore, ...availabilityPath)))
   })
 
+  it('edita períodos sem remover reserva nem alterar a aprovação profissional', async () => {
+    await seedScenario()
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(professionalFirestore, professionalA)
+    await professional.acceptRequest({ requestId: 'request-1', expectedRound: 1 })
+
+    const availability = createProfessionalAvailabilityService({
+      getActorId: () => professionalA,
+      repository: createProfessionalAvailabilityRepository(professionalFirestore),
+    })
+    const before = await getDoc(
+      doc(
+        professionalFirestore,
+        'professionalOperationalProfiles',
+        professionalA,
+      ),
+    )
+    const loaded = await availability.loadDay(serviceDate)
+    expect(
+      loaded.periods.find((period) => period.period === 'MORNING'),
+    ).toMatchObject({ available: true, reserved: true })
+
+    await availability.saveDay(serviceDate, {
+      MORNING: false,
+      AFTERNOON: true,
+      EVENING: false,
+    })
+
+    const [reservation, operational, morningSlot] = await Promise.all([
+      getDoc(
+        doc(
+          professionalFirestore,
+          'professionalReservations',
+          professionalA,
+          'slots',
+          slotId,
+        ),
+      ),
+      getDoc(
+        doc(
+          professionalFirestore,
+          'professionalOperationalProfiles',
+          professionalA,
+        ),
+      ),
+      getDoc(
+        doc(
+          professionalFirestore,
+          'professionalAvailability',
+          professionalA,
+          'slots',
+          slotId,
+        ),
+      ),
+    ])
+    expect(reservation.exists()).toBe(true)
+    expect(morningSlot.data()?.available).toBe(false)
+    expect(operational.data()).toEqual(before.data())
+  })
+
   it('mantém a recusa na rodada, libera a reserva ao cancelar e permite a substituição', async () => {
     await seedScenario()
     const first = serviceFor(
@@ -725,7 +1251,16 @@ describe('service request transactional proof', () => {
       professionalB,
     )
 
-    await first.refuseRequest({ requestId: 'request-1', expectedRound: 1 })
+    const refusal = await first.declineOpportunity({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    const refusalRetry = await first.declineOpportunity({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    expect(refusal.idempotent).toBe(false)
+    expect(refusalRetry.idempotent).toBe(true)
     await expect(
       first.acceptRequest({ requestId: 'request-1', expectedRound: 1 }),
     ).rejects.toMatchObject({ code: 'already-refused' })
@@ -739,9 +1274,22 @@ describe('service request transactional proof', () => {
     })
 
     expect(reopened.reopenedRound).toBe(2)
+    const queryInput = {
+      categoryId,
+      specialtyId,
+      cityIbgeCode,
+      serviceDate,
+      period: 'MORNING' as const,
+    }
+    await expect(second.listOpenOpportunities(queryInput)).resolves.toMatchObject({
+      items: [],
+    })
+    await expect(first.listOpenOpportunities(queryInput)).resolves.toMatchObject({
+      items: [expect.objectContaining({ requestId: 'request-1', round: 2 })],
+    })
     await expect(
       second.acceptRequest({ requestId: 'request-1', expectedRound: 2 }),
-    ).rejects.toMatchObject({ code: 'not-eligible' })
+    ).rejects.toMatchObject({ code: 'excluded-from-round' })
     const replacement = await first.acceptRequest({
       requestId: 'request-1',
       expectedRound: 2,
@@ -839,19 +1387,31 @@ describe('service request transactional proof', () => {
       'perfil não aprovado',
       { expectedRound: 1 },
       { operational: { reviewStatus: 'UNDER_REVIEW' } },
-      'permission-denied',
+      'professional-restricted',
+    ],
+    [
+      'perfil rejeitado',
+      { expectedRound: 1 },
+      { operational: { reviewStatus: 'REJECTED' } },
+      'professional-restricted',
+    ],
+    [
+      'perfil suspenso',
+      { expectedRound: 1 },
+      { operational: { reviewStatus: 'SUSPENDED', active: false } },
+      'professional-restricted',
     ],
     [
       'perfil inativo',
       { expectedRound: 1 },
       { operational: { active: false } },
-      'permission-denied',
+      'professional-restricted',
     ],
     [
       'versão desatualizada',
       { expectedRound: 1 },
       { operational: { profileVersion: 2, approvedVersion: 1 } },
-      'permission-denied',
+      'professional-restricted',
     ],
   ])('nega aceite para %s', async (_label, input, changes, expectedCode) => {
     await seedScenario()
@@ -879,6 +1439,158 @@ describe('service request transactional proof', () => {
     ).rejects.toMatchObject({ code: expectedCode })
   })
 
+  it('nega aceite sem perfil próprio e para serviço incompatível', async () => {
+    await seedScenario()
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    await inspect((firestore) =>
+      deleteDoc(doc(firestore, 'professionalProfiles', professionalA)),
+    )
+    await expect(
+      professional.acceptOpportunity({
+        requestId: 'request-1',
+        expectedRound: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'professional-restricted' })
+
+    await testEnvironment.clearFirestore()
+    await seedScenario()
+    await inspect(async (firestore) => {
+      await updateDoc(doc(firestore, 'professionalProfiles', professionalA), {
+        categoryIds: ['cleaning'],
+        specialtyIds: ['house-cleaning'],
+      })
+      await updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalA),
+        {
+          approvedCategoryIds: ['cleaning'],
+          approvedSpecialtyIds: ['house-cleaning'],
+        },
+      )
+    })
+    await expect(
+      serviceFor(
+        testEnvironment.authenticatedContext(professionalA).firestore(),
+        professionalA,
+      ).acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+    ).rejects.toMatchObject({ code: 'not-eligible' })
+  })
+
+  it('impede conta com ambos os papéis de aceitar o próprio pedido', async () => {
+    await seedScenario()
+    await inspect(async (firestore) => {
+      await updateDoc(doc(firestore, 'users', professionalA), {
+        roles: ['client', 'professional'],
+      })
+      await updateDoc(doc(firestore, 'serviceRequests', 'request-1'), {
+        clientId: professionalA,
+      })
+    })
+    const dualRole = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+
+    await expect(
+      dualRole.acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+    ).rejects.toMatchObject({ code: 'not-eligible' })
+    await inspect(async (firestore) => {
+      expect(
+        (
+          await getDocs(
+            collection(
+              firestore,
+              'serviceRequests',
+              'request-1',
+              'assignments',
+            ),
+          )
+        ).size,
+      ).toBe(0)
+    })
+  })
+
+  it('distingue indisponibilidade, exclusão da rodada e reserva ocupada', async () => {
+    await seedScenario()
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    await inspect((firestore) =>
+      updateDoc(
+        doc(
+          firestore,
+          'professionalAvailability',
+          professionalA,
+          'slots',
+          slotId,
+        ),
+        { available: false },
+      ),
+    )
+    await expect(
+      professional.acceptOpportunity({
+        requestId: 'request-1',
+        expectedRound: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'not-eligible' })
+
+    await inspect(async (firestore) => {
+      await updateDoc(
+        doc(
+          firestore,
+          'professionalAvailability',
+          professionalA,
+          'slots',
+          slotId,
+        ),
+        { available: true },
+      )
+      await updateDoc(doc(firestore, 'serviceRequests', 'request-1'), {
+        excludedProfessionalIds: [professionalA],
+      })
+    })
+    await expect(
+      professional.acceptOpportunity({
+        requestId: 'request-1',
+        expectedRound: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'excluded-from-round' })
+
+    await inspect(async (firestore) => {
+      await updateDoc(doc(firestore, 'serviceRequests', 'request-1'), {
+        excludedProfessionalIds: [],
+      })
+      await setDoc(
+        doc(
+          firestore,
+          'professionalReservations',
+          professionalA,
+          'slots',
+          slotId,
+        ),
+        {
+          reservationId: slotId,
+          professionalId: professionalA,
+          requestId: 'another-request',
+          assignmentId: 'round-1',
+          serviceDate,
+          period: 'MORNING',
+          round: 1,
+          createdAt: new Date(),
+        },
+      )
+    })
+    await expect(
+      professional.acceptOpportunity({
+        requestId: 'request-1',
+        expectedRound: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'slot-conflict' })
+  })
+
   it('rejeita writes diretos sem reserva/evento e com proprietário forjado', async () => {
     await seedScenario()
     const first = testEnvironment.authenticatedContext(professionalA).firestore()
@@ -904,6 +1616,66 @@ describe('service request transactional proof', () => {
         currentRoundId: 'round-2',
         updatedAt: serverTimestamp(),
       }),
+    )
+    const forgedAcceptance = writeBatch(first)
+    forgedAcceptance.set(
+      doc(requestReference, 'assignments', 'round-1'),
+      {
+        assignmentId: 'round-1',
+        requestId: 'request-1',
+        clientId,
+        professionalId: professionalA,
+        round: 1,
+        status: 'ACTIVE',
+        serviceDate,
+        period: 'MORNING',
+        reservationId: slotId,
+        acceptedEventId: assignmentEventId(1),
+        acceptedAt: serverTimestamp(),
+        endedAt: null,
+        endReason: null,
+      },
+    )
+    forgedAcceptance.set(
+      doc(
+        first,
+        'professionalReservations',
+        professionalA,
+        'slots',
+        slotId,
+      ),
+      {
+        reservationId: slotId,
+        professionalId: professionalA,
+        requestId: 'request-1',
+        assignmentId: 'round-1',
+        serviceDate,
+        period: 'MORNING',
+        round: 1,
+        createdAt: serverTimestamp(),
+      },
+    )
+    forgedAcceptance.set(
+      doc(requestReference, 'events', assignmentEventId(1)),
+      {
+        eventId: assignmentEventId(1),
+        entityType: 'SERVICE_REQUEST',
+        entityId: 'request-1',
+        requestId: 'request-1',
+        type: 'REQUEST_ASSIGNED',
+        reasonCode: 'PROFESSIONAL_ACCEPTANCE',
+        actorId: professionalA,
+        actorRole: 'PROFESSIONAL',
+        round: 1,
+        assignmentId: 'round-1',
+        fromStatus: 'OPEN',
+        toStatus: 'ASSIGNED',
+        createdAt: serverTimestamp(),
+      },
+    )
+    await assertFails(forgedAcceptance.commit())
+    await assertFails(
+      getDoc(doc(first, 'serviceRequestPrivate', 'request-1')),
     )
     await assertFails(
       setDoc(
@@ -1202,6 +1974,13 @@ describe('service request transactional proof', () => {
     })
     await second.acceptRequest({ requestId: 'request-1', expectedRound: 2 })
 
+    await expect(
+      first.acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+    ).rejects.toMatchObject({ code: 'round-changed' })
+    await expect(
+      first.declineOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+    ).rejects.toMatchObject({ code: 'round-changed' })
+
     const retry = await first.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: oldAssignment.assignmentId,
@@ -1294,7 +2073,7 @@ describe('service request transactional proof', () => {
 
     await expect(
       professional.acceptRequest({ requestId: 'request-2', expectedRound: 1 }),
-    ).rejects.toMatchObject({ code: 'permission-denied' })
+    ).rejects.toMatchObject({ code: 'professional-restricted' })
     await inspect(async (firestore) => {
       const [request, assignment, reservation] = await Promise.all([
         getDoc(doc(firestore, 'serviceRequests', 'request-1')),

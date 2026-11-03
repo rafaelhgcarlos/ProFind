@@ -62,6 +62,42 @@ function zonedDateTime(serviceDate: string, hour: number) {
   return new Date(utcGuess.getTime() - correctedOffset)
 }
 
+export function serviceDateInTimeZone(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: SERVICE_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? ''
+  return `${value('year')}-${value('month')}-${value('day')}`
+}
+
+export function availabilityDateBounds(now = new Date()) {
+  return {
+    min: serviceDateInTimeZone(now),
+    max: serviceDateInTimeZone(
+      new Date(
+        now.getTime() + MAX_SCHEDULING_HORIZON_DAYS * 24 * 60 * 60_000,
+      ),
+    ),
+  }
+}
+
+export function assertAvailabilityDate(
+  serviceDate: string,
+  now = new Date(),
+) {
+  dateParts(serviceDate)
+  const bounds = availabilityDateBounds(now)
+  if (serviceDate < bounds.min || serviceDate > bounds.max) {
+    throw new Error(
+      `Escolha uma data entre hoje e os próximos ${MAX_SCHEDULING_HORIZON_DAYS} dias.`,
+    )
+  }
+}
+
 export function getServicePeriodWindow(
   serviceDate: string,
   period: ServicePeriod,

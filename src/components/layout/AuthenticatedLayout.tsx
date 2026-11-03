@@ -2,6 +2,7 @@ import {
   Activity,
   BookOpenText,
   BriefcaseBusiness,
+  CalendarClock,
   CircleHelp,
   ClipboardCheck,
   ClipboardList,
@@ -33,6 +34,7 @@ export interface LayoutNavigationItem {
   showOnMobile?: boolean
   disabled?: boolean
   disabledReason?: string
+  disabledLabel?: string
 }
 
 export type AuthenticatedMode = 'client' | 'professional' | 'admin'
@@ -50,6 +52,7 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
       href: '/cliente#solicitacoes',
       icon: ClipboardList,
       disabled: true,
+      disabledLabel: 'Em breve',
       disabledReason: 'Em breve você poderá acompanhar seus pedidos por aqui.',
     },
     { label: 'Perfil', href: '/cliente/perfil', icon: UserRound },
@@ -67,6 +70,11 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
       href: '/profissional/portfolio',
       icon: Images,
       showOnMobile: false,
+    },
+    {
+      label: 'Disponibilidade',
+      href: '/profissional/disponibilidade',
+      icon: CalendarClock,
     },
     {
       label: 'Oportunidades',
@@ -134,6 +142,7 @@ interface AuthenticatedLayoutProps extends PropsWithChildren {
   navigation?: LayoutNavigationItem[]
   activeNavigationHref?: string
   contextSwitcher?: ReactNode
+  contentClassName?: string
 }
 
 export function AuthenticatedLayout({
@@ -144,6 +153,7 @@ export function AuthenticatedLayout({
   navigation = navigationByMode[mode],
   activeNavigationHref,
   contextSwitcher,
+  contentClassName,
   children,
 }: AuthenticatedLayoutProps) {
   const location = useLocation()
@@ -262,7 +272,7 @@ export function AuthenticatedLayout({
                   <Icon className="size-5" aria-hidden="true" />
                   <span>{item.label}</span>
                   <span className="ml-auto text-[0.65rem] font-semibold uppercase tracking-wide">
-                    Pendente
+                    {item.disabledLabel ?? 'Pendente'}
                   </span>
                   <span className="sr-only">{item.disabledReason}</span>
                 </span>
@@ -376,7 +386,13 @@ export function AuthenticatedLayout({
           </div>
         </header>
 
-        <main id="conteudo-principal" className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main
+          id="conteudo-principal"
+          className={cn(
+            'mx-auto w-full min-w-0 max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8',
+            contentClassName,
+          )}
+        >
           <h1 className="mb-6 text-2xl font-bold tracking-tight lg:hidden">{pageTitle}</h1>
           {children}
         </main>

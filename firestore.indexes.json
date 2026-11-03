@@ -10,7 +10,8 @@
         { "fieldPath": "cityIbgeCode", "order": "ASCENDING" },
         { "fieldPath": "serviceDate", "order": "ASCENDING" },
         { "fieldPath": "period", "order": "ASCENDING" },
-        { "fieldPath": "acceptUntil", "order": "ASCENDING" }
+        { "fieldPath": "acceptUntil", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
       ]
     },
     {

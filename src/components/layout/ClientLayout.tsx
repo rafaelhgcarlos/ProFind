@@ -12,6 +12,7 @@ interface ClientLayoutProps extends PropsWithChildren {
   userName?: string
   activeNavigationHref?: string
   contextSwitcher?: ReactNode
+  contentClassName?: string
 }
 
 export function ClientLayout({ children, userName, ...props }: ClientLayoutProps) {

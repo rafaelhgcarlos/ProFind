@@ -1,5 +1,6 @@
 import {
   BriefcaseBusiness,
+  CalendarClock,
   CircleAlert,
   Clock3,
   Compass,
@@ -105,6 +106,22 @@ export function ModeHomePage({ mode }: ModeHomePageProps) {
               </Button>
               <Button asChild variant="outline">
                 <Link to="/profissional/perfil">Editar cadastro</Link>
+              </Button>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <CalendarClock className="size-5 text-primary" aria-hidden="true" />
+                Disponibilidade
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-3 text-sm leading-6 text-muted-foreground">
+                Organize os períodos em que você pode receber oportunidades.
+              </p>
+              <Button asChild variant="outline">
+                <Link to="/profissional/disponibilidade">Editar agenda</Link>
               </Button>
             </CardContent>
           </Card>

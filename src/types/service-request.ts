@@ -33,6 +33,7 @@ export const SERVICE_EVENT_REASON_CODES = [
 ] as const
 
 export const SERVICE_EVENT_HISTORY_LIMIT = 50
+export const OPPORTUNITY_QUERY_VERSION = 1 as const
 
 export type ServiceRequestStatus = (typeof SERVICE_REQUEST_STATUSES)[number]
 export type ServicePeriod = (typeof SERVICE_PERIODS)[number]
@@ -124,6 +125,30 @@ export interface ProfessionalAvailabilitySlot {
   available: boolean
 }
 
+export interface ProfessionalOpportunitySummary {
+  requestId: string
+  categoryId: string
+  specialtyId: string
+  cityIbgeCode: string
+  serviceDate: string
+  period: ServicePeriod
+  periodStartAt: Date
+  acceptUntil: Date
+  round: number
+  reopenReason: 'PROFESSIONAL_CANCELLATION' | null
+}
+
+export interface OpportunityPageCursor {
+  version: typeof OPPORTUNITY_QUERY_VERSION
+  acceptUntil: Date
+  requestId: string
+}
+
+export interface OpportunityPage {
+  items: ProfessionalOpportunitySummary[]
+  nextCursor: OpportunityPageCursor | null
+}
+
 export interface ProfessionalReservation {
   reservationId: string
   professionalId: string
@@ -175,8 +200,11 @@ export type ServiceRequestErrorCode =
   | 'already-created'
   | 'not-found'
   | 'not-open'
+  | 'opportunity-taken'
   | 'round-changed'
   | 'not-eligible'
+  | 'professional-restricted'
+  | 'excluded-from-round'
   | 'request-expired'
   | 'slot-conflict'
   | 'already-refused'
@@ -184,6 +212,7 @@ export type ServiceRequestErrorCode =
   | 'stale-assignment'
   | 'intervention-required'
   | 'permission-denied'
+  | 'offline'
   | 'unavailable'
   | 'unknown'
 

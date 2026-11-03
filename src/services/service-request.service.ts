@@ -3,9 +3,11 @@ import type { Firestore } from 'firebase/firestore'
 import { getFirebaseAuth, getFirebaseFirestore } from '../lib/firebase'
 import {
   createServiceRequestRepository,
+  type AcceptOpportunityInput,
   type AcceptRequestInput,
   type CancelAssignmentInput,
   type CreateRequestInput,
+  type DeclineOpportunityInput,
   type OpportunityQuery,
   type RefuseRequestInput,
   type ServiceHistoryQuery,
@@ -21,6 +23,7 @@ export interface ServiceRequestServiceDependencies {
   firestore: Firestore
   getActorId(): string | null
   now?: () => Date
+  isOnline?: () => boolean
   coordinator?: TransactionCoordinator
   listCatalog?: () => Promise<ServiceCatalog>
 }
@@ -206,6 +209,71 @@ export function createServiceRequestService(
     }
   }
 
+  async function safelyOpportunityAction<T>(
+    professionalId: string,
+    input: Omit<AcceptOpportunityInput, 'professionalId'>,
+    operation: () => Promise<T>,
+  ) {
+    const online = dependencies.isOnline?.() ??
+      (typeof navigator === 'undefined' || navigator.onLine !== false)
+    if (!online) {
+      throw new ServiceRequestError(
+        'offline',
+        'Conecte-se à internet para confirmar ou recusar uma oportunidade.',
+      )
+    }
+    try {
+      return await operation()
+    } catch (error) {
+      if (externalErrorCode(error) === 'permission-denied') {
+        try {
+          await repository.assertProfessionalOpportunityAccess(professionalId)
+        } catch (accessError) {
+          if (
+            accessError instanceof ServiceRequestError &&
+            accessError.code === 'professional-restricted'
+          ) {
+            throw accessError
+          }
+        }
+        try {
+          await repository.diagnoseOpportunityAction({
+            ...input,
+            professionalId,
+          })
+        } catch (diagnosisError) {
+          if (diagnosisError instanceof ServiceRequestError) {
+            throw diagnosisError
+          }
+        }
+        throw new ServiceRequestError(
+          'not-eligible',
+          'Sua elegibilidade para esta oportunidade mudou. Atualize os dados antes de tentar novamente.',
+          { cause: error },
+        )
+      }
+      throw normalizeOperationError(error)
+    }
+  }
+
+  function acceptOpportunity(
+    input: Omit<AcceptOpportunityInput, 'professionalId'>,
+  ) {
+    const professionalId = actorId()
+    return safelyOpportunityAction(professionalId, input, () =>
+      repository.acceptOpportunity({ ...input, professionalId }),
+    )
+  }
+
+  function declineOpportunity(
+    input: Omit<DeclineOpportunityInput, 'professionalId'>,
+  ) {
+    const professionalId = actorId()
+    return safelyOpportunityAction(professionalId, input, () =>
+      repository.declineOpportunity({ ...input, professionalId }),
+    )
+  }
+
   return {
     getOwnRequest(requestId: string) {
       const clientId = actorId()
@@ -253,18 +321,22 @@ export function createServiceRequestService(
     },
 
     listOpenOpportunities(input: OpportunityQuery) {
-      actorId()
-      return safely(() => repository.listOpenOpportunities(input))
+      const professionalId = actorId()
+      return safely(() =>
+        repository.listOpenOpportunities(input, professionalId),
+      )
     },
 
+    acceptOpportunity,
+
+    declineOpportunity,
+
     acceptRequest(input: Omit<AcceptRequestInput, 'professionalId'>) {
-      const professionalId = actorId()
-      return safely(() => repository.acceptRequest({ ...input, professionalId }))
+      return acceptOpportunity(input)
     },
 
     refuseRequest(input: Omit<RefuseRequestInput, 'professionalId'>) {
-      const professionalId = actorId()
-      return safely(() => repository.refuseRequest({ ...input, professionalId }))
+      return declineOpportunity(input)
     },
 
     cancelAssignment(
@@ -305,6 +377,12 @@ export const serviceRequestService = {
   },
   listOpenOpportunities(input: OpportunityQuery) {
     return getDefaultService().listOpenOpportunities(input)
+  },
+  acceptOpportunity(input: Omit<AcceptOpportunityInput, 'professionalId'>) {
+    return getDefaultService().acceptOpportunity(input)
+  },
+  declineOpportunity(input: Omit<DeclineOpportunityInput, 'professionalId'>) {
+    return getDefaultService().declineOpportunity(input)
   },
   acceptRequest(input: Omit<AcceptRequestInput, 'professionalId'>) {
     return getDefaultService().acceptRequest(input)
