@@ -795,6 +795,7 @@ export function createServiceRequestRepository({
 
     const requestUnsubscribe = onSnapshot(
       doc(firestore, 'serviceRequests', requestId),
+      { includeMetadataChanges: true },
       (snapshot) => {
         requestSnapshot = snapshot
         emit()
@@ -803,6 +804,7 @@ export function createServiceRequestRepository({
     )
     const privateUnsubscribe = onSnapshot(
       doc(firestore, 'serviceRequestPrivate', requestId),
+      { includeMetadataChanges: true },
       (snapshot) => {
         privateSnapshot = snapshot
         emit()
@@ -868,6 +870,7 @@ export function createServiceRequestRepository({
 
     return onSnapshot(
       query(collection(firestore, 'serviceRequests'), ...constraints),
+      { includeMetadataChanges: true },
       (snapshot) => {
         const visibleDocuments = snapshot.docs.slice(0, pageSize)
         const items = visibleDocuments.map((item) =>
@@ -902,6 +905,7 @@ export function createServiceRequestRepository({
 
     const requestUnsubscribe = onSnapshot(
       requestReference,
+      { includeMetadataChanges: true },
       (requestSnapshot) => {
         detailGeneration += 1
         const version = detailGeneration
@@ -926,6 +930,7 @@ export function createServiceRequestRepository({
           const appointment = professionalAppointmentSummary(request)
           privateUnsubscribe = onSnapshot(
             doc(firestore, 'serviceRequestPrivate', requestId),
+            { includeMetadataChanges: true },
             (privateSnapshot) => {
               if (detailGeneration !== version) return
               try {
@@ -1771,6 +1776,7 @@ export function createServiceRequestRepository({
               collection(firestore, 'serviceRequests'),
               ...constraints,
             ),
+            { includeMetadataChanges: true },
             (snapshot) => {
               queryStates.set(scopeKey, {
                 ready: true,
