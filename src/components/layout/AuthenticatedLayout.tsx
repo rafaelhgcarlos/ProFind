@@ -89,7 +89,7 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
     },
     {
       label: 'Ajuda',
-      href: '/profissional#ajuda-cadastro',
+      href: '/profissional/ajuda',
       icon: CircleHelp,
     },
   ],

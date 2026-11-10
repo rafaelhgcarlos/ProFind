@@ -86,6 +86,10 @@ describe('layouts autenticados', () => {
     expect(screen.getAllByRole('link', { name: 'Perfil' })).toHaveLength(2)
     expect(screen.getAllByRole('link', { name: 'Análise' })).toHaveLength(2)
     expect(screen.getAllByRole('link', { name: 'Ajuda' })).toHaveLength(2)
+    expect(screen.getAllByRole('link', { name: 'Ajuda' })[0]).toHaveAttribute(
+      'href',
+      '/profissional/ajuda',
+    )
     expect(screen.getByRole('link', { name: 'Oportunidades' })).toHaveAttribute(
       'href',
       '/profissional/oportunidades',
