@@ -36,6 +36,7 @@ import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
 
 const PAGE_SIZE = 12
+const CACHE_WARNING_DELAY_MS = 2_000
 
 interface AppointmentPageState {
   items: ProfessionalAppointmentSummary[]
@@ -64,6 +65,34 @@ function statusLabel(status: ProfessionalAppointmentSummary['status']) {
 
 function normalizedError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
+}
+
+function useDelayedCacheWarning(fromCache: boolean) {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    if (!fromCache) {
+      queueMicrotask(() => {
+        if (active) setVisible(false)
+      })
+      return () => {
+        active = false
+      }
+    }
+    const timer = window.setTimeout(
+      () => {
+        if (active) setVisible(true)
+      },
+      CACHE_WARNING_DELAY_MS,
+    )
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [fromCache])
+
+  return visible
 }
 
 function addressLabel(details: ProfessionalAppointmentDetails) {
@@ -264,8 +293,9 @@ function AppointmentsList({
     .map((key) => pages[key])
     .find(Boolean)
   const nextCursor = lastPage?.nextCursor ?? null
-  const disconnected =
-    !online || Object.values(pages).some((page) => page.fromCache)
+  const cacheBacked = Object.values(pages).some((page) => page.fromCache)
+  const cacheWarningVisible = useDelayedCacheWarning(cacheBacked)
+  const disconnected = !online || cacheWarningVisible
 
   return (
     <div className="mx-auto grid max-w-6xl gap-6">
@@ -487,6 +517,7 @@ function AppointmentDetails({
   const startAvailable = details
     ? currentTime >= details.appointment.periodStartAt.getTime()
     : false
+  const cacheWarningVisible = useDelayedCacheWarning(fromCache)
 
   async function handleStart() {
     if (!details || starting) return
@@ -552,7 +583,7 @@ function AppointmentDetails({
         </Button>
       </div>
 
-      {!online || fromCache ? (
+      {!online || cacheWarningVisible ? (
         <Alert variant="warning">
           <WifiOff aria-hidden="true" />
           <AlertTitle>Dados possivelmente desatualizados</AlertTitle>

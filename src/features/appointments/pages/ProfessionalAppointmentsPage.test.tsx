@@ -211,6 +211,44 @@ describe('ProfessionalAppointmentsPage', () => {
     ).toBeVisible()
   })
 
+  it('não trata o primeiro snapshot de cache como desconexão imediata', async () => {
+    renderPage('/profissional/atendimentos/request-1')
+    await waitFor(() => expect(mocks.detailSubscriptions).toHaveLength(1))
+    vi.useFakeTimers()
+    try {
+      act(() => {
+        mocks.detailSubscriptions[0].onDetails({
+          details,
+          fromCache: true,
+        })
+      })
+      expect(
+        screen.queryByText('Dados possivelmente desatualizados'),
+      ).not.toBeInTheDocument()
+
+      act(() => vi.advanceTimersByTime(1_999))
+      expect(
+        screen.queryByText('Dados possivelmente desatualizados'),
+      ).not.toBeInTheDocument()
+
+      act(() => vi.advanceTimersByTime(1))
+      expect(screen.getByText('Dados possivelmente desatualizados')).toBeVisible()
+
+      act(() => {
+        mocks.detailSubscriptions[0].onDetails({
+          details,
+          fromCache: false,
+        })
+      })
+      await act(async () => undefined)
+      expect(
+        screen.queryByText('Dados possivelmente desatualizados'),
+      ).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('confirma o início somente depois do commit e não oferece conclusão', async () => {
     let resolveStart: ((value: unknown) => void) | undefined
     mocks.startAssignment.mockReturnValue(
