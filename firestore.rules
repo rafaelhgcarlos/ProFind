@@ -340,8 +340,8 @@ service cloud.firestore {
         && oldAssignment.professionalId == professionalId
         && oldAssignment.requestId == requestId
         && oldAssignment.round == before.round
-        && oldAssignment.startedAt == null
-        && oldAssignment.startedEventId == null
+        && oldAssignment.get('startedAt', null) == null
+        && oldAssignment.get('startedEventId', null) == null
         && assignment.startedAt == request.time
         && assignment.startedEventId == eventId
         && getAfter(reservationPath).data == reservation

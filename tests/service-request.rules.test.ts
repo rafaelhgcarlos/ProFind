@@ -8,6 +8,7 @@ import {
 } from '@firebase/rules-unit-testing'
 import {
   collection,
+  deleteField,
   deleteDoc,
   doc,
   documentId,
@@ -2181,6 +2182,60 @@ describe('service request transactional proof', () => {
         reason: 'Não posso mais comparecer depois do início do atendimento.',
       }),
     ).rejects.toMatchObject({ code: 'intervention-required' })
+  })
+
+  it('inicia atribuição histórica criada antes dos campos de início existirem', async () => {
+    await seedScenario()
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await professional.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await inspect(async (firestore) => {
+      await updateDoc(
+        doc(
+          firestore,
+          'serviceRequests',
+          'request-1',
+          'assignments',
+          accepted.assignmentId,
+        ),
+        {
+          startedAt: deleteField(),
+          startedEventId: deleteField(),
+        },
+      )
+      await updateDoc(doc(firestore, 'serviceRequests', 'request-1'), {
+        periodStartAt: new Date(Date.now() - 60_000),
+      })
+    })
+
+    await expect(
+      professional.startAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        expectedRound: 1,
+      }),
+    ).resolves.toMatchObject({ idempotent: false })
+
+    await inspect(async (firestore) => {
+      const assignment = await getDoc(
+        doc(
+          firestore,
+          'serviceRequests',
+          'request-1',
+          'assignments',
+          accepted.assignmentId,
+        ),
+      )
+      expect(assignment.data()).toMatchObject({
+        startedEventId: startEventId(1),
+      })
+      expect(assignment.data()?.startedAt).toBeDefined()
+    })
   })
 
   it('permite ao profissional suspenso iniciar compromisso existente sem liberar novas oportunidades', async () => {
