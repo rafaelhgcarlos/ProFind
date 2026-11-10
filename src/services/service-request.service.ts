@@ -6,13 +6,20 @@ import {
   type AcceptOpportunityInput,
   type AcceptRequestInput,
   type CancelAssignmentInput,
+  type CancelClientRequestInput,
   type CreateRequestInput,
   type DeclineOpportunityInput,
   type OpportunityFeedPageSnapshot,
   type OpportunityQuery,
+  type OwnRequestDetailsSnapshot,
+  type ProfessionalAppointmentDetailsSnapshot,
+  type ProfessionalAppointmentsPageInput,
+  type ProfessionalAppointmentsPageSnapshot,
   type RefuseRequestInput,
   type ServiceHistoryQuery,
+  type StartAssignmentInput,
   type TransactionCoordinator,
+  type UpdateRequestInput,
 } from '../repositories/service-request.repository'
 import { listAvailableCatalog } from './catalog.service'
 import { getServiceRequestSchedulingWindow } from './service-period-policy'
@@ -51,11 +58,36 @@ export interface ServiceRequestCreationInput {
   contactPhone: string
 }
 
+export interface ServiceRequestUpdateInput
+  extends Omit<ServiceRequestCreationInput, 'contactName' | 'contactPhone'> {
+  requestId: string
+  expectedRound: number
+}
+
 export interface OpportunityFeedSubscriptionInput {
   pageSize?: number
   cursor?: OpportunityFeedCursor | null
   onAccessChange(eligible: boolean): void
   onPage(snapshot: OpportunityFeedPageSnapshot): void
+  onError(error: ServiceRequestError): void
+}
+
+export interface ProfessionalAppointmentsSubscriptionInput
+  extends ProfessionalAppointmentsPageInput {
+  onPage(snapshot: ProfessionalAppointmentsPageSnapshot): void
+  onError(error: ServiceRequestError): void
+}
+
+export interface ProfessionalAppointmentDetailsSubscriptionInput {
+  requestId: string
+  onDetails(snapshot: ProfessionalAppointmentDetailsSnapshot): void
+  onUnavailable(error: ServiceRequestError): void
+  onError(error: ServiceRequestError): void
+}
+
+export interface OwnRequestDetailsSubscriptionInput {
+  requestId: string
+  onDetails(snapshot: OwnRequestDetailsSnapshot): void
   onError(error: ServiceRequestError): void
 }
 
@@ -209,6 +241,7 @@ export function createServiceRequestService(
     string,
     ReturnType<typeof repository.createRequest>
   >()
+  const mutationInFlight = new Map<string, Promise<unknown>>()
 
   function actorId() {
     const value = dependencies.getActorId()
@@ -230,15 +263,19 @@ export function createServiceRequestService(
   }
 
   async function safelyCancelOwnRequest(
-    requestId: string,
-    clientId: string,
+    input: CancelClientRequestInput,
   ) {
     try {
-      return await repository.cancelOwnRequest(requestId, clientId)
+      return await repository.cancelOwnRequest(input)
     } catch (error) {
       if (externalErrorCode(error) === 'permission-denied') {
         try {
-          await repository.diagnoseClientCancellation(requestId, clientId)
+          await repository.diagnoseClientCancellation(
+            input.requestId,
+            input.clientId,
+            input.expectedRound,
+            input.expectedAssignmentId,
+          )
         } catch (diagnosisError) {
           if (diagnosisError instanceof ServiceRequestError) {
             throw diagnosisError
@@ -320,6 +357,33 @@ export function createServiceRequestService(
       return safely(() => repository.getOwnRequest(requestId, clientId))
     },
 
+    getOwnRequestDetails(requestId: string) {
+      const clientId = actorId()
+      return safely(() => repository.getOwnRequestDetails(requestId, clientId))
+    },
+
+    subscribeOwnRequestDetails(input: OwnRequestDetailsSubscriptionInput) {
+      const clientId = actorId()
+      return repository.subscribeOwnRequestDetails(input.requestId, clientId, {
+        onDetails: input.onDetails,
+        onError: (error) => input.onError(normalizeOperationError(error)),
+      })
+    },
+
+    getCurrentProfessionalAssignment(
+      requestId: string,
+      expectedAssignmentId: string,
+    ) {
+      const professionalId = actorId()
+      return safely(() =>
+        repository.getCurrentProfessionalAssignment(
+          requestId,
+          expectedAssignmentId,
+          professionalId,
+        ),
+      )
+    },
+
     createRequest(input: ServiceRequestCreationInput) {
       const clientId = actorId()
       const pending = creationInFlight.get(input.operationKey)
@@ -344,9 +408,63 @@ export function createServiceRequestService(
       return operation
     },
 
-    cancelOwnRequest(requestId: string) {
+    updateOwnRequest(input: ServiceRequestUpdateInput) {
       const clientId = actorId()
-      return safelyCancelOwnRequest(requestId, clientId)
+      const pending = mutationInFlight.get(input.operationKey)
+      if (pending) return pending as ReturnType<typeof repository.updateOwnRequest>
+
+      const operation = safely(async () => {
+        const catalog = await (dependencies.listCatalog ?? listAvailableCatalog)()
+        const normalized = normalizeCreationInput(
+          {
+            ...input,
+            contactName: 'Cliente',
+            contactPhone: '',
+          },
+          catalog,
+          clientId,
+          dependencies.now?.() ?? new Date(),
+        )
+        const update: UpdateRequestInput = {
+          requestId: input.requestId,
+          operationKey: normalized.operationKey,
+          clientId,
+          expectedRound: input.expectedRound,
+          categoryId: normalized.categoryId,
+          specialtyId: normalized.specialtyId,
+          cityIbgeCode: normalized.cityIbgeCode,
+          serviceDate: normalized.serviceDate,
+          period: normalized.period,
+          periodStartAt: normalized.periodStartAt,
+          acceptUntil: normalized.acceptUntil,
+          description: normalized.description,
+          address: normalized.address,
+        }
+        return repository.updateOwnRequest(update)
+      })
+      mutationInFlight.set(input.operationKey, operation)
+      void operation.finally(() => {
+        if (mutationInFlight.get(input.operationKey) === operation) {
+          mutationInFlight.delete(input.operationKey)
+        }
+      }).catch(() => undefined)
+      return operation
+    },
+
+    cancelOwnRequest(
+      input: Omit<CancelClientRequestInput, 'clientId'>,
+    ) {
+      const clientId = actorId()
+      const pending = mutationInFlight.get(input.operationKey)
+      if (pending) return pending as ReturnType<typeof repository.cancelOwnRequest>
+      const operation = safelyCancelOwnRequest({ ...input, clientId })
+      mutationInFlight.set(input.operationKey, operation)
+      void operation.finally(() => {
+        if (mutationInFlight.get(input.operationKey) === operation) {
+          mutationInFlight.delete(input.operationKey)
+        }
+      }).catch(() => undefined)
+      return operation
     },
 
     listRequestHistory(input: Omit<ServiceHistoryQuery, 'actorId'> & { ownEventsOnly?: boolean }) {
@@ -397,6 +515,35 @@ export function createServiceRequestService(
       }
     },
 
+    subscribeProfessionalAppointments(
+      input: ProfessionalAppointmentsSubscriptionInput,
+    ) {
+      const professionalId = actorId()
+      return repository.subscribeProfessionalAppointmentsPage(
+        input,
+        professionalId,
+        {
+          onPage: input.onPage,
+          onError: (error) => input.onError(normalizeOperationError(error)),
+        },
+      )
+    },
+
+    subscribeProfessionalAppointmentDetails(
+      input: ProfessionalAppointmentDetailsSubscriptionInput,
+    ) {
+      const professionalId = actorId()
+      return repository.subscribeProfessionalAppointmentDetails(
+        input.requestId,
+        professionalId,
+        {
+          onDetails: input.onDetails,
+          onUnavailable: input.onUnavailable,
+          onError: (error) => input.onError(normalizeOperationError(error)),
+        },
+      )
+    },
+
     acceptOpportunity,
 
     declineOpportunity,
@@ -407,6 +554,31 @@ export function createServiceRequestService(
 
     refuseRequest(input: Omit<RefuseRequestInput, 'professionalId'>) {
       return declineOpportunity(input)
+    },
+
+    startAssignment(input: Omit<StartAssignmentInput, 'professionalId'>) {
+      const professionalId = actorId()
+      const online = dependencies.isOnline?.() ??
+        (typeof navigator === 'undefined' || navigator.onLine !== false)
+      if (!online) {
+        return Promise.reject(
+          new ServiceRequestError(
+            'offline',
+            'Conecte-se à internet para confirmar o início do atendimento.',
+          ),
+        )
+      }
+      const key = `start:${input.requestId}:${input.expectedAssignmentId}`
+      const pending = mutationInFlight.get(key)
+      if (pending) return pending as ReturnType<typeof repository.startAssignment>
+      const operation = safely(() =>
+        repository.startAssignment({ ...input, professionalId }),
+      )
+      mutationInFlight.set(key, operation)
+      void operation.finally(() => {
+        if (mutationInFlight.get(key) === operation) mutationInFlight.delete(key)
+      }).catch(() => undefined)
+      return operation
     },
 
     cancelAssignment(
@@ -434,11 +606,29 @@ export const serviceRequestService = {
   getOwnRequest(requestId: string) {
     return getDefaultService().getOwnRequest(requestId)
   },
+  getOwnRequestDetails(requestId: string) {
+    return getDefaultService().getOwnRequestDetails(requestId)
+  },
+  subscribeOwnRequestDetails(input: OwnRequestDetailsSubscriptionInput) {
+    return getDefaultService().subscribeOwnRequestDetails(input)
+  },
+  getCurrentProfessionalAssignment(
+    requestId: string,
+    expectedAssignmentId: string,
+  ) {
+    return getDefaultService().getCurrentProfessionalAssignment(
+      requestId,
+      expectedAssignmentId,
+    )
+  },
   createRequest(input: ServiceRequestCreationInput) {
     return getDefaultService().createRequest(input)
   },
-  cancelOwnRequest(requestId: string) {
-    return getDefaultService().cancelOwnRequest(requestId)
+  updateOwnRequest(input: ServiceRequestUpdateInput) {
+    return getDefaultService().updateOwnRequest(input)
+  },
+  cancelOwnRequest(input: Omit<CancelClientRequestInput, 'clientId'>) {
+    return getDefaultService().cancelOwnRequest(input)
   },
   listRequestHistory(
     input: Omit<ServiceHistoryQuery, 'actorId'> & { ownEventsOnly?: boolean },
@@ -451,6 +641,16 @@ export const serviceRequestService = {
   subscribeOpportunityFeed(input: OpportunityFeedSubscriptionInput) {
     return getDefaultService().subscribeOpportunityFeed(input)
   },
+  subscribeProfessionalAppointments(
+    input: ProfessionalAppointmentsSubscriptionInput,
+  ) {
+    return getDefaultService().subscribeProfessionalAppointments(input)
+  },
+  subscribeProfessionalAppointmentDetails(
+    input: ProfessionalAppointmentDetailsSubscriptionInput,
+  ) {
+    return getDefaultService().subscribeProfessionalAppointmentDetails(input)
+  },
   acceptOpportunity(input: Omit<AcceptOpportunityInput, 'professionalId'>) {
     return getDefaultService().acceptOpportunity(input)
   },
@@ -462,6 +662,9 @@ export const serviceRequestService = {
   },
   refuseRequest(input: Omit<RefuseRequestInput, 'professionalId'>) {
     return getDefaultService().refuseRequest(input)
+  },
+  startAssignment(input: Omit<StartAssignmentInput, 'professionalId'>) {
+    return getDefaultService().startAssignment(input)
   },
   cancelAssignment(input: Omit<CancelAssignmentInput, 'professionalId'>) {
     return getDefaultService().cancelAssignment(input)

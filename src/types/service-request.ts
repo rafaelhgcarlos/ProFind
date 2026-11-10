@@ -13,23 +13,28 @@ export const SERVICE_PERIODS = ['MORNING', 'AFTERNOON', 'EVENING'] as const
 export const DISTRIBUTION_ROUND_STATUSES = ['OPEN', 'CLOSED'] as const
 export const DISTRIBUTION_ROUND_REASONS = [
   'INITIAL',
+  'CLIENT_EDIT',
   'PROFESSIONAL_CANCELLATION',
 ] as const
 export const ASSIGNMENT_STATUSES = ['ACTIVE', 'CANCELLED', 'COMPLETED'] as const
 export const SERVICE_EVENT_TYPES = [
   'REQUEST_CREATED',
+  'REQUEST_EDITED',
   'REQUEST_CANCELLED',
   'REQUEST_ASSIGNED',
   'PROFESSIONAL_REFUSED',
   'PROFESSIONAL_CANCELLED_AND_REOPENED',
+  'SERVICE_STARTED',
 ] as const
 
 export const SERVICE_EVENT_REASON_CODES = [
   'CLIENT_REQUEST',
+  'CLIENT_EDIT',
   'CLIENT_CANCELLATION',
   'PROFESSIONAL_ACCEPTANCE',
   'PROFESSIONAL_REFUSAL',
   'PROFESSIONAL_CANCELLATION',
+  'PROFESSIONAL_START',
 ] as const
 
 export const SERVICE_EVENT_HISTORY_LIMIT = 50
@@ -97,6 +102,8 @@ export interface ServiceAssignment {
   period: ServicePeriod
   reservationId: string
   acceptedEventId: string
+  startedAt?: Date | null
+  startedEventId?: string | null
   endedEventId?: string
 }
 
@@ -201,7 +208,45 @@ export interface ServiceRequestEvent {
   fromStatus: ServiceRequestStatus
   toStatus: ServiceRequestStatus
   targetRound?: number
+  operationKey?: string
+  reason?: string
   createdAt: Date
+}
+
+export interface ProfessionalAssignmentDetails {
+  opportunity: ProfessionalOpportunitySummary
+  assignmentId: string
+}
+
+export interface ProfessionalAppointmentSummary {
+  requestId: string
+  assignmentId: string
+  categoryId: string
+  specialtyId: string
+  serviceDate: string
+  period: ServicePeriod
+  periodStartAt: Date
+  status: 'ASSIGNED' | 'IN_PROGRESS'
+  round: number
+}
+
+export interface ProfessionalAppointmentDetails {
+  appointment: ProfessionalAppointmentSummary
+  privateData: ServiceRequestPrivateData
+}
+
+export interface ProfessionalAppointmentsCursor {
+  requestId: string
+}
+
+export interface ProfessionalAppointmentsPage {
+  items: ProfessionalAppointmentSummary[]
+  nextCursor: ProfessionalAppointmentsCursor | null
+}
+
+export interface OwnServiceRequestDetails {
+  request: ServiceRequestSummary
+  privateData: ServiceRequestPrivateData
 }
 
 export type ServiceRequestErrorCode =

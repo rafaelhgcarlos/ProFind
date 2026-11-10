@@ -108,12 +108,14 @@ service cloud.firestore {
         && assignment.keys().hasAll([
           'assignmentId', 'requestId', 'clientId', 'professionalId',
           'round', 'status', 'serviceDate', 'period', 'reservationId',
-          'acceptedEventId', 'acceptedAt', 'endedAt', 'endReason'
+          'acceptedEventId', 'acceptedAt', 'startedAt', 'startedEventId',
+          'endedAt', 'endReason'
         ])
         && assignment.keys().hasOnly([
           'assignmentId', 'requestId', 'clientId', 'professionalId',
           'round', 'status', 'serviceDate', 'period', 'reservationId',
-          'acceptedEventId', 'acceptedAt', 'endedAt', 'endReason'
+          'acceptedEventId', 'acceptedAt', 'startedAt', 'startedEventId',
+          'endedAt', 'endReason'
         ])
         && assignment.assignmentId == after.currentAssignmentId
         && assignment.requestId == requestId
@@ -125,6 +127,8 @@ service cloud.firestore {
         && assignment.period == before.period
         && assignment.reservationId == before.serviceDate + '_' + before.period
         && assignment.acceptedAt == request.time
+        && assignment.startedAt == null
+        && assignment.startedEventId == null
         && assignment.endedAt == null
         && assignment.endReason == null
         && reservation.keys().hasAll([
@@ -222,12 +226,16 @@ service cloud.firestore {
         && oldAssignment.professionalId == professionalId
         && oldAssignment.requestId == requestId
         && newAssignment.diff(oldAssignment).affectedKeys().hasOnly([
-          'status', 'endedAt', 'endReason', 'endedEventId'
+          'status', 'endedAt', 'endReason', 'endedEventId',
+          'cancellationReason'
         ])
         && newAssignment.status == 'CANCELLED'
         && newAssignment.endedAt == request.time
         && newAssignment.endReason == 'PROFESSIONAL_CANCELLATION'
         && newAssignment.endedEventId is string
+        && newAssignment.cancellationReason is string
+        && newAssignment.cancellationReason.size() >= 10
+        && newAssignment.cancellationReason.size() <= 500
         && nextRound.keys().hasAll([
           'roundId', 'requestId', 'round', 'status', 'reason',
           'excludedProfessionalIds', 'previousAssignmentId', 'openedAt',
@@ -252,12 +260,12 @@ service cloud.firestore {
         && event.keys().hasAll([
           'eventId', 'entityType', 'entityId', 'requestId', 'type',
           'reasonCode', 'actorId', 'actorRole', 'round', 'targetRound',
-          'assignmentId', 'fromStatus', 'toStatus', 'createdAt'
+          'assignmentId', 'reason', 'fromStatus', 'toStatus', 'createdAt'
         ])
         && event.keys().hasOnly([
           'eventId', 'entityType', 'entityId', 'requestId', 'type',
           'reasonCode', 'actorId', 'actorRole', 'round', 'targetRound',
-          'assignmentId', 'fromStatus', 'toStatus', 'createdAt'
+          'assignmentId', 'reason', 'fromStatus', 'toStatus', 'createdAt'
         ])
         && event.eventId == newAssignment.endedEventId
         && event.entityType == 'SERVICE_REQUEST'
@@ -270,6 +278,7 @@ service cloud.firestore {
         && event.round == before.round
         && event.targetRound == before.round + 1
         && event.assignmentId == before.currentAssignmentId
+        && event.reason == newAssignment.cancellationReason
         && event.fromStatus == 'ASSIGNED'
         && event.toStatus == 'OPEN'
         && event.createdAt == request.time;
@@ -306,6 +315,80 @@ service cloud.firestore {
           before,
           after
         );
+    }
+
+    function hasValidStartDocuments(requestId, professionalId, before) {
+      let assignmentPath = /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(before.currentAssignmentId);
+      let oldAssignment = get(assignmentPath).data;
+      let assignment = getAfter(assignmentPath).data;
+      let reservationPath = /databases/$(database)/documents/professionalReservations/$(professionalId)/slots/$(oldAssignment.reservationId);
+      let reservation = get(reservationPath).data;
+      let eventId = 'started-' + before.currentRoundId;
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(eventId);
+      let event = getAfter(eventPath).data;
+
+      return exists(assignmentPath)
+        && exists(reservationPath)
+        && !exists(eventPath)
+        && existsAfter(assignmentPath)
+        && existsAfter(reservationPath)
+        && existsAfter(eventPath)
+        && assignment.diff(oldAssignment).affectedKeys().hasOnly([
+          'startedAt', 'startedEventId'
+        ])
+        && oldAssignment.status == 'ACTIVE'
+        && oldAssignment.professionalId == professionalId
+        && oldAssignment.requestId == requestId
+        && oldAssignment.round == before.round
+        && oldAssignment.startedAt == null
+        && oldAssignment.startedEventId == null
+        && assignment.startedAt == request.time
+        && assignment.startedEventId == eventId
+        && getAfter(reservationPath).data == reservation
+        && reservation.professionalId == professionalId
+        && reservation.requestId == requestId
+        && reservation.assignmentId == before.currentAssignmentId
+        && reservation.round == before.round
+        && event.keys().hasAll([
+          'eventId', 'entityType', 'entityId', 'requestId', 'type',
+          'reasonCode', 'actorId', 'actorRole', 'round', 'assignmentId',
+          'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.keys().hasOnly([
+          'eventId', 'entityType', 'entityId', 'requestId', 'type',
+          'reasonCode', 'actorId', 'actorRole', 'round', 'assignmentId',
+          'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == eventId
+        && event.entityType == 'SERVICE_REQUEST'
+        && event.entityId == requestId
+        && event.requestId == requestId
+        && event.type == 'SERVICE_STARTED'
+        && event.reasonCode == 'PROFESSIONAL_START'
+        && event.actorId == professionalId
+        && event.actorRole == 'PROFESSIONAL'
+        && event.round == before.round
+        && event.assignmentId == before.currentAssignmentId
+        && event.fromStatus == 'ASSIGNED'
+        && event.toStatus == 'IN_PROGRESS'
+        && event.createdAt == request.time;
+    }
+
+    function isStartTransition(requestId, professionalId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == professionalId
+        && before.status == 'ASSIGNED'
+        && before.assignedProfessionalId == professionalId
+        && before.currentAssignmentId is string
+        && request.time >= before.periodStartAt
+        && after.status == 'IN_PROGRESS'
+        && after.updatedAt == request.time
+        && after.diff(before).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && hasValidStartDocuments(requestId, professionalId, before);
     }
 
     function isRefusalCreate(requestId, roundId, professionalId) {
@@ -529,7 +612,7 @@ service cloud.firestore {
         && summary.createdAt == request.time;
     }
 
-    function hasValidClientCancellationDocuments(requestId, clientId, before) {
+    function hasValidLegacyClientCancellationDocuments(requestId, clientId, before) {
       let roundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(before.currentRoundId);
       let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/cancelled-by-client;
       let oldRound = get(roundPath).data;
@@ -568,7 +651,7 @@ service cloud.firestore {
         && event.createdAt == request.time;
     }
 
-    function isClientCancellationTransition(requestId, clientId) {
+    function isLegacyClientCancellationTransition(requestId, clientId) {
       let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
       let before = get(requestPath).data;
       let after = getAfter(requestPath).data;
@@ -582,11 +665,280 @@ service cloud.firestore {
         && after.status == 'CANCELLED'
         && after.updatedAt == request.time
         && after.diff(before).affectedKeys().hasOnly(['status', 'updatedAt'])
-        && hasValidClientCancellationDocuments(
+        && hasValidLegacyClientCancellationDocuments(
           requestId,
           clientId,
           before
         );
+    }
+
+    function isLegacyClientCancellationCompanion(requestId, clientId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == clientId
+        && before.clientId == clientId
+        && before.status == 'OPEN'
+        && after.status == 'CANCELLED'
+        && after.updatedAt == request.time;
+    }
+
+    function hasValidClientEditDocuments(requestId, clientId, before, after) {
+      let privatePath = /databases/$(database)/documents/serviceRequestPrivate/$(requestId);
+      let oldRoundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(before.currentRoundId);
+      let nextRoundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(after.currentRoundId);
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(('edited-' + after.currentRoundId));
+      let oldPrivate = get(privatePath).data;
+      let newPrivate = getAfter(privatePath).data;
+      let oldRound = get(oldRoundPath).data;
+      let closedRound = getAfter(oldRoundPath).data;
+      let nextRound = getAfter(nextRoundPath).data;
+      let event = getAfter(eventPath).data;
+
+      return exists(privatePath)
+        && exists(oldRoundPath)
+        && !exists(nextRoundPath)
+        && !exists(eventPath)
+        && existsAfter(privatePath)
+        && existsAfter(oldRoundPath)
+        && existsAfter(nextRoundPath)
+        && existsAfter(eventPath)
+        && oldPrivate.clientId == clientId
+        && newPrivate.diff(oldPrivate).affectedKeys().hasOnly([
+          'notes', 'address', 'updatedAt'
+        ])
+        && newPrivate.notes is string
+        && newPrivate.notes.size() >= 10
+        && newPrivate.notes.size() <= 1000
+        && isValidPrivateAddress(newPrivate.address, after.cityIbgeCode)
+        && newPrivate.updatedAt == request.time
+        && oldRound.status == 'OPEN'
+        && closedRound.diff(oldRound).affectedKeys().hasOnly([
+          'status', 'closedAt', 'closedReason', 'updatedAt'
+        ])
+        && closedRound.status == 'CLOSED'
+        && closedRound.closedAt == request.time
+        && closedRound.closedReason == 'CLIENT_EDIT'
+        && closedRound.updatedAt == request.time
+        && nextRound.keys().hasOnly([
+          'roundId', 'requestId', 'round', 'status', 'reason',
+          'excludedProfessionalIds', 'previousAssignmentId', 'openedAt',
+          'closedAt', 'closedReason', 'updatedAt'
+        ])
+        && nextRound.roundId == after.currentRoundId
+        && nextRound.requestId == requestId
+        && nextRound.round == before.round + 1
+        && nextRound.status == 'OPEN'
+        && nextRound.reason == 'CLIENT_EDIT'
+        && nextRound.excludedProfessionalIds == []
+        && nextRound.previousAssignmentId == null
+        && nextRound.openedAt == request.time
+        && nextRound.closedAt == null
+        && nextRound.closedReason == null
+        && nextRound.updatedAt == request.time
+        && event.keys().hasOnly([
+          'eventId', 'entityType', 'entityId', 'requestId', 'type',
+          'reasonCode', 'actorId', 'actorRole', 'round', 'assignmentId',
+          'targetRound', 'operationKey', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == 'edited-' + after.currentRoundId
+        && event.entityType == 'SERVICE_REQUEST'
+        && event.entityId == requestId
+        && event.requestId == requestId
+        && event.type == 'REQUEST_EDITED'
+        && event.reasonCode == 'CLIENT_EDIT'
+        && event.actorId == clientId
+        && event.actorRole == 'CLIENT'
+        && event.round == before.round
+        && event.assignmentId == null
+        && event.targetRound == after.round
+        && event.operationKey.matches('^[A-Za-z0-9_-]{20,80}$')
+        && event.fromStatus == 'OPEN'
+        && event.toStatus == 'OPEN'
+        && event.createdAt == request.time;
+    }
+
+    function isClientEditTransition(requestId, clientId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == clientId
+        && before.clientId == clientId
+        && before.status == 'OPEN'
+        && before.assignedProfessionalId == null
+        && before.currentAssignmentId == null
+        && after.status == 'OPEN'
+        && after.assignedProfessionalId == null
+        && after.currentAssignmentId == null
+        && after.round == before.round + 1
+        && after.currentRoundId is string
+        && after.reopenReason == null
+        && after.excludedProfessionalIds == []
+        && after.cityIbgeCode.matches('^[0-9]{7}$')
+        && after.serviceDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && after.period in ['MORNING', 'AFTERNOON', 'EVENING']
+        && after.periodStartAt is timestamp
+        && after.acceptUntil is timestamp
+        && after.acceptUntil == after.periodStartAt - duration.value(30, 'm')
+        && request.time < after.acceptUntil
+        && after.periodStartAt <= request.time + duration.value(90, 'd')
+        && after.updatedAt == request.time
+        && after.diff(before).affectedKeys().hasOnly([
+          'categoryId', 'specialtyId', 'cityIbgeCode', 'serviceDate',
+          'period', 'periodStartAt', 'acceptUntil', 'round',
+          'currentRoundId', 'reopenReason', 'excludedProfessionalIds',
+          'updatedAt'
+        ])
+        && hasActiveCreationCatalog(after)
+        && hasValidClientEditDocuments(requestId, clientId, before, after);
+    }
+
+    function isClientEditCompanion(requestId, clientId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == clientId
+        && before.clientId == clientId
+        && before.status == 'OPEN'
+        && after.status == 'OPEN'
+        && after.round == before.round + 1
+        && after.updatedAt == request.time;
+    }
+
+    function hasValidOpenClientCancellationDocuments(requestId, clientId, before) {
+      let roundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(before.currentRoundId);
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/cancelled-by-client;
+      let oldRound = get(roundPath).data;
+      let round = getAfter(roundPath).data;
+      let event = getAfter(eventPath).data;
+
+      return exists(roundPath)
+        && !exists(eventPath)
+        && existsAfter(roundPath)
+        && existsAfter(eventPath)
+        && oldRound.status == 'OPEN'
+        && round.diff(oldRound).affectedKeys().hasOnly([
+          'status', 'closedAt', 'closedReason', 'updatedAt'
+        ])
+        && round.status == 'CLOSED'
+        && round.closedAt == request.time
+        && round.closedReason == 'CLIENT_CANCELLATION'
+        && round.updatedAt == request.time
+        && event.keys().hasOnly([
+          'eventId', 'entityType', 'entityId', 'requestId', 'type',
+          'reasonCode', 'actorId', 'actorRole', 'round', 'assignmentId',
+          'operationKey', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == 'cancelled-by-client'
+        && event.entityType == 'SERVICE_REQUEST'
+        && event.entityId == requestId
+        && event.requestId == requestId
+        && event.type == 'REQUEST_CANCELLED'
+        && event.reasonCode == 'CLIENT_CANCELLATION'
+        && event.actorId == clientId
+        && event.actorRole == 'CLIENT'
+        && event.round == before.round
+        && event.assignmentId == null
+        && event.operationKey.matches('^[A-Za-z0-9_-]{20,80}$')
+        && event.fromStatus == 'OPEN'
+        && event.toStatus == 'CANCELLED'
+        && event.createdAt == request.time;
+    }
+
+    function hasValidAssignedClientCancellationDocuments(requestId, clientId, before) {
+      let roundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(before.currentRoundId);
+      let assignmentPath = /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(before.currentAssignmentId);
+      let assignment = get(assignmentPath).data;
+      let endedAssignment = getAfter(assignmentPath).data;
+      let reservationPath = /databases/$(database)/documents/professionalReservations/$(before.assignedProfessionalId)/slots/$(assignment.reservationId);
+      let oldRound = get(roundPath).data;
+      let round = getAfter(roundPath).data;
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/cancelled-by-client;
+      let event = getAfter(eventPath).data;
+
+      return exists(roundPath)
+        && exists(assignmentPath)
+        && exists(reservationPath)
+        && !exists(eventPath)
+        && existsAfter(roundPath)
+        && existsAfter(assignmentPath)
+        && !existsAfter(reservationPath)
+        && existsAfter(eventPath)
+        && oldRound.status == 'CLOSED'
+        && round.diff(oldRound).affectedKeys().hasOnly([
+          'status', 'closedAt', 'closedReason', 'updatedAt'
+        ])
+        && round.status == 'CLOSED'
+        && round.closedAt == request.time
+        && round.closedReason == 'CLIENT_CANCELLATION'
+        && round.updatedAt == request.time
+        && assignment.status == 'ACTIVE'
+        && assignment.requestId == requestId
+        && assignment.clientId == clientId
+        && assignment.professionalId == before.assignedProfessionalId
+        && endedAssignment.diff(assignment).affectedKeys().hasOnly([
+          'status', 'endedAt', 'endReason', 'endedEventId'
+        ])
+        && endedAssignment.status == 'CANCELLED'
+        && endedAssignment.endedAt == request.time
+        && endedAssignment.endReason == 'CLIENT_CANCELLATION'
+        && endedAssignment.endedEventId == 'cancelled-by-client'
+        && event.keys().hasOnly([
+          'eventId', 'entityType', 'entityId', 'requestId', 'type',
+          'reasonCode', 'actorId', 'actorRole', 'round', 'assignmentId',
+          'operationKey', 'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == 'cancelled-by-client'
+        && event.entityType == 'SERVICE_REQUEST'
+        && event.entityId == requestId
+        && event.requestId == requestId
+        && event.type == 'REQUEST_CANCELLED'
+        && event.reasonCode == 'CLIENT_CANCELLATION'
+        && event.actorId == clientId
+        && event.actorRole == 'CLIENT'
+        && event.round == before.round
+        && event.assignmentId == before.currentAssignmentId
+        && event.operationKey.matches('^[A-Za-z0-9_-]{20,80}$')
+        && event.fromStatus == 'ASSIGNED'
+        && event.toStatus == 'CANCELLED'
+        && event.createdAt == request.time;
+    }
+
+    function isClientCancellationTransition(requestId, clientId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == clientId
+        && before.clientId == clientId
+        && before.status in ['OPEN', 'ASSIGNED']
+        && request.time < before.periodStartAt
+        && after.status == 'CANCELLED'
+        && after.assignedProfessionalId == null
+        && after.currentAssignmentId == null
+        && after.updatedAt == request.time
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'assignedProfessionalId', 'currentAssignmentId', 'updatedAt'
+        ])
+        && ((before.status == 'OPEN'
+            && before.assignedProfessionalId == null
+            && before.currentAssignmentId == null
+            && hasValidOpenClientCancellationDocuments(
+              requestId, clientId, before
+            ))
+          || (before.status == 'ASSIGNED'
+            && before.assignedProfessionalId is string
+            && before.currentAssignmentId is string
+            && hasValidAssignedClientCancellationDocuments(
+              requestId, clientId, before
+            )));
     }
 
     function isClientCancellationCompanion(requestId, clientId) {
@@ -597,7 +949,7 @@ service cloud.firestore {
       return request.auth != null
         && request.auth.uid == clientId
         && before.clientId == clientId
-        && before.status == 'OPEN'
+        && before.status in ['OPEN', 'ASSIGNED']
         && after.status == 'CANCELLED'
         && after.updatedAt == request.time;
     }
@@ -1814,14 +2166,18 @@ service cloud.firestore {
             && professionalMatchesOpportunity(
               resource.data,
               request.auth.uid
-            )));
+            ))
+          || (resource.data.status in ['ASSIGNED', 'IN_PROGRESS']
+            && resource.data.assignedProfessionalId == request.auth.uid));
       allow get: if request.auth != null
         && (resource == null || canReadServiceRequest(requestId));
       allow create: if isServiceRequestCreation(requestId);
       allow delete: if false;
       allow update: if request.auth != null
         && (isAcceptanceTransition(requestId, request.auth.uid)
+          || isStartTransition(requestId, request.auth.uid)
           || isCancellationTransition(requestId, request.auth.uid)
+          || isClientEditTransition(requestId, request.auth.uid)
           || isClientCancellationTransition(requestId, request.auth.uid));
 
       match /rounds/{roundId} {
@@ -1835,6 +2191,11 @@ service cloud.firestore {
             && isCancellationTransition(requestId, request.auth.uid)
             && getAfter(
               /databases/$(database)/documents/serviceRequests/$(requestId)
+            ).data.currentRoundId == roundId)
+          || (request.auth != null
+            && isClientEditCompanion(requestId, request.auth.uid)
+            && getAfter(
+              /databases/$(database)/documents/serviceRequests/$(requestId)
             ).data.currentRoundId == roundId);
         allow update: if request.auth != null
           && ((isAcceptanceTransition(requestId, request.auth.uid)
@@ -1842,6 +2203,10 @@ service cloud.firestore {
                 /databases/$(database)/documents/serviceRequests/$(requestId)
               ).data.currentRoundId == roundId)
             || (isClientCancellationCompanion(requestId, request.auth.uid)
+              && get(
+                /databases/$(database)/documents/serviceRequests/$(requestId)
+              ).data.currentRoundId == roundId)
+            || (isClientEditCompanion(requestId, request.auth.uid)
               && get(
                 /databases/$(database)/documents/serviceRequests/$(requestId)
               ).data.currentRoundId == roundId));
@@ -1873,7 +2238,9 @@ service cloud.firestore {
             /databases/$(database)/documents/serviceRequests/$(requestId)
           ).data.currentAssignmentId == assignmentId;
         allow update: if request.auth != null
-          && isCancellationTransition(requestId, request.auth.uid)
+          && (isStartTransition(requestId, request.auth.uid)
+            || isCancellationTransition(requestId, request.auth.uid)
+            || isClientCancellationTransition(requestId, request.auth.uid))
           && get(
             /databases/$(database)/documents/serviceRequests/$(requestId)
           ).data.currentAssignmentId == assignmentId;
@@ -1916,9 +2283,19 @@ service cloud.firestore {
             || (request.resource.data.type
                 == 'PROFESSIONAL_CANCELLED_AND_REOPENED'
               && isCancellationTransition(requestId, request.auth.uid))
+            || (request.resource.data.type == 'SERVICE_STARTED'
+              && isStartTransition(requestId, request.auth.uid))
             || (request.resource.data.type == 'REQUEST_CANCELLED'
               && eventId == 'cancelled-by-client'
               && isClientCancellationCompanion(
+                requestId,
+                request.auth.uid
+              ))
+            || (request.resource.data.type == 'REQUEST_EDITED'
+              && eventId == 'edited-' + getAfter(
+                /databases/$(database)/documents/serviceRequests/$(requestId)
+              ).data.currentRoundId
+              && isClientEditCompanion(
                 requestId,
                 request.auth.uid
               )));
@@ -1949,7 +2326,9 @@ service cloud.firestore {
           ).data,
           request.resource.data
         );
-      allow list, update, delete: if false;
+      allow update: if request.auth != null
+        && isClientEditCompanion(requestId, request.auth.uid);
+      allow list, delete: if false;
     }
 
     match /professionalReservations/{professionalId}/slots/{slotId} {
@@ -1970,9 +2349,13 @@ service cloud.firestore {
         );
       allow update: if false;
       allow delete: if request.auth != null
-        && request.auth.uid == professionalId
         && resource.data.reservationId == slotId
-        && isCancellationTransition(resource.data.requestId, professionalId);
+        && ((request.auth.uid == professionalId
+            && isCancellationTransition(resource.data.requestId, professionalId))
+          || isClientCancellationTransition(
+            resource.data.requestId,
+            request.auth.uid
+          ));
     }
 
     // O catálogo é público, mas sua manutenção acontece somente por

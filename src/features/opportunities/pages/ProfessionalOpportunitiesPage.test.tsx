@@ -1,10 +1,13 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { OpportunityFeedSubscriptionInput } from '../../../services/service-request.service'
-import { ServiceRequestError } from '../../../types/service-request'
+import {
+  ServiceRequestError,
+  type ProfessionalOpportunitySummary,
+} from '../../../types/service-request'
 import { useAuth } from '../../auth/use-auth'
 import { useCatalog } from '../../home/use-catalog'
 import { useProfile } from '../../onboarding/use-profile'
@@ -15,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   unsubscribers: [] as ReturnType<typeof vi.fn>[],
   acceptOpportunity: vi.fn(),
   declineOpportunity: vi.fn(),
+  getCurrentProfessionalAssignment: vi.fn(),
+  cancelAssignment: vi.fn(),
   findReview: vi.fn(),
 }))
 
@@ -47,6 +52,8 @@ vi.mock('../../../services/service-request.service', async (importOriginal) => {
       },
       acceptOpportunity: mocks.acceptOpportunity,
       declineOpportunity: mocks.declineOpportunity,
+      getCurrentProfessionalAssignment: mocks.getCurrentProfessionalAssignment,
+      cancelAssignment: mocks.cancelAssignment,
     },
   }
 })
@@ -123,7 +130,7 @@ function opportunity(
   requestId: string,
   specialtyId = 'electrician',
   offset = 3_600_000,
-) {
+): ProfessionalOpportunitySummary {
   return {
     requestId,
     categoryId: 'maintenance',
@@ -152,6 +159,20 @@ function renderPage(path = '/profissional') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <ProfessionalOpportunitiesPage />
+    </MemoryRouter>,
+  )
+}
+
+function renderPageWithAppointmentRoute() {
+  return render(
+    <MemoryRouter initialEntries={['/profissional']}>
+      <Routes>
+        <Route path="/profissional" element={<ProfessionalOpportunitiesPage />} />
+        <Route
+          path="/profissional/atendimentos/:requestId"
+          element={<h1>Detalhe real do atendimento</h1>}
+        />
+      </Routes>
     </MemoryRouter>,
   )
 }
@@ -195,6 +216,17 @@ describe('ProfessionalOpportunitiesPage', () => {
       round: 1,
       idempotent: false,
     })
+    mocks.getCurrentProfessionalAssignment.mockResolvedValue({
+      opportunity: opportunity('request-1'),
+      assignmentId: 'round-1',
+    })
+    mocks.cancelAssignment.mockResolvedValue({
+      requestId: 'request-1',
+      cancelledAssignmentId: 'round-1',
+      reopenedRound: 2,
+      replacementSearchOpen: true,
+      idempotent: false,
+    })
   })
 
   it('não abre o feed para profissional restrito e preserva status, feedback e ajuda', async () => {
@@ -223,7 +255,7 @@ describe('ProfessionalOpportunitiesPage', () => {
       }),
     )
     const user = userEvent.setup()
-    renderPage()
+    renderPageWithAppointmentRoute()
     await publishFirstPage()
 
     expect(screen.getByText('Eletricista')).toBeInTheDocument()
@@ -232,14 +264,15 @@ describe('ProfessionalOpportunitiesPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Aceitar' }))
     expect(screen.getByRole('button', { name: 'Confirmando…' })).toBeDisabled()
-    expect(screen.queryByText('Aceite confirmado')).not.toBeInTheDocument()
+    expect(screen.queryByText('Atendimento confirmado')).not.toBeInTheDocument()
 
     await act(async () => {
       resolveAcceptance?.({ assignmentId: 'round-1' })
     })
-    expect(await screen.findByText('Aceite confirmado')).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Detalhe real do atendimento' }),
+    ).toBeInTheDocument()
     expect(screen.queryByText('Eletricista')).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /agendados/i })).not.toBeInTheDocument()
   })
 
   it('mantém erro de disputa no card e impede um segundo clique', async () => {
@@ -280,6 +313,60 @@ describe('ProfessionalOpportunitiesPage', () => {
       requestId: 'request-1',
       expectedRound: 1,
     })
+  })
+
+  it('identifica no feed a nova rodada aberta para substituição', async () => {
+    renderPage()
+    await publishFirstPage([
+      {
+        ...opportunity('request-1'),
+        round: 2,
+        reopenReason: 'PROFESSIONAL_CANCELLATION' as const,
+      },
+    ])
+
+    expect(screen.getByText('Substituição solicitada')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Aceitar' })).toBeEnabled()
+  })
+
+  it('permite ao profissional suspenso cancelar compromisso existente com confirmação e motivo', async () => {
+    mocks.findReview.mockResolvedValue({
+      ...approvedReview,
+      reviewStatus: 'SUSPENDED',
+      active: false,
+    })
+    mocks.cancelAssignment.mockResolvedValueOnce({
+      requestId: 'request-1',
+      cancelledAssignmentId: 'round-1',
+      reopenedRound: 2,
+      replacementSearchOpen: false,
+      idempotent: false,
+    })
+    const user = userEvent.setup()
+    renderPage('/profissional?atendimento=request-1&atribuicao=round-1')
+    await waitFor(() => expect(mocks.subscriptions).toHaveLength(1))
+    act(() => mocks.subscriptions[0].onAccessChange(false))
+
+    expect(await screen.findByText('Atendimento confirmado')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancelar atendimento' }))
+    expect(mocks.cancelAssignment).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Informe o motivo do cancelamento em 10 a 500 caracteres.',
+    )
+
+    await user.type(
+      screen.getByLabelText('Motivo do cancelamento *'),
+      'Tive uma emergência e não conseguirei comparecer.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+
+    await waitFor(() => expect(mocks.cancelAssignment).toHaveBeenCalledWith({
+      requestId: 'request-1',
+      expectedAssignmentId: 'round-1',
+      reason: 'Tive uma emergência e não conseguirei comparecer.',
+    }))
+    expect(await screen.findByText(/pendente para intervenção ou reagendamento/i)).toBeInTheDocument()
   })
 
   it('pagina com cursor, elimina duplicações e desmonta listeners na troca de conta', async () => {

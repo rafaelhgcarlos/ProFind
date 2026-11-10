@@ -84,12 +84,8 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
     },
     {
       label: 'Atendimentos',
-      href: '/profissional',
+      href: '/profissional/atendimentos',
       icon: BriefcaseBusiness,
-      showOnMobile: false,
-      disabled: true,
-      disabledReason:
-        'Em breve você poderá acompanhar seus atendimentos por aqui.',
     },
     {
       label: 'Ajuda',

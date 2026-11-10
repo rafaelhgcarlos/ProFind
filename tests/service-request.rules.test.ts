@@ -28,6 +28,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import type {
   OpportunityFeedPageSnapshot,
+  ProfessionalAppointmentDetailsSnapshot,
+  ProfessionalAppointmentsPageSnapshot,
   TransactionCoordinator,
 } from '../src/repositories/service-request.repository'
 import { createProfessionalAvailabilityRepository } from '../src/repositories/professional-availability.repository'
@@ -39,6 +41,7 @@ import {
   getServicePeriodWindow,
   roundDocumentId,
   serviceSlotId,
+  startEventId,
 } from '../src/services/service-period-policy'
 import {
   ServiceRequestError,
@@ -409,6 +412,48 @@ describe('service request transactional proof', () => {
     }
   }
 
+  function clientCancellationInput(
+    requestId: string,
+    expectedRound = 1,
+    expectedAssignmentId: string | null = null,
+    operationKey = 'client-cancel-operation-0001',
+  ) {
+    return { requestId, expectedRound, expectedAssignmentId, operationKey }
+  }
+
+  function clientUpdateInput(
+    requestId: string,
+    expectedRound = 1,
+    operationKey = 'client-edit-operation-000001',
+  ) {
+    const created = creationInput(operationKey)
+    return {
+      requestId,
+      expectedRound,
+      operationKey,
+      specialtyId: created.specialtyId,
+      description: 'Preciso revisar três tomadas e o quadro de energia.',
+      city: created.city,
+      stateCode: created.stateCode,
+      cityIbgeCode: created.cityIbgeCode,
+      street: 'Rua Atualizada',
+      number: '200',
+      complement: 'Casa 2',
+      neighborhood: created.neighborhood,
+      postalCode: created.postalCode,
+      serviceDate: created.serviceDate,
+      period: created.period,
+    }
+  }
+
+  async function makeRequestStartable(requestId = 'request-1') {
+    await inspect((firestore) =>
+      updateDoc(doc(firestore, 'serviceRequests', requestId), {
+        periodStartAt: new Date(Date.now() - 60_000),
+      }),
+    )
+  }
+
   it('cria resumo, dados privados, rodada e histórico atomicamente e recupera o pedido', async () => {
     await seedScenario([])
     const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
@@ -534,16 +579,18 @@ describe('service request transactional proof', () => {
       serviceFor(
         testEnvironment.authenticatedContext('other-client').firestore(),
         'other-client',
-      ).cancelOwnRequest(created.request.requestId),
+      ).cancelOwnRequest(clientCancellationInput(created.request.requestId)),
     ).rejects.toMatchObject({ code: 'permission-denied' })
 
-    const cancelled = await service.cancelOwnRequest(created.request.requestId)
+    const cancelled = await service.cancelOwnRequest(
+      clientCancellationInput(created.request.requestId),
+    )
     expect(cancelled).toMatchObject({
       idempotent: false,
       request: { status: 'CANCELLED', clientId },
     })
     await expect(
-      service.cancelOwnRequest(created.request.requestId),
+      service.cancelOwnRequest(clientCancellationInput(created.request.requestId)),
     ).resolves.toMatchObject({ idempotent: true, request: { status: 'CANCELLED' } })
 
     let persisted: Record<string, Record<string, unknown> | undefined> = {}
@@ -575,6 +622,261 @@ describe('service request transactional proof', () => {
         period: 'MORNING',
       }),
     ).resolves.toMatchObject({ items: [] })
+  })
+
+  it('edita somente OPEN sem atribuição, cria nova rodada e invalida decisões antigas atomicamente', async () => {
+    await seedScenario()
+    const ownerFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const owner = serviceFor(ownerFirestore, clientId)
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    await professional.declineOpportunity({ requestId: 'request-1', expectedRound: 1 })
+
+    const input = clientUpdateInput('request-1')
+    const updated = await owner.updateOwnRequest(input)
+    expect(updated).toMatchObject({
+      idempotent: false,
+      request: { round: 2, currentRoundId: 'round-2', status: 'OPEN' },
+    })
+    await expect(owner.updateOwnRequest(input)).resolves.toMatchObject({
+      idempotent: true,
+    })
+
+    await inspect(async (firestore) => {
+      const [summary, privateData, oldRound, newRound, oldRefusal, event] =
+        await Promise.all([
+          getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+          getDoc(doc(firestore, 'serviceRequestPrivate', 'request-1')),
+          getDoc(doc(firestore, 'serviceRequests', 'request-1', 'rounds', 'round-1')),
+          getDoc(doc(firestore, 'serviceRequests', 'request-1', 'rounds', 'round-2')),
+          getDoc(doc(firestore, 'serviceRequests', 'request-1', 'rounds', 'round-1', 'refusals', professionalA)),
+          getDoc(doc(firestore, 'serviceRequests', 'request-1', 'events', 'edited-round-2')),
+        ])
+      expect(summary.data()).toMatchObject({ round: 2, specialtyId, status: 'OPEN' })
+      expect(privateData.data()).toMatchObject({
+        contactName: 'Cliente Exemplo',
+        contactPhone: '11999998888',
+        notes: input.description,
+        address: { street: 'Rua Atualizada' },
+      })
+      expect(oldRound.data()).toMatchObject({ status: 'CLOSED', closedReason: 'CLIENT_EDIT' })
+      expect(newRound.data()).toMatchObject({ status: 'OPEN', reason: 'CLIENT_EDIT' })
+      expect(oldRefusal.exists()).toBe(true)
+      expect(event.data()).toMatchObject({
+        type: 'REQUEST_EDITED',
+        operationKey: input.operationKey,
+        round: 1,
+        targetRound: 2,
+      })
+    })
+    await expect(
+      professional.acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+    ).rejects.toMatchObject({ code: 'round-changed' })
+  })
+
+  it('serializa edição contra aceite realmente simultâneo sem estado parcial', async () => {
+    await seedScenario()
+    const barrier = coordinatedBarrier(2)
+    const owner = serviceFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+      barrier,
+    )
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      barrier,
+    )
+
+    const outcomes = await Promise.allSettled([
+      owner.updateOwnRequest(clientUpdateInput('request-1')),
+      professional.acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+    ])
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1)
+
+    await inspect(async (firestore) => {
+      const [request, assignments, newRound, editEvent] = await Promise.all([
+        getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+        getDocs(collection(firestore, 'serviceRequests', 'request-1', 'assignments')),
+        getDoc(doc(firestore, 'serviceRequests', 'request-1', 'rounds', 'round-2')),
+        getDoc(doc(firestore, 'serviceRequests', 'request-1', 'events', 'edited-round-2')),
+      ])
+      if (request.data()?.status === 'ASSIGNED') {
+        expect(assignments.size).toBe(1)
+        expect(newRound.exists()).toBe(false)
+        expect(editEvent.exists()).toBe(false)
+      } else {
+        expect(request.data()).toMatchObject({ status: 'OPEN', round: 2 })
+        expect(assignments.size).toBe(0)
+        expect(newRound.exists()).toBe(true)
+        expect(editEvent.exists()).toBe(true)
+      }
+    })
+  })
+
+  it('cancela pedido ASSIGNED sem substituição e remove atribuição e reserva no mesmo commit', async () => {
+    await seedScenario()
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const owner = serviceFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+    )
+    const assignment = await professional.acceptOpportunity({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    const input = clientCancellationInput(
+      'request-1',
+      1,
+      assignment.assignmentId,
+      'client-cancel-assigned-0001',
+    )
+
+    const cancelled = await owner.cancelOwnRequest(input)
+    expect(cancelled).toMatchObject({
+      idempotent: false,
+      request: {
+        status: 'CANCELLED',
+        round: 1,
+        assignedProfessionalId: null,
+        currentAssignmentId: null,
+      },
+    })
+    await expect(owner.cancelOwnRequest(input)).resolves.toMatchObject({
+      idempotent: true,
+    })
+    await expect(
+      owner.cancelOwnRequest({ ...input, operationKey: 'different-cancel-operation-01' }),
+    ).rejects.toMatchObject({ code: 'stale-assignment' })
+
+    await inspect(async (firestore) => {
+      const [request, round, endedAssignment, reservation, event, nextRound] =
+        await Promise.all([
+          getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+          getDoc(doc(firestore, 'serviceRequests', 'request-1', 'rounds', 'round-1')),
+          getDoc(doc(firestore, 'serviceRequests', 'request-1', 'assignments', assignment.assignmentId)),
+          getDoc(doc(firestore, 'professionalReservations', professionalA, 'slots', slotId)),
+          getDoc(doc(firestore, 'serviceRequests', 'request-1', 'events', 'cancelled-by-client')),
+          getDoc(doc(firestore, 'serviceRequests', 'request-1', 'rounds', 'round-2')),
+        ])
+      expect(request.data()).toMatchObject({ status: 'CANCELLED', round: 1 })
+      expect(round.data()).toMatchObject({ status: 'CLOSED', closedReason: 'CLIENT_CANCELLATION' })
+      expect(endedAssignment.data()).toMatchObject({
+        status: 'CANCELLED',
+        endReason: 'CLIENT_CANCELLATION',
+      })
+      expect(reservation.exists()).toBe(false)
+      expect(event.data()).toMatchObject({ fromStatus: 'ASSIGNED', assignmentId: assignment.assignmentId })
+      expect(nextRound.exists()).toBe(false)
+    })
+  })
+
+  it('serializa cancelamento OPEN contra aceite simultâneo e exige releitura do perdedor', async () => {
+    await seedScenario()
+    const barrier = coordinatedBarrier(2)
+    const owner = serviceFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+      barrier,
+    )
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      barrier,
+    )
+    const outcomes = await Promise.allSettled([
+      owner.cancelOwnRequest(clientCancellationInput('request-1')),
+      professional.acceptOpportunity({ requestId: 'request-1', expectedRound: 1 }),
+    ])
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1)
+
+    await inspect(async (firestore) => {
+      const [request, assignments, reservation, cancellationEvent] = await Promise.all([
+        getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+        getDocs(collection(firestore, 'serviceRequests', 'request-1', 'assignments')),
+        getDoc(doc(firestore, 'professionalReservations', professionalA, 'slots', slotId)),
+        getDoc(doc(firestore, 'serviceRequests', 'request-1', 'events', 'cancelled-by-client')),
+      ])
+      if (request.data()?.status === 'ASSIGNED') {
+        expect(assignments.size).toBe(1)
+        expect(reservation.exists()).toBe(true)
+        expect(cancellationEvent.exists()).toBe(false)
+      } else {
+        expect(request.data()?.status).toBe('CANCELLED')
+        expect(assignments.size).toBe(0)
+        expect(reservation.exists()).toBe(false)
+        expect(cancellationEvent.exists()).toBe(true)
+      }
+    })
+  })
+
+  it('nega edição cruzada e writes diretos que omitem rodada, privado ou evento', async () => {
+    await seedScenario()
+    const otherClient = serviceFor(
+      testEnvironment.authenticatedContext('other-client').firestore(),
+      'other-client',
+    )
+    await expect(
+      otherClient.updateOwnRequest(clientUpdateInput('request-1')),
+    ).rejects.toMatchObject({ code: 'permission-denied' })
+
+    const ownerFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    await assertFails(
+      updateDoc(doc(ownerFirestore, 'serviceRequests', 'request-1'), {
+        round: 2,
+        currentRoundId: 'round-2',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+    await assertFails(
+      updateDoc(doc(ownerFirestore, 'serviceRequestPrivate', 'request-1'), {
+        notes: 'Alteração direta sem a transação completa.',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('bloqueia edição e cancelamento comum após o início e protege a reserva contra write direto', async () => {
+    await seedScenario()
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const ownerFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const owner = serviceFor(ownerFirestore, clientId)
+    const assignment = await professional.acceptOpportunity({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+
+    await assertFails(
+      deleteDoc(
+        doc(ownerFirestore, 'professionalReservations', professionalA, 'slots', slotId),
+      ),
+    )
+    await inspect((firestore) =>
+      updateDoc(doc(firestore, 'serviceRequests', 'request-1'), {
+        status: 'IN_PROGRESS',
+      }),
+    )
+    await expect(
+      owner.updateOwnRequest(clientUpdateInput('request-1')),
+    ).rejects.toMatchObject({ code: 'not-open' })
+    await expect(
+      owner.cancelOwnRequest(
+        clientCancellationInput(
+          'request-1',
+          1,
+          assignment.assignmentId,
+          'client-cancel-started-0001',
+        ),
+      ),
+    ).rejects.toMatchObject({ code: 'intervention-required' })
   })
 
   it('permite a query proposta somente para profissional aprovado e mantém o resumo sem dados privados', async () => {
@@ -1169,15 +1471,17 @@ describe('service request transactional proof', () => {
         requestId: 'request-1',
         expectedRound: 1,
       }),
-      client.cancelOwnRequest('request-1'),
+      client.cancelOwnRequest(clientCancellationInput('request-1')),
     ])
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
     const rejected = results.find((result) => result.status === 'rejected')
-    expect(rejected).toMatchObject({
-      status: 'rejected',
-      reason: { code: 'not-open' },
-    })
+    expect(rejected?.status).toBe('rejected')
+    if (rejected?.status === 'rejected') {
+      expect(['not-open', 'round-changed']).toContain(
+        (rejected.reason as ServiceRequestError).code,
+      )
+    }
     await inspect(async (firestore) => {
       const [request, round, assignments, events, reservation] =
         await Promise.all([
@@ -1469,6 +1773,7 @@ describe('service request transactional proof', () => {
     const reopened = await second.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: accepted.assignmentId,
+      reason: 'Não conseguirei comparecer ao atendimento agendado.',
     })
 
     expect(reopened.reopenedRound).toBe(2)
@@ -1549,10 +1854,12 @@ describe('service request transactional proof', () => {
     const firstCancel = await professional.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: firstAccept.assignmentId,
+      reason: 'Não conseguirei comparecer ao atendimento agendado.',
     })
     const retryCancel = await professional.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: firstAccept.assignmentId,
+      reason: 'Não conseguirei comparecer ao atendimento agendado.',
     })
     expect(firstCancel.idempotent).toBe(false)
     expect(retryCancel.idempotent).toBe(true)
@@ -1570,6 +1877,553 @@ describe('service request transactional proof', () => {
       expect(assignments.size).toBe(1)
       expect(events.size).toBe(2)
       expect(rounds.size).toBe(2)
+    })
+  })
+
+  it('exige motivo e preserva o motivo na atribuição e no evento imutável', async () => {
+    await seedScenario()
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await professional.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await expect(
+      professional.cancelAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        reason: 'curto',
+      }),
+    ).rejects.toMatchObject({ code: 'validation' })
+
+    const reason = 'Tive uma emergência familiar e não conseguirei comparecer.'
+    await professional.cancelAssignment({
+      requestId: 'request-1',
+      expectedAssignmentId: accepted.assignmentId,
+      reason,
+    })
+    await inspect(async (firestore) => {
+      const [assignment, event] = await Promise.all([
+        getDoc(doc(firestore, 'serviceRequests', 'request-1', 'assignments', accepted.assignmentId)),
+        getDoc(doc(firestore, 'serviceRequests', 'request-1', 'events', 'reopened-round-1')),
+      ])
+      expect(assignment.data()).toMatchObject({ cancellationReason: reason })
+      expect(event.data()).toMatchObject({ reason })
+    })
+  })
+
+  it('permite cancelamento do compromisso existente por profissional suspenso e inativo', async () => {
+    await seedScenario(['request-1', 'request-2'])
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await professional.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await inspect((firestore) =>
+      updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalA),
+        { reviewStatus: 'SUSPENDED', active: false },
+      ),
+    )
+
+    await expect(
+      professional.acceptOpportunity({ requestId: 'request-2', expectedRound: 1 }),
+    ).rejects.toMatchObject({ code: 'professional-restricted' })
+    await expect(
+      professional.getCurrentProfessionalAssignment(
+        'request-1',
+        accepted.assignmentId,
+      ),
+    ).resolves.toMatchObject({ assignmentId: accepted.assignmentId })
+    await expect(
+      professional.cancelAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        reason: 'Minha conta foi suspensa e não poderei realizar o atendimento.',
+      }),
+    ).resolves.toMatchObject({ reopenedRound: 2 })
+  })
+
+  it('lista atendimentos atuais com limite e mantém o endereço privado restrito ao responsável', async () => {
+    await seedScenario()
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(professionalFirestore, professionalA)
+    await professional.acceptRequest({ requestId: 'request-1', expectedRound: 1 })
+    await inspect((firestore) =>
+      updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalA),
+        { reviewStatus: 'UNDER_REVIEW', active: false },
+      ),
+    )
+
+    const appointmentsQuery = query(
+      collection(professionalFirestore, 'serviceRequests'),
+      where('assignedProfessionalId', '==', professionalA),
+      where('status', 'in', ['ASSIGNED', 'IN_PROGRESS']),
+      orderBy(documentId(), 'asc'),
+      limit(13),
+    )
+    await expect(getDocs(appointmentsQuery)).resolves.toMatchObject({ size: 1 })
+    await assertSucceeds(
+      getDoc(doc(professionalFirestore, 'serviceRequestPrivate', 'request-1')),
+    )
+
+    const previousProfessional = testEnvironment
+      .authenticatedContext(professionalB)
+      .firestore()
+    await assertFails(
+      getDoc(doc(previousProfessional, 'serviceRequestPrivate', 'request-1')),
+    )
+    await assertFails(
+      getDocs(
+        query(
+          collection(professionalFirestore, 'serviceRequests'),
+          where('assignedProfessionalId', '==', professionalA),
+          where('status', 'in', ['ASSIGNED', 'IN_PROGRESS']),
+          orderBy(documentId(), 'asc'),
+        ),
+      ),
+    )
+  })
+
+  it('atualiza lista e detalhe em tempo real quando o atendimento começa', async () => {
+    await seedScenario()
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await professional.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+
+    let resolveAssignedPage!: (snapshot: ProfessionalAppointmentsPageSnapshot) => void
+    let resolveStartedPage!: (snapshot: ProfessionalAppointmentsPageSnapshot) => void
+    let resolveAssignedDetails!: (
+      snapshot: ProfessionalAppointmentDetailsSnapshot,
+    ) => void
+    let resolveStartedDetails!: (
+      snapshot: ProfessionalAppointmentDetailsSnapshot,
+    ) => void
+    const assignedPage = new Promise<ProfessionalAppointmentsPageSnapshot>(
+      (resolve) => {
+        resolveAssignedPage = resolve
+      },
+    )
+    const startedPage = new Promise<ProfessionalAppointmentsPageSnapshot>(
+      (resolve) => {
+        resolveStartedPage = resolve
+      },
+    )
+    const assignedDetails = new Promise<ProfessionalAppointmentDetailsSnapshot>(
+      (resolve) => {
+        resolveAssignedDetails = resolve
+      },
+    )
+    const startedDetails = new Promise<ProfessionalAppointmentDetailsSnapshot>(
+      (resolve) => {
+        resolveStartedDetails = resolve
+      },
+    )
+    const errors: unknown[] = []
+    const unsubscribePage = professional.subscribeProfessionalAppointments({
+      pageSize: 12,
+      onPage(snapshot) {
+        const status = snapshot.page.items[0]?.status
+        if (status === 'ASSIGNED') resolveAssignedPage(snapshot)
+        if (status === 'IN_PROGRESS') resolveStartedPage(snapshot)
+      },
+      onError(error) {
+        errors.push(error)
+      },
+    })
+    const unsubscribeDetails =
+      professional.subscribeProfessionalAppointmentDetails({
+        requestId: 'request-1',
+        onDetails(snapshot) {
+          if (snapshot.details.appointment.status === 'ASSIGNED') {
+            resolveAssignedDetails(snapshot)
+          }
+          if (snapshot.details.appointment.status === 'IN_PROGRESS') {
+            resolveStartedDetails(snapshot)
+          }
+        },
+        onUnavailable(error) {
+          errors.push(error)
+        },
+        onError(error) {
+          errors.push(error)
+        },
+      })
+
+    try {
+      await expect(assignedPage).resolves.toMatchObject({
+        page: { items: [{ assignmentId: accepted.assignmentId }] },
+      })
+      await expect(assignedDetails).resolves.toMatchObject({
+        details: {
+          privateData: { address: { street: 'Rua Privada' } },
+        },
+      })
+      await makeRequestStartable()
+      await professional.startAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        expectedRound: 1,
+      })
+      await expect(startedPage).resolves.toMatchObject({
+        page: { items: [{ status: 'IN_PROGRESS' }] },
+      })
+      await expect(startedDetails).resolves.toMatchObject({
+        details: { appointment: { status: 'IN_PROGRESS' } },
+      })
+      expect(errors).toEqual([])
+    } finally {
+      unsubscribePage()
+      unsubscribeDetails()
+    }
+  })
+
+  it('inicia o atendimento atomicamente, preserva a reserva e torna retry idempotente', async () => {
+    await seedScenario()
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await professional.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await makeRequestStartable()
+
+    const started = await professional.startAssignment({
+      requestId: 'request-1',
+      expectedAssignmentId: accepted.assignmentId,
+      expectedRound: 1,
+    })
+    const retry = await professional.startAssignment({
+      requestId: 'request-1',
+      expectedAssignmentId: accepted.assignmentId,
+      expectedRound: 1,
+    })
+    expect(started.idempotent).toBe(false)
+    expect(retry.idempotent).toBe(true)
+
+    await inspect(async (firestore) => {
+      const [request, assignment, reservation, startEvent, events] =
+        await Promise.all([
+          getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+          getDoc(
+            doc(
+              firestore,
+              'serviceRequests',
+              'request-1',
+              'assignments',
+              accepted.assignmentId,
+            ),
+          ),
+          getDoc(
+            doc(
+              firestore,
+              'professionalReservations',
+              professionalA,
+              'slots',
+              slotId,
+            ),
+          ),
+          getDoc(
+            doc(
+              firestore,
+              'serviceRequests',
+              'request-1',
+              'events',
+              startEventId(1),
+            ),
+          ),
+          getDocs(collection(firestore, 'serviceRequests', 'request-1', 'events')),
+        ])
+      expect(request.data()).toMatchObject({
+        status: 'IN_PROGRESS',
+        assignedProfessionalId: professionalA,
+        currentAssignmentId: accepted.assignmentId,
+      })
+      expect(assignment.data()).toMatchObject({
+        status: 'ACTIVE',
+        startedEventId: startEventId(1),
+      })
+      expect(assignment.data()?.startedAt).toBeDefined()
+      expect(reservation.data()).toMatchObject({
+        professionalId: professionalA,
+        requestId: 'request-1',
+        assignmentId: accepted.assignmentId,
+      })
+      expect(startEvent.data()).toMatchObject({
+        type: 'SERVICE_STARTED',
+        fromStatus: 'ASSIGNED',
+        toStatus: 'IN_PROGRESS',
+      })
+      expect(
+        events.docs.filter((event) => event.data().type === 'SERVICE_STARTED'),
+      ).toHaveLength(1)
+    })
+
+    await expect(
+      professional.cancelAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        reason: 'Não posso mais comparecer depois do início do atendimento.',
+      }),
+    ).rejects.toMatchObject({ code: 'intervention-required' })
+  })
+
+  it('permite ao profissional suspenso iniciar compromisso existente sem liberar novas oportunidades', async () => {
+    await seedScenario(['request-1', 'request-2'])
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await professional.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await makeRequestStartable()
+    await inspect((firestore) =>
+      updateDoc(
+        doc(firestore, 'professionalOperationalProfiles', professionalA),
+        { reviewStatus: 'SUSPENDED', active: false },
+      ),
+    )
+
+    await expect(
+      professional.startAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        expectedRound: 1,
+      }),
+    ).resolves.toMatchObject({ idempotent: false })
+    await expect(
+      professional.acceptRequest({ requestId: 'request-2', expectedRound: 1 }),
+    ).rejects.toMatchObject({ code: 'professional-restricted' })
+  })
+
+  it('revoga endereço e início do antigo responsável após substituição', async () => {
+    await seedScenario()
+    const firstFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const first = serviceFor(firstFirestore, professionalA)
+    const second = serviceFor(
+      testEnvironment.authenticatedContext(professionalB).firestore(),
+      professionalB,
+    )
+    const oldAssignment = await first.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await first.cancelAssignment({
+      requestId: 'request-1',
+      expectedAssignmentId: oldAssignment.assignmentId,
+      reason: 'Não conseguirei realizar o atendimento na data combinada.',
+    })
+    const replacement = await second.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 2,
+    })
+    await makeRequestStartable()
+
+    await assertFails(
+      getDoc(doc(firstFirestore, 'serviceRequestPrivate', 'request-1')),
+    )
+    await expect(
+      first.startAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: oldAssignment.assignmentId,
+        expectedRound: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'round-changed' })
+    await expect(
+      second.startAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: replacement.assignmentId,
+        expectedRound: 2,
+      }),
+    ).resolves.toMatchObject({ assignmentId: replacement.assignmentId })
+  })
+
+  it('rejeita início direto sem atualizar atribuição e evento associados', async () => {
+    await seedScenario()
+    const professionalFirestore = testEnvironment
+      .authenticatedContext(professionalA)
+      .firestore()
+    const professional = serviceFor(professionalFirestore, professionalA)
+    await professional.acceptRequest({ requestId: 'request-1', expectedRound: 1 })
+    await makeRequestStartable()
+
+    await assertFails(
+      updateDoc(doc(professionalFirestore, 'serviceRequests', 'request-1'), {
+        status: 'IN_PROGRESS',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+  })
+
+  it('serializa início e cancelamento concorrentes sem estado parcial', async () => {
+    await seedScenario()
+    const barrier = coordinatedBarrier(2)
+    const operationBarrier: TransactionCoordinator = {
+      async afterRead(operation, key) {
+        if (operation !== 'start' && operation !== 'cancel') return
+        await barrier.afterRead(operation, key)
+      },
+    }
+    const professional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await professional.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await makeRequestStartable()
+    const startProfessional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      operationBarrier,
+      () => new Date(),
+    )
+    const cancelProfessional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      operationBarrier,
+      () => new Date(Date.now() - 120_000),
+    )
+
+    const results = await Promise.allSettled([
+      startProfessional.startAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        expectedRound: 1,
+      }),
+      cancelProfessional.cancelAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        reason: 'Não conseguirei realizar o atendimento na data combinada.',
+      }),
+    ])
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+
+    await inspect(async (firestore) => {
+      const [request, reservation] = await Promise.all([
+        getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+        getDoc(
+          doc(
+            firestore,
+            'professionalReservations',
+            professionalA,
+            'slots',
+            slotId,
+          ),
+        ),
+      ])
+      if (request.data()?.status === 'IN_PROGRESS') {
+        expect(reservation.exists()).toBe(true)
+      } else {
+        expect(request.data()).toMatchObject({ status: 'OPEN', round: 2 })
+        expect(reservation.exists()).toBe(false)
+      }
+    })
+  })
+
+  it('mantém substituição vencida como OPEN pendente sem oferecer novos aceites', async () => {
+    await seedScenario()
+    const first = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await first.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    const afterAcceptanceCutoff = new Date(periodWindow.acceptUntil.getTime() + 60_000)
+    const lateProfessional = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      undefined,
+      () => afterAcceptanceCutoff,
+    )
+    const reopened = await lateProfessional.cancelAssignment({
+      requestId: 'request-1',
+      expectedAssignmentId: accepted.assignmentId,
+      reason: 'Não conseguirei chegar antes do início do período combinado.',
+    })
+    expect(reopened.replacementSearchOpen).toBe(false)
+
+    const second = serviceFor(
+      testEnvironment.authenticatedContext(professionalB).firestore(),
+      professionalB,
+      undefined,
+      () => afterAcceptanceCutoff,
+    )
+    await expect(
+      second.acceptOpportunity({ requestId: 'request-1', expectedRound: 2 }),
+    ).rejects.toMatchObject({ code: 'request-expired' })
+    await inspect(async (firestore) => {
+      const request = await getDoc(doc(firestore, 'serviceRequests', 'request-1'))
+      expect(request.data()).toMatchObject({
+        status: 'OPEN',
+        round: 2,
+        reopenReason: 'PROFESSIONAL_CANCELLATION',
+      })
+    })
+  })
+
+  it('mantém pedido OPEN quando não há substituto elegível, sem criar profissional fictício', async () => {
+    await seedScenario()
+    const first = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const accepted = await first.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await inspect(async (firestore) => {
+      for (const professionalId of [professionalB, professionalC]) {
+        await updateDoc(
+          doc(firestore, 'professionalAvailability', professionalId, 'slots', slotId),
+          { available: false },
+        )
+      }
+    })
+    await first.cancelAssignment({
+      requestId: 'request-1',
+      expectedAssignmentId: accepted.assignmentId,
+      reason: 'Não conseguirei realizar o atendimento na data combinada.',
+    })
+
+    for (const professionalId of [professionalA, professionalB, professionalC]) {
+      const candidate = serviceFor(
+        testEnvironment.authenticatedContext(professionalId).firestore(),
+        professionalId,
+      )
+      await expect(candidate.listOpenOpportunities({
+        categoryId,
+        specialtyId,
+        cityIbgeCode,
+        serviceDate,
+        period: 'MORNING',
+      })).resolves.toMatchObject({ items: [] })
+    }
+    await inspect(async (firestore) => {
+      const request = await getDoc(doc(firestore, 'serviceRequests', 'request-1'))
+      expect(request.data()).toMatchObject({ status: 'OPEN', round: 2 })
     })
   })
 
@@ -1972,6 +2826,7 @@ describe('service request transactional proof', () => {
     await second.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: accepted.assignmentId,
+      reason: 'Não conseguirei comparecer ao atendimento agendado.',
     })
     await first.acceptRequest({ requestId: 'request-1', expectedRound: 2 })
 
@@ -2086,6 +2941,7 @@ describe('service request transactional proof', () => {
     await first.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: assignment.assignmentId,
+      reason: 'Não conseguirei comparecer ao atendimento agendado.',
     })
     await assertFails(getDoc(privateReferenceForFirst))
     await second.acceptRequest({ requestId: 'request-1', expectedRound: 2 })
@@ -2128,6 +2984,7 @@ describe('service request transactional proof', () => {
     const cancellation = first.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: assignment.assignmentId,
+      reason: 'Não conseguirei comparecer ao atendimento agendado.',
     })
     await cancellationRead
     const overlappingAccept = second.acceptRequest({
@@ -2152,6 +3009,96 @@ describe('service request transactional proof', () => {
     })
   })
 
+  it('serializa cancelamento do cliente, cancelamento profissional e novo aceite concorrentes', async () => {
+    await seedScenario()
+    const barrier = coordinatedBarrier(2)
+    const cancellationBarrier: TransactionCoordinator = {
+      async afterRead(operation, key) {
+        if (operation !== 'cancel' && operation !== 'client-cancel') return
+        await barrier.afterRead(operation, key)
+      },
+    }
+    const first = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+      cancellationBarrier,
+    )
+    const owner = serviceFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+      cancellationBarrier,
+    )
+    const second = serviceFor(
+      testEnvironment.authenticatedContext(professionalB).firestore(),
+      professionalB,
+    )
+    const assignment = await first.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    const professionalCancellationInput = {
+      requestId: 'request-1',
+      expectedAssignmentId: assignment.assignmentId,
+      reason: 'Não conseguirei realizar o atendimento na data combinada.',
+    }
+    const clientInput = clientCancellationInput(
+      'request-1',
+      1,
+      assignment.assignmentId,
+      'client-cancel-race-000001',
+    )
+
+    const professionalCancellation = first.cancelAssignment(
+      professionalCancellationInput,
+    )
+    const clientCancellation = owner.cancelOwnRequest(clientInput)
+    const earlyReplacement = second.acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 2,
+    })
+    await expect(earlyReplacement).rejects.toMatchObject({ code: 'round-changed' })
+    const cancellations = await Promise.allSettled([
+      professionalCancellation,
+      clientCancellation,
+    ])
+    expect(cancellations.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+
+    let requestStatus = ''
+    await inspect(async (firestore) => {
+      const state = await getDoc(doc(firestore, 'serviceRequests', 'request-1'))
+      requestStatus = String(state.data()?.status ?? '')
+    })
+    if (requestStatus === 'OPEN') {
+      const replacement = await second.acceptRequest({
+        requestId: 'request-1',
+        expectedRound: 2,
+      })
+      await expect(owner.cancelOwnRequest(clientInput)).rejects.toMatchObject({
+        code: 'round-changed',
+      })
+      await expect(
+        first.cancelAssignment(professionalCancellationInput),
+      ).resolves.toMatchObject({ idempotent: true })
+      await inspect(async (firestore) => {
+        const request = await getDoc(doc(firestore, 'serviceRequests', 'request-1'))
+        expect(request.data()).toMatchObject({
+          status: 'ASSIGNED',
+          assignedProfessionalId: professionalB,
+          currentAssignmentId: replacement.assignmentId,
+        })
+      })
+    } else {
+      expect(requestStatus).toBe('CANCELLED')
+      await expect(
+        second.acceptRequest({ requestId: 'request-1', expectedRound: 2 }),
+      ).rejects.toSatisfy(
+        (error: unknown) =>
+          error instanceof ServiceRequestError &&
+          ['not-open', 'round-changed'].includes(error.code),
+      )
+    }
+  })
+
   it('não permite que um retry de cancelamento afete atribuição posterior', async () => {
     await seedScenario()
     const first = serviceFor(
@@ -2169,6 +3116,7 @@ describe('service request transactional proof', () => {
     await first.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: oldAssignment.assignmentId,
+      reason: 'Não conseguirei comparecer ao atendimento agendado.',
     })
     await second.acceptRequest({ requestId: 'request-1', expectedRound: 2 })
 
@@ -2182,6 +3130,7 @@ describe('service request transactional proof', () => {
     const retry = await first.cancelAssignment({
       requestId: 'request-1',
       expectedAssignmentId: oldAssignment.assignmentId,
+      reason: 'Não conseguirei comparecer ao atendimento agendado.',
     })
     expect(retry.idempotent).toBe(true)
     await inspect(async (firestore) => {
@@ -2212,12 +3161,14 @@ describe('service request transactional proof', () => {
       professional.cancelAssignment({
         requestId: 'request-1',
         expectedAssignmentId: assignment.assignmentId,
+        reason: 'Não conseguirei comparecer ao atendimento agendado.',
       }),
     ).rejects.toBeInstanceOf(ServiceRequestError)
     await expect(
       professional.cancelAssignment({
         requestId: 'request-1',
         expectedAssignmentId: assignment.assignmentId,
+        reason: 'Não conseguirei comparecer ao atendimento agendado.',
       }),
     ).rejects.toMatchObject({ code: 'intervention-required' })
   })
@@ -2242,6 +3193,7 @@ describe('service request transactional proof', () => {
       professional.cancelAssignment({
         requestId: 'request-1',
         expectedAssignmentId: assignment.assignmentId,
+        reason: 'Não conseguirei comparecer ao atendimento agendado.',
       }),
     ).rejects.toMatchObject({ code: 'intervention-required' })
   })

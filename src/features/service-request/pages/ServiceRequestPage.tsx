@@ -36,7 +36,12 @@ import {
   SERVICE_PERIOD_DEFINITIONS,
   SERVICE_TIME_ZONE,
 } from '../../../services/service-period-policy'
-import type { ServicePeriod, ServiceRequestSummary } from '../../../types/service-request'
+import {
+  ServiceRequestError,
+  type OwnServiceRequestDetails,
+  type ServicePeriod,
+  type ServiceRequestSummary,
+} from '../../../types/service-request'
 import { BRAZILIAN_STATE_CODES } from '../../../types/professional-profile'
 import type { ProfessionalBaseLocation } from '../../../types/professional-profile'
 import { MunicipalityCombobox } from '../../professional-profile/components/MunicipalityCombobox'
@@ -143,10 +148,14 @@ export function ServiceRequestPage() {
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [confirmed, setConfirmed] = useState<ServiceRequestSummary | null>(null)
+  const [requestDetails, setRequestDetails] = useState<OwnServiceRequestDetails | null>(null)
+  const [editingRequest, setEditingRequest] = useState<ServiceRequestSummary | null>(null)
   const [recovering, setRecovering] = useState(Boolean(recoveredRequestId))
   const [confirmCancellation, setConfirmCancellation] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [cancellationError, setCancellationError] = useState('')
+  const [cancellationOperationKey, setCancellationOperationKey] = useState(newOperationKey)
+  const [loadedAt] = useState(() => new Date())
   const [schedulingBounds] = useState(() => {
     const now = new Date()
     return {
@@ -163,23 +172,21 @@ export function ServiceRequestPage() {
   }, [draft, recoveredRequestId, user?.uid])
 
   useEffect(() => {
-    if (!recoveredRequestId || confirmed) return
-    let active = true
-    void serviceRequestService
-      .getOwnRequest(recoveredRequestId)
-      .then((request) => {
-        if (active) setConfirmed(request)
-      })
-      .catch((error) => {
-        if (active) setSubmitError(requestErrorMessage(error))
-      })
-      .finally(() => {
-        if (active) setRecovering(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [confirmed, recoveredRequestId])
+    if (!user?.uid || !recoveredRequestId || editingRequest) return
+    return serviceRequestService.subscribeOwnRequestDetails({
+      requestId: recoveredRequestId,
+      onDetails(snapshot) {
+        setRequestDetails(snapshot.details)
+        setConfirmed(snapshot.details.request)
+        setSubmitError('')
+        setRecovering(false)
+      },
+      onError(error) {
+        setSubmitError(requestErrorMessage(error))
+        setRecovering(false)
+      },
+    })
+  }, [editingRequest, recoveredRequestId, user?.uid])
 
   const categories = catalogState.status === 'ready' ? catalogState.catalog.categories : []
   const requestedCatalogSpecialty =
@@ -238,6 +245,41 @@ export function ServiceRequestPage() {
     setSubmitError('')
   }
 
+  async function rereadRequest() {
+    const requestId = editingRequest?.requestId ?? confirmed?.requestId
+    if (!requestId) return null
+    const details = await serviceRequestService.getOwnRequestDetails(requestId)
+    setRequestDetails(details)
+    return details
+  }
+
+  function beginEdit() {
+    if (!confirmed || confirmed.status !== 'OPEN' || !requestDetails) return
+    const privateData = requestDetails.privateData
+    setDraft({
+      operationKey: newOperationKey(),
+      categoryId: confirmed.categoryId,
+      specialtyId: confirmed.specialtyId,
+      description: privateData.notes,
+      stateCode: privateData.address.stateCode,
+      municipality: {
+        city: privateData.address.city,
+        stateCode: privateData.address.stateCode,
+        ibgeCode: privateData.address.ibgeCode,
+      },
+      street: privateData.address.street,
+      number: privateData.address.number,
+      complement: privateData.address.complement ?? '',
+      neighborhood: privateData.address.neighborhood,
+      postalCode: privateData.address.postalCode,
+      serviceDate: confirmed.serviceDate,
+      period: confirmed.period,
+    })
+    setEditingRequest(confirmed)
+    setConfirmed(null)
+    setSubmitError('')
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (submitting) return
@@ -256,7 +298,7 @@ export function ServiceRequestPage() {
     setSubmitting(true)
     setSubmitError('')
     try {
-      const result = await serviceRequestService.createRequest({
+      const payload = {
         operationKey: draft.operationKey,
         specialtyId: selectedSpecialtyId,
         description: draft.description,
@@ -272,14 +314,57 @@ export function ServiceRequestPage() {
         period: draft.period,
         contactName: profile?.name ?? '',
         contactPhone: clientProfile?.phone ?? '',
+      }
+      const result = editingRequest
+        ? await serviceRequestService.updateOwnRequest({
+            ...payload,
+            requestId: editingRequest.requestId,
+            expectedRound: editingRequest.round,
+          })
+        : await serviceRequestService.createRequest(payload)
+      if (!editingRequest && user?.uid) {
+        window.localStorage.removeItem(draftStorageKey(user.uid))
+      }
+      setRequestDetails({
+        request: result.request,
+        privateData: {
+          requestId: result.request.requestId,
+          operationKey: result.request.operationKey,
+          clientId: result.request.clientId,
+          contactName: requestDetails?.privateData.contactName ?? profile?.name ?? '',
+          contactPhone: requestDetails?.privateData.contactPhone ?? clientProfile?.phone ?? '',
+          notes: draft.description.trim().replace(/\s+/g, ' '),
+          address: {
+            street: draft.street.trim(),
+            number: draft.number.trim(),
+            complement: draft.complement.trim(),
+            neighborhood: draft.neighborhood.trim(),
+            city: draft.municipality.city,
+            stateCode: draft.stateCode,
+            postalCode: draft.postalCode.replace(/\D/g, ''),
+            ibgeCode: draft.municipality.ibgeCode,
+          },
+        },
       })
-      if (user?.uid) window.localStorage.removeItem(draftStorageKey(user.uid))
       setConfirmed(result.request)
+      setEditingRequest(null)
       navigate(`/cliente/solicitar?pedido=${encodeURIComponent(result.request.requestId)}`, {
         replace: true,
       })
     } catch (error) {
       setSubmitError(requestErrorMessage(error))
+      if (
+        editingRequest &&
+        error instanceof ServiceRequestError &&
+        ['round-changed', 'not-open', 'stale-assignment'].includes(error.code)
+      ) {
+        try {
+          const details = await rereadRequest()
+          if (details) setEditingRequest(details.request)
+        } catch {
+          // Mantém o rascunho visível; a mensagem original continua sendo a mais útil.
+        }
+      }
     } finally {
       setSubmitting(false)
     }
@@ -291,12 +376,32 @@ export function ServiceRequestPage() {
     setCancellationError('')
     try {
       const result = await serviceRequestService.cancelOwnRequest(
-        confirmed.requestId,
+        {
+          requestId: confirmed.requestId,
+          operationKey: cancellationOperationKey,
+          expectedRound: confirmed.round,
+          expectedAssignmentId: confirmed.currentAssignmentId,
+        },
       )
       setConfirmed(result.request)
+      if (requestDetails) {
+        setRequestDetails({ ...requestDetails, request: result.request })
+      }
       setConfirmCancellation(false)
     } catch (error) {
       setCancellationError(requestErrorMessage(error))
+      if (
+        error instanceof ServiceRequestError &&
+        ['round-changed', 'stale-assignment', 'not-open'].includes(error.code)
+      ) {
+        try {
+          const details = await rereadRequest()
+          if (details) setConfirmed(details.request)
+          setCancellationOperationKey(newOperationKey())
+        } catch {
+          // Preserva o estado já exibido quando a releitura também falha.
+        }
+      }
     } finally {
       setCancelling(false)
     }
@@ -315,18 +420,48 @@ export function ServiceRequestPage() {
 
   if (confirmed) {
     const isOpen = confirmed.status === 'OPEN'
+    const isExpired = isOpen && confirmed.acceptUntil.getTime() <= loadedAt.getTime()
+    const isReplacement =
+      isOpen && confirmed.reopenReason === 'PROFESSIONAL_CANCELLATION'
+    const isAssigned = confirmed.status === 'ASSIGNED'
+    const canCancel = isOpen || isAssigned
+    const statusTitle = isReplacement && isExpired
+      ? 'Substituição pendente'
+      : isReplacement
+        ? 'Procurando substituto'
+      : isExpired
+        ? 'Pedido pendente'
+      : isOpen
+        ? 'Procurando profissional'
+      : isAssigned
+        ? 'Profissional confirmado'
+        : confirmed.status === 'CANCELLED'
+          ? 'Solicitação cancelada'
+          : confirmed.status === 'COMPLETED'
+            ? 'Atendimento concluído'
+            : 'Atendimento iniciado'
     return (
       <ClientLayout pageTitle="Solicitar serviço" contextSwitcher={<ModeSwitcher />}>
         <Card className="mx-auto max-w-2xl overflow-hidden">
           <div className="bg-brand-panel px-5 py-8 text-brand-panel-foreground sm:px-8">
             <CheckCircle2 className="size-10" aria-hidden="true" />
             <h2 className="mt-4 text-2xl font-bold tracking-tight">
-              {isOpen ? 'Procurando profissional' : 'Solicitação cancelada'}
+              {statusTitle}
             </h2>
             <p className="mt-2 max-w-xl text-sm leading-6 text-brand-panel-foreground/80">
-              {isOpen
+              {isReplacement && isExpired
+                ? 'O profissional cancelou após o prazo de novos aceites. O pedido continua aberto para intervenção ou reagendamento, sem confirmação de substituto.'
+                : isReplacement
+                  ? 'O profissional cancelou e uma nova rodada foi iniciada. A substituição depende de um novo aceite válido.'
+              : isExpired
+                ? 'O prazo desta rodada terminou sem aceite. O pedido continua visível; edite a data ou procure o suporte se precisar de ajuda.'
+                : isOpen
                 ? 'Sua solicitação foi salva. A disponibilidade depende de profissionais compatíveis na sua região.'
-                : 'O cancelamento foi salvo e este pedido não participa mais da procura.'}
+                : isAssigned
+                  ? 'Um profissional aceitou este pedido. O cancelamento ainda é permitido antes do início do período.'
+                  : confirmed.status === 'CANCELLED'
+                    ? 'O cancelamento foi salvo e este pedido não participa mais da procura.'
+                    : 'Para alterações após o início, procure o suporte pelos canais já informados no cadastro.'}
             </p>
           </div>
           <CardContent className="space-y-5 pt-6">
@@ -350,12 +485,16 @@ export function ServiceRequestPage() {
                 <AlertDescription>{cancellationError}</AlertDescription>
               </Alert>
             ) : null}
-            {isOpen && confirmCancellation ? (
+            {canCancel && confirmCancellation ? (
               <Alert variant="warning">
                 <CircleAlert aria-hidden="true" />
                 <AlertTitle>Cancelar esta solicitação?</AlertTitle>
                 <AlertDescription>
-                  <p>A procura será encerrada e este pedido não poderá ser reaberto por esta tela.</p>
+                  <p>
+                    {isAssigned
+                      ? 'A atribuição e a reserva serão encerradas. A procura não será reiniciada.'
+                      : 'A procura será encerrada e este pedido não poderá ser reaberto por esta tela.'}
+                  </p>
                   <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                     <Button type="button" variant="destructive" loading={cancelling} loadingLabel="Cancelando…" onClick={() => void cancelRequest()}>
                       Confirmar cancelamento
@@ -371,7 +510,12 @@ export function ServiceRequestPage() {
               <Button asChild variant="outline">
                 <Link to="/cliente">Voltar ao início</Link>
               </Button>
-              {isOpen && !confirmCancellation ? (
+              {isOpen && requestDetails ? (
+                <Button type="button" variant="outline" onClick={beginEdit}>
+                  Editar solicitação
+                </Button>
+              ) : null}
+              {canCancel && !confirmCancellation ? (
                 <Button type="button" variant="ghost" onClick={() => setConfirmCancellation(true)}>
                   Cancelar solicitação
                 </Button>
@@ -391,14 +535,44 @@ export function ServiceRequestPage() {
     >
       <div className="mx-auto max-w-6xl">
         <div className="mb-6">
-          <Button variant="ghost" size="sm" asChild className="-ml-3">
-            <Link to="/cliente"><ArrowLeft aria-hidden="true" /> Voltar ao início</Link>
-          </Button>
-          <h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Conte o que você precisa</h2>
+          {editingRequest ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-ml-3"
+              onClick={() => {
+                setConfirmed(requestDetails?.request ?? editingRequest)
+                setEditingRequest(null)
+                setSubmitError('')
+              }}
+            >
+              <ArrowLeft aria-hidden="true" /> Voltar ao pedido
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" asChild className="-ml-3">
+              <Link to="/cliente"><ArrowLeft aria-hidden="true" /> Voltar ao início</Link>
+            </Button>
+          )}
+          <h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
+            {editingRequest ? 'Editar solicitação' : 'Conte o que você precisa'}
+          </h2>
           <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-            Informe uma especialidade, o local e um período. Você poderá revisar tudo antes de enviar.
+            {editingRequest
+              ? 'Revise os campos. Ao salvar, uma nova rodada de procura substituirá a rodada atual.'
+              : 'Informe uma especialidade, o local e um período. Você poderá revisar tudo antes de enviar.'}
           </p>
         </div>
+
+        {editingRequest && editingRequest.status !== 'OPEN' ? (
+          <Alert variant="warning" className="mb-6">
+            <CircleAlert aria-hidden="true" />
+            <AlertTitle>O pedido mudou enquanto você editava</AlertTitle>
+            <AlertDescription>
+              Seus campos foram preservados, mas esta versão não pode mais ser salva. Volte ao pedido para ver o estado atual.
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {!clientProfileReadiness?.isComplete ? (
           <Alert variant="warning" className="mb-6">
@@ -581,7 +755,7 @@ export function ServiceRequestPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Resumo da solicitação</CardTitle>
-                <CardDescription>Confira os dados antes de enviar.</CardDescription>
+                <CardDescription>Confira os dados antes de {editingRequest ? 'salvar' : 'enviar'}.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
                 <div><p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Serviço</p><p className="mt-1 break-words font-medium">{selectedSpecialty?.name ?? 'Não informado'}</p><p className="text-sm text-muted-foreground">{selectedCategory?.name}</p></div>
@@ -594,9 +768,11 @@ export function ServiceRequestPage() {
                     <AlertDescription>{submitError}</AlertDescription>
                   </Alert>
                 ) : null}
-                <Button type="submit" className="w-full" disabled={submitting || catalogState.status !== 'ready' || !clientProfileReadiness?.isComplete}>
+                <Button type="submit" className="w-full" disabled={submitting || catalogState.status !== 'ready' || !clientProfileReadiness?.isComplete || Boolean(editingRequest && editingRequest.status !== 'OPEN')}>
                   {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
-                  {submitting ? 'Enviando…' : 'Enviar solicitação'}
+                  {submitting
+                    ? editingRequest ? 'Salvando…' : 'Enviando…'
+                    : editingRequest ? 'Salvar alterações' : 'Enviar solicitação'}
                 </Button>
                 <p className="flex gap-2 text-xs leading-5 text-muted-foreground"><Clock3 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />Se houver falha, seus dados ficam salvos neste dispositivo para uma nova tentativa.</p>
               </CardContent>

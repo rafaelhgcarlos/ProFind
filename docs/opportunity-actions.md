@@ -1,13 +1,15 @@
 # Aceite e recusa de oportunidades
 
-Esta entrega complementa o núcleo transacional da #22 com os use cases públicos
-da #17. Ela não implementa o feed completo da #13 nem as telas de atendimentos
-da #26.
+Esta implementação complementa o núcleo transacional da #22 com os use cases
+públicos da #17, o cancelamento/substituição da #21 e a agenda/início da #26,
+integrados ao feed da #13.
 
 ## Use cases
 
 - `acceptOpportunity({ requestId, expectedRound })`
 - `declineOpportunity({ requestId, expectedRound })`
+- `cancelAssignment({ requestId, expectedAssignmentId, reason })`
+- `startAssignment({ requestId, expectedAssignmentId, expectedRound })`
 
 Os nomes antigos `acceptRequest` e `refuseRequest` permanecem como aliases para
 compatibilidade. O UID profissional sempre vem do Firebase Authentication; o
@@ -41,6 +43,46 @@ rodada, portanto uma nova rodada não herda recusas antigas.
 IDs determinísticos de atribuição/evento e a leitura do resultado persistido
 tornam retries idempotentes. Um retry de uma operação antiga nunca escreve na
 rodada posterior.
+
+## Cancelamento profissional e substituição
+
+Somente o profissional apontado pela atribuição ativa pode cancelar. O motivo é
+obrigatório e o commit encerra a atribuição, remove a reserva, limpa o responsável,
+incrementa a rodada, reabre o mesmo pedido como `OPEN` e grava o evento
+`PROFESSIONAL_CANCELLED_AND_REOPENED`. O cancelante fica excluído apenas da rodada
+seguinte; recusas da rodada anterior continuam no histórico, mas não bloqueiam os
+demais profissionais.
+
+O cancelamento é permitido até o início do período, inclusive para um profissional
+posteriormente suspenso ou desativado, porque isso trata um compromisso existente e
+não concede acesso a novas oportunidades. Se o corte de aceite já passou, o pedido
+permanece `OPEN` como pendência de intervenção ou reagendamento e não entra no feed.
+Não existe promessa de substituição nem criação de outro pedido.
+
+O ID determinístico da atribuição e o evento encerrado tornam retries idempotentes.
+Um retry da atribuição antiga reconhece o cancelamento já persistido e nunca reabre
+ou cancela a atribuição de um substituto posterior.
+
+## Atendimentos e início
+
+A agenda profissional consulta apenas pedidos `ASSIGNED` ou `IN_PROGRESS` cujo
+`assignedProfessionalId` é o UID autenticado. A consulta é limitada, paginada pelo
+ID do pedido e mantida em tempo real; os itens carregados são apresentados por data.
+O detalhe combina o
+resumo com `serviceRequestPrivate/{requestId}`; ao perder a atribuição, o listener
+limpa imediatamente endereço e descrição da memória da tela.
+
+O início revalida pedido, rodada, atribuição ativa, responsável atual, reserva e
+início do período. O commit altera o pedido para `IN_PROGRESS`, registra
+`startedAt`/`startedEventId` na atribuição e cria o evento imutável
+`SERVICE_STARTED`. A reserva não é atualizada nem removida e continua protegendo o
+slot durante a execução.
+
+O evento usa ID determinístico por rodada. Uma resposta perdida ou repetição da
+mesma operação retorna o resultado persistido sem criar outro evento. Uma operação
+de atribuição antiga falha depois de cancelamento ou substituição. Suspensão,
+desativação ou reanálise impedem novas oportunidades, mas não retiram as ações
+autorizadas sobre um compromisso ainda atual.
 
 ## Resultados para a futura interface
 

@@ -1,14 +1,22 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ServiceRequestPage } from './ServiceRequestPage'
+import type { OwnRequestDetailsSubscriptionInput } from '../../../services/service-request.service'
+import {
+  ServiceRequestError,
+  type OwnServiceRequestDetails,
+} from '../../../types/service-request'
 
 const mocks = vi.hoisted(() => ({
   createRequest: vi.fn(),
+  updateOwnRequest: vi.fn(),
   cancelOwnRequest: vi.fn(),
   getOwnRequest: vi.fn(),
+  getOwnRequestDetails: vi.fn(),
+  ownDetailsSubscriptions: [] as OwnRequestDetailsSubscriptionInput[],
   useAuth: vi.fn(),
   useProfile: vi.fn(),
   useCatalog: vi.fn(),
@@ -24,8 +32,25 @@ vi.mock('../../home/use-catalog', () => ({ useCatalog: mocks.useCatalog }))
 vi.mock('../../../services/service-request.service', () => ({
   serviceRequestService: {
     createRequest: mocks.createRequest,
+    updateOwnRequest: mocks.updateOwnRequest,
     cancelOwnRequest: mocks.cancelOwnRequest,
     getOwnRequest: mocks.getOwnRequest,
+    getOwnRequestDetails: mocks.getOwnRequestDetails,
+    subscribeOwnRequestDetails: vi.fn((input) => {
+      mocks.ownDetailsSubscriptions.push(input)
+      let active = true
+      void mocks.getOwnRequestDetails(input.requestId).then(
+        (details: OwnServiceRequestDetails) => {
+          if (active) input.onDetails({ details, fromCache: false })
+        },
+        (error: unknown) => {
+          if (active) input.onError(error)
+        },
+      )
+      return () => {
+        active = false
+      }
+    }),
   },
 }))
 vi.mock('../../professional-profile/components/MunicipalityCombobox', () => ({
@@ -54,6 +79,46 @@ const profileState = {
   clientProfileReadiness: { isComplete: true, missingFields: [] },
 }
 
+const recoveredDetails: OwnServiceRequestDetails = {
+  request: {
+    requestId: 'request-operation-key-000001',
+    operationKey: 'request-operation-key-000001',
+    clientId: 'client-owner',
+    categoryId: 'maintenance',
+    specialtyId: 'electrician',
+    cityIbgeCode: '3509502',
+    serviceDate: '2026-11-10',
+    period: 'MORNING',
+    periodStartAt: new Date('2026-11-10T11:00:00Z'),
+    acceptUntil: new Date('2026-11-20T10:30:00Z'),
+    status: 'OPEN',
+    round: 1,
+    currentRoundId: 'round-1',
+    assignedProfessionalId: null,
+    currentAssignmentId: null,
+    reopenReason: null,
+    excludedProfessionalIds: [],
+  },
+  privateData: {
+    requestId: 'request-operation-key-000001',
+    operationKey: 'request-operation-key-000001',
+    clientId: 'client-owner',
+    contactName: 'Cliente Exemplo',
+    contactPhone: '',
+    notes: 'Duas tomadas pararam de funcionar.',
+    address: {
+      street: 'Rua das Flores',
+      number: '100',
+      complement: '',
+      neighborhood: 'Centro',
+      city: 'Campinas',
+      stateCode: 'SP',
+      postalCode: '13000000',
+      ibgeCode: '3509502',
+    },
+  },
+}
+
 function renderPage(path = '/cliente/solicitar?specialty=electrician') {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -77,9 +142,10 @@ async function fillForm() {
   return user
 }
 
-describe('ServiceRequestPage', () => {
+describe('ServiceRequestPage', { timeout: 10_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.ownDetailsSubscriptions.length = 0
     localStorage.clear()
     mocks.useAuth.mockReturnValue({ status: 'authenticated', user: { uid: 'client-owner' } })
     mocks.useProfile.mockReturnValue(profileState)
@@ -96,7 +162,7 @@ describe('ServiceRequestPage', () => {
         serviceDate: '2026-11-10',
         period: 'MORNING',
         periodStartAt: new Date(),
-        acceptUntil: new Date(),
+        acceptUntil: new Date('2026-11-20T10:30:00Z'),
         status: 'OPEN',
         round: 1,
         currentRoundId: 'round-1',
@@ -105,6 +171,11 @@ describe('ServiceRequestPage', () => {
         reopenReason: null,
         excludedProfessionalIds: [],
       },
+    })
+    mocks.getOwnRequestDetails.mockResolvedValue(recoveredDetails)
+    mocks.updateOwnRequest.mockResolvedValue({
+      idempotent: false,
+      request: { ...recoveredDetails.request, round: 2, currentRoundId: 'round-2' },
     })
     mocks.cancelOwnRequest.mockResolvedValue({
       idempotent: false,
@@ -138,7 +209,7 @@ describe('ServiceRequestPage', () => {
       request: {
         requestId: 'request-operation-key-000001', operationKey: 'request-operation-key-000001',
         clientId: 'client-owner', categoryId: 'maintenance', specialtyId: 'electrician', cityIbgeCode: '3509502',
-        serviceDate: '2026-11-10', period: 'MORNING', periodStartAt: new Date(), acceptUntil: new Date(), status: 'OPEN',
+        serviceDate: '2026-11-10', period: 'MORNING', periodStartAt: new Date(), acceptUntil: new Date('2026-11-20T10:30:00Z'), status: 'OPEN',
         round: 1, currentRoundId: 'round-1', assignedProfessionalId: null, currentAssignmentId: null,
         reopenReason: null, excludedProfessionalIds: [],
       },
@@ -158,25 +229,32 @@ describe('ServiceRequestPage', () => {
   })
 
   it('recupera uma solicitação confirmada pela URL após recarga', async () => {
-    mocks.getOwnRequest.mockResolvedValue({
-      requestId: 'request-operation-key-000001',
-      serviceDate: '2026-11-10',
-      period: 'MORNING',
-      status: 'OPEN',
-    })
     renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
 
     expect(await screen.findByRole('heading', { name: 'Procurando profissional' })).toBeInTheDocument()
-    expect(mocks.getOwnRequest).toHaveBeenCalledWith('request-operation-key-000001')
+    expect(mocks.getOwnRequestDetails).toHaveBeenCalledWith('request-operation-key-000001')
+  })
+
+  it('reflete o início do atendimento recebido pelo listener em tempo real', async () => {
+    renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
+    await screen.findByRole('heading', { name: 'Procurando profissional' })
+
+    act(() => {
+      mocks.ownDetailsSubscriptions[0].onDetails({
+        details: {
+          ...recoveredDetails,
+          request: { ...recoveredDetails.request, status: 'IN_PROGRESS' },
+        },
+        fromCache: false,
+      })
+    })
+
+    expect(
+      screen.getByRole('heading', { name: 'Atendimento iniciado' }),
+    ).toBeVisible()
   })
 
   it('cancela somente após confirmação explícita e mostra o estado persistido', async () => {
-    mocks.getOwnRequest.mockResolvedValue({
-      requestId: 'request-operation-key-000001',
-      serviceDate: '2026-11-10',
-      period: 'MORNING',
-      status: 'OPEN',
-    })
     const user = userEvent.setup()
     renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
 
@@ -185,7 +263,139 @@ describe('ServiceRequestPage', () => {
     await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
 
     expect(await screen.findByRole('heading', { name: 'Solicitação cancelada' })).toBeInTheDocument()
-    expect(mocks.cancelOwnRequest).toHaveBeenCalledWith('request-operation-key-000001')
+    expect(mocks.cancelOwnRequest).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'request-operation-key-000001',
+      expectedRound: 1,
+      expectedAssignmentId: null,
+    }))
+  })
+
+  it('reutiliza o formulário para editar e inicia a nova rodada somente após o commit', async () => {
+    const user = userEvent.setup()
+    renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
+
+    await user.click(await screen.findByRole('button', { name: 'Editar solicitação' }))
+    expect(screen.getByLabelText('Descreva o que precisa *')).toHaveValue(
+      'Duas tomadas pararam de funcionar.',
+    )
+    await user.clear(screen.getByLabelText('Descreva o que precisa *'))
+    await user.type(
+      screen.getByLabelText('Descreva o que precisa *'),
+      'Agora são três tomadas sem energia.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Salvar alterações' }))
+
+    await waitFor(() => expect(mocks.updateOwnRequest).toHaveBeenCalledOnce())
+    expect(mocks.updateOwnRequest).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'request-operation-key-000001',
+      expectedRound: 1,
+      description: 'Agora são três tomadas sem energia.',
+    }))
+    expect(await screen.findByRole('heading', { name: 'Procurando profissional' })).toBeInTheDocument()
+  })
+
+  it('preserva o rascunho e relê o pedido quando um aceite vence a edição', async () => {
+    mocks.updateOwnRequest.mockRejectedValueOnce(
+      new ServiceRequestError('round-changed', 'A solicitação mudou.'),
+    )
+    mocks.getOwnRequestDetails
+      .mockResolvedValueOnce(recoveredDetails)
+      .mockResolvedValueOnce({
+        ...recoveredDetails,
+        request: {
+          ...recoveredDetails.request,
+          status: 'ASSIGNED',
+          assignedProfessionalId: 'professional-a',
+          currentAssignmentId: 'round-1',
+        },
+      })
+    const user = userEvent.setup()
+    renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
+    await user.click(await screen.findByRole('button', { name: 'Editar solicitação' }))
+    await user.clear(screen.getByLabelText('Descreva o que precisa *'))
+    await user.type(
+      screen.getByLabelText('Descreva o que precisa *'),
+      'Alteração que não pode ser perdida no conflito.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Salvar alterações' }))
+
+    expect(await screen.findByText('O pedido mudou enquanto você editava')).toBeInTheDocument()
+    expect(screen.getByLabelText('Descreva o que precisa *')).toHaveValue(
+      'Alteração que não pode ser perdida no conflito.',
+    )
+    expect(screen.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled()
+  })
+
+  it('permite confirmar o cancelamento de um pedido atribuído sem oferecer edição', async () => {
+    mocks.getOwnRequestDetails.mockResolvedValueOnce({
+      ...recoveredDetails,
+      request: {
+        ...recoveredDetails.request,
+        status: 'ASSIGNED',
+        assignedProfessionalId: 'professional-a',
+        currentAssignmentId: 'round-1',
+      },
+    })
+    const user = userEvent.setup()
+    renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
+
+    expect(await screen.findByRole('heading', { name: 'Profissional confirmado' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Editar solicitação' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancelar solicitação' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+
+    expect(mocks.cancelOwnRequest).toHaveBeenCalledWith(expect.objectContaining({
+      expectedRound: 1,
+      expectedAssignmentId: 'round-1',
+    }))
+  })
+
+  it('mantém pedido vencido visível como pendência sem criar estado EXPIRED', async () => {
+    mocks.getOwnRequestDetails.mockResolvedValueOnce({
+      ...recoveredDetails,
+      request: {
+        ...recoveredDetails.request,
+        acceptUntil: new Date('2026-11-01T10:30:00Z'),
+      },
+    })
+    renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
+
+    expect(await screen.findByRole('heading', { name: 'Pedido pendente' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Editar solicitação' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancelar solicitação' })).toBeInTheDocument()
+  })
+
+  it('mostra procura de substituto somente enquanto novos aceites são permitidos', async () => {
+    mocks.getOwnRequestDetails.mockResolvedValueOnce({
+      ...recoveredDetails,
+      request: {
+        ...recoveredDetails.request,
+        reopenReason: 'PROFESSIONAL_CANCELLATION',
+        round: 2,
+        currentRoundId: 'round-2',
+      },
+    })
+    renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
+
+    expect(await screen.findByRole('heading', { name: 'Procurando substituto' })).toBeInTheDocument()
+    expect(screen.getByText(/depende de um novo aceite válido/i)).toBeInTheDocument()
+  })
+
+  it('sinaliza intervenção quando o cancelamento profissional ocorre após o corte de aceite', async () => {
+    mocks.getOwnRequestDetails.mockResolvedValueOnce({
+      ...recoveredDetails,
+      request: {
+        ...recoveredDetails.request,
+        reopenReason: 'PROFESSIONAL_CANCELLATION',
+        round: 2,
+        currentRoundId: 'round-2',
+        acceptUntil: new Date('2026-11-01T10:30:00Z'),
+      },
+    })
+    renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
+
+    expect(await screen.findByRole('heading', { name: 'Substituição pendente' })).toBeInTheDocument()
+    expect(screen.getByText(/intervenção ou reagendamento/i)).toBeInTheDocument()
   })
 
   it('recusa uma especialidade inexistente sem perder o formulário', async () => {

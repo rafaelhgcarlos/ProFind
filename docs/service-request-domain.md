@@ -44,11 +44,13 @@ Política centralizada em `service-period-policy.ts`:
 |---|---|---|---|
 | `OPEN` | Aceite por profissional elegível | `ASSIGNED` | solicitação, fechamento da rodada, atribuição, reserva e evento |
 | `OPEN` | Recusa pelo profissional | `OPEN` | recusa da rodada e evento; não altera terceiros |
+| `OPEN` sem atribuição | Edição pelo cliente dono | `OPEN` em nova rodada | solicitação, dados privados editáveis, fechamento da rodada anterior, nova rodada e evento |
 | `OPEN` | Cancelamento pelo cliente dono | `CANCELLED` | solicitação, fechamento da rodada atual e evento |
-| `ASSIGNED` | Cancelamento pelo responsável antes do início | `OPEN` | solicitação, atribuição encerrada, remoção da reserva, nova rodada e evento |
+| `ASSIGNED` antes do início | Cancelamento pelo cliente dono | `CANCELLED` | solicitação, rodada, atribuição encerrada, remoção da reserva e evento; não abre substituição |
+| `ASSIGNED` | Cancelamento motivado pelo responsável antes do início | `OPEN` | solicitação, atribuição encerrada com motivo, remoção da reserva, nova rodada e evento |
 | `ASSIGNED` | Início, integração futura | `IN_PROGRESS` | fora desta entrega |
 | `IN_PROGRESS` | Conclusão, integração futura | `COMPLETED` | fora desta entrega |
-| `OPEN`/`ASSIGNED` | Cancelamento do cliente, integração futura | `CANCELLED` | fora desta entrega |
+| `IN_PROGRESS`/`COMPLETED` | Edição ou cancelamento comum | sem alteração | bloqueado; orientar suporte sem antecipar o fluxo da #28 |
 
 `COMPLETED` e `CANCELLED` são terminais para a substituição. Um atendimento iniciado, um período vencido ou outra situação não segura retorna `intervention-required`; nenhum cliente web força a reabertura.
 
@@ -73,14 +75,24 @@ Mudanças relevantes no perfil incrementam `profileVersion`, registram um evento
 ## Invariantes e imutabilidade
 
 - Cliente, matching, data, período e limites temporais não mudam durante aceite ou substituição.
+- Uma edição do cliente exige `OPEN`, ausência de atribuição e a rodada esperada. Serviço, local, data e período são revalidados, a rodada anterior é fechada e uma nova rodada começa no mesmo commit. Recusas e aceites da rodada anterior permanecem no histórico, mas não autorizam ações na nova rodada.
+- Identidade, `requestId`, `operationKey` original, `clientId`, contato, datas de criação e histórico são imutáveis durante a edição. Somente os campos editáveis do resumo e os dados privados de serviço/endereço são substituídos.
 - A atribuição ativa, a reserva e o evento de aceite são obrigatórios no mesmo commit.
+- O início exige `ASSIGNED`, responsável/atribuição/rodada atuais e horário igual ou posterior a `periodStartAt`. Pedido, atribuição e evento `SERVICE_STARTED` mudam atomicamente para representar `IN_PROGRESS`.
+- A reserva permanece inalterada durante `IN_PROGRESS`; conclusão e liberação posterior pertencem ao contrato da #27.
+- O evento de início e seu ponteiro na atribuição são determinísticos. Retry da mesma atribuição é idempotente e uma atribuição substituída não pode iniciar o pedido.
 - A reserva é criada em um caminho único por profissional/slot.
 - `actorId`, `professionalId`, `clientId`, rodada e ponteiros devem concordar entre todos os documentos.
 - Recusas e eventos são imutáveis e usam caminhos da rodada atual.
-- O cliente só cancela o próprio pedido enquanto ele está `OPEN`; a rodada e o evento de cancelamento pertencem ao mesmo commit.
+- O cliente cancela o próprio pedido `OPEN` ou `ASSIGNED` somente antes do início. Em `ASSIGNED`, a mesma transação encerra a atribuição, remove a reserva, fecha a rodada e registra o evento. O destino é terminal `CANCELLED`: cancelamento do cliente nunca inicia substituição.
 - A nova rodada não consulta nem copia recusas antigas.
 - Quem cancelou fica em `excludedProfessionalIds` somente na rodada imediatamente seguinte.
+- O motivo do cancelamento profissional é obrigatório, normalizado e preservado tanto na atribuição encerrada quanto no evento imutável.
+- O prazo de cancelamento profissional termina no início do período; o prazo de novos aceites termina 30 minutos antes. Um cancelamento entre esses dois marcos ainda libera a reserva e reabre o mesmo pedido, mas a rodada nasce vencida para novos aceites e fica como pendência de intervenção ou reagendamento.
+- Suspensão, desativação ou reanálise bloqueiam novas oportunidades, mas não retiram do profissional atualmente designado a autorização de cancelar o compromisso existente dentro das demais regras.
+- Suspensão, desativação ou reanálise também não retiram a leitura da agenda atual nem o início autorizado de um compromisso existente.
 - O cancelamento exige a atribuição esperada. Um retry encontra o evento antigo e retorna sucesso idempotente sem tocar em uma atribuição posterior.
+- Edição e cancelamento do cliente carregam chave de operação, rodada esperada e atribuição esperada. Retries antigos podem reconhecer o próprio evento, mas não alteram uma rodada ou atribuição posterior.
 - A remoção da reserva, o encerramento da atribuição e a reabertura são inseparáveis.
 - Writes parciais, proprietário forjado e mudanças diretas de estado são negados pelas Rules.
 
@@ -91,6 +103,7 @@ Mudanças relevantes no perfil incrementam `profileVersion`, registram um evento
 - `serviceRequestPrivate/{requestId}` é legível apenas pelo cliente, administrador ativo ou profissional atualmente designado.
 - Durante `OPEN`, nenhum candidato lê dados privados.
 - Assim que ocorre cancelamento/reabertura, o antigo responsável perde novas leituras privadas. Depois da substituição, somente o novo responsável recebe acesso.
+- A listagem de atendimentos usa somente o responsável atual; históricos permitidos não reabrem acesso ao documento privado.
 - Histórico de atribuições e eventos não aceita edição ou exclusão pelo cliente web.
 
 As Rules usam leituras cruzadas (`get`, `getAfter`, `existsAfter`) e por isso as operações devem manter o conjunto documentado de escritas. O modelo atual permanece abaixo dos limites de acesso a documentos das Rules para transações atômicas; adicionar novas dependências exige recontar e retestar esses acessos.
@@ -133,8 +146,10 @@ npm run test:rules
 
 - dois profissionais no mesmo pedido;
 - um profissional em dois pedidos no mesmo slot.
+- edição do cliente contra aceite profissional;
+- cancelamento do cliente contra aceite profissional.
 
-A suíte também cobre recusa isolada, substituição, retry, rodada antiga, vencimento, aprovação/ativação/versão, writes incompletos, falsificação de proprietário, privacidade e corrida entre cancelamento e novo aceite.
+A suíte também cobre cancelamento `OPEN`/`ASSIGNED`, liberação de reserva, ausência de substituição no cancelamento do cliente, recusa isolada, substituição profissional, retries antigos, rodada antiga, vencimento sem `EXPIRED`, aprovação/ativação/versão, acesso cruzado, writes incompletos, falsificação de proprietário, privacidade e bloqueio após o início.
 
 ## Migração futura
 

@@ -90,6 +90,12 @@ const ProfessionalOpportunitiesPage = lazy(() =>
   ).then((module) => ({ default: module.ProfessionalOpportunitiesPage })),
 )
 
+const ProfessionalAppointmentsPage = lazy(() =>
+  import(
+    '../features/appointments/pages/ProfessionalAppointmentsPage'
+  ).then((module) => ({ default: module.ProfessionalAppointmentsPage })),
+)
+
 const ClientProfilePage = lazy(() =>
   import('../features/client-profile/pages/ClientProfilePage').then(
     (module) => ({ default: module.ClientProfilePage }),
@@ -248,6 +254,22 @@ export function AppRouter() {
               element={
                 <Suspense fallback={<RouteFallback />}>
                   <ProfessionalOpportunitiesPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/profissional/atendimentos"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ProfessionalAppointmentsPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/profissional/atendimentos/:requestId"
+              element={
+                <Suspense fallback={<RouteFallback />}>
+                  <ProfessionalAppointmentsPage />
                 </Suspense>
               }
             />

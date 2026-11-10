@@ -11,7 +11,7 @@ import {
   Wrench,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
@@ -19,7 +19,9 @@ import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
 import { EmptyState } from '../../../components/ui/empty-state'
+import { Label } from '../../../components/ui/label'
 import { Skeleton } from '../../../components/ui/skeleton'
+import { Textarea } from '../../../components/ui/textarea'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { professionalReviewService } from '../../../services/professional-review.service'
 import { serviceRequestService } from '../../../services/service-request.service'
@@ -109,6 +111,10 @@ function pageKey(cursor?: OpportunityFeedCursor | null) {
 export function ProfessionalOpportunitiesPage() {
   useDocumentTitle('Oportunidades — ProFind')
   const location = useLocation()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const recoveredRequestId = searchParams.get('atendimento') ?? ''
+  const recoveredAssignmentId = searchParams.get('atribuicao') ?? ''
   const { user } = useAuth()
   const userId = user?.uid
   const { profile, professionalProfile } = useProfile()
@@ -130,6 +136,14 @@ export function ProfessionalOpportunitiesPage() {
     () => new Set(),
   )
   const [accepted, setAccepted] = useState<AcceptedConfirmation | null>(null)
+  const [recoveringAssignment, setRecoveringAssignment] = useState(
+    Boolean(recoveredRequestId && recoveredAssignmentId),
+  )
+  const [confirmCancellation, setConfirmCancellation] = useState(false)
+  const [cancellationReason, setCancellationReason] = useState('')
+  const [cancellingAssignment, setCancellingAssignment] = useState(false)
+  const [assignmentError, setAssignmentError] = useState('')
+  const [cancellationNotice, setCancellationNotice] = useState('')
   const [online, setOnline] = useState(
     () => typeof navigator === 'undefined' || navigator.onLine !== false,
   )
@@ -245,10 +259,35 @@ export function ProfessionalOpportunitiesPage() {
       setCardFeedback({})
       setDisabledRequestIds(new Set())
       setAccepted(null)
+      setConfirmCancellation(false)
+      setCancellationReason('')
+      setAssignmentError('')
+      setRecoveringAssignment(Boolean(recoveredRequestId && recoveredAssignmentId))
 
       if (userId) {
         void reloadReview(userId, version)
         connectPage(null, 'first', version)
+        if (recoveredRequestId && recoveredAssignmentId) {
+          void serviceRequestService
+            .getCurrentProfessionalAssignment(
+              recoveredRequestId,
+              recoveredAssignmentId,
+            )
+            .then((details) => {
+              if (generation.current === version) setAccepted(details)
+            })
+            .catch((error: unknown) => {
+              if (generation.current !== version) return
+              setAssignmentError(
+                error instanceof Error
+                  ? error.message
+                  : 'Não foi possível recuperar este atendimento.',
+              )
+            })
+            .finally(() => {
+              if (generation.current === version) setRecoveringAssignment(false)
+            })
+        }
       }
     })
 
@@ -257,7 +296,14 @@ export function ProfessionalOpportunitiesPage() {
       for (const unsubscribe of activeSubscriptions.values()) unsubscribe()
       activeSubscriptions.clear()
     }
-  }, [attempt, connectPage, reloadReview, userId])
+  }, [
+    attempt,
+    connectPage,
+    recoveredAssignmentId,
+    recoveredRequestId,
+    reloadReview,
+    userId,
+  ])
 
   const opportunities = useMemo(() => {
     const unique = new Map<string, ProfessionalOpportunitySummary>()
@@ -337,6 +383,7 @@ export function ProfessionalOpportunitiesPage() {
     action: OpportunityAction,
   ) {
     if (pendingActions[opportunity.requestId]) return
+    setCancellationNotice('')
     setPendingActions((current) => ({
       ...current,
       [opportunity.requestId]: action,
@@ -359,6 +406,9 @@ export function ProfessionalOpportunitiesPage() {
           expectedRound: opportunity.round,
         })
         setAccepted({ opportunity, assignmentId: result.assignmentId })
+        navigate(`/profissional/atendimentos/${opportunity.requestId}`, {
+          replace: true,
+        })
       } else {
         await serviceRequestService.declineOpportunity({
           requestId: opportunity.requestId,
@@ -413,6 +463,41 @@ export function ProfessionalOpportunitiesPage() {
     }
   }
 
+  async function handleCancelAssignment() {
+    if (!accepted || cancellingAssignment) return
+    const reason = cancellationReason.trim().replace(/\s+/g, ' ')
+    if (reason.length < 10 || reason.length > 500) {
+      setAssignmentError('Informe o motivo do cancelamento em 10 a 500 caracteres.')
+      return
+    }
+    setCancellingAssignment(true)
+    setAssignmentError('')
+    try {
+      const result = await serviceRequestService.cancelAssignment({
+        requestId: accepted.opportunity.requestId,
+        expectedAssignmentId: accepted.assignmentId,
+        reason,
+      })
+      setAccepted(null)
+      setConfirmCancellation(false)
+      setCancellationReason('')
+      setCancellationNotice(
+        result.replacementSearchOpen
+          ? 'Atendimento cancelado. A procura por substituto foi iniciada.'
+          : 'Atendimento cancelado. O prazo de aceite terminou e o pedido ficou pendente para intervenção ou reagendamento.',
+      )
+      navigate(location.pathname, { replace: true })
+    } catch (error) {
+      setAssignmentError(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível cancelar este atendimento.',
+      )
+    } finally {
+      setCancellingAssignment(false)
+    }
+  }
+
   const pageTitle = location.pathname.endsWith('/oportunidades')
     ? 'Oportunidades'
     : 'Início'
@@ -454,6 +539,119 @@ export function ProfessionalOpportunitiesPage() {
               <Skeleton className="h-72" />
             </div>
           </div>
+        ) : null}
+
+        {recoveringAssignment ? (
+          <div role="status" aria-label="Recuperando atendimento">
+            <Skeleton className="h-40" />
+          </div>
+        ) : null}
+
+        {cancellationNotice ? (
+          <Alert variant="success" aria-live="polite">
+            <CheckCircle2 aria-hidden="true" />
+            <AlertTitle>Cancelamento confirmado</AlertTitle>
+            <AlertDescription>{cancellationNotice}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {accepted ? (
+          <Card>
+            <CardHeader>
+              <Badge variant="secondary" className="w-fit">
+                <CalendarClock aria-hidden="true" className="size-3.5" />
+                Compromisso existente
+              </Badge>
+              <CardTitle>Atendimento confirmado</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <p className="text-sm leading-6 text-muted-foreground">
+                {specialtyNames.get(accepted.opportunity.specialtyId) ?? 'Serviço'} ·{' '}
+                {formatServiceDate(accepted.opportunity.serviceDate)} ·{' '}
+                {SERVICE_PERIOD_DEFINITIONS[accepted.opportunity.period].label}
+              </p>
+              {assignmentError ? (
+                <Alert variant="destructive" role="alert">
+                  <AlertTriangle aria-hidden="true" />
+                  <AlertTitle>Não foi possível atualizar o atendimento</AlertTitle>
+                  <AlertDescription>{assignmentError}</AlertDescription>
+                </Alert>
+              ) : null}
+              {confirmCancellation ? (
+                <Alert variant="warning">
+                  <AlertTriangle aria-hidden="true" />
+                  <AlertTitle>Cancelar este atendimento?</AlertTitle>
+                  <AlertDescription>
+                    <p>
+                      A atribuição será encerrada e a reserva liberada somente após a confirmação do servidor.
+                    </p>
+                    <div className="mt-4 space-y-2">
+                      <Label htmlFor="professional-cancellation-reason">
+                        Motivo do cancelamento *
+                      </Label>
+                      <Textarea
+                        id="professional-cancellation-reason"
+                        required
+                        minLength={10}
+                        maxLength={500}
+                        value={cancellationReason}
+                        aria-invalid={
+                          cancellationReason.trim().length > 0 &&
+                          cancellationReason.trim().length < 10
+                        }
+                        placeholder="Explique por que não poderá realizar o atendimento."
+                        onChange={(event) => {
+                          setCancellationReason(event.target.value)
+                          setAssignmentError('')
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {cancellationReason.length}/500 caracteres
+                      </p>
+                    </div>
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        loading={cancellingAssignment}
+                        loadingLabel="Cancelando…"
+                        onClick={() => void handleCancelAssignment()}
+                      >
+                        Confirmar cancelamento
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={cancellingAssignment}
+                        onClick={() => {
+                          setConfirmCancellation(false)
+                          setAssignmentError('')
+                        }}
+                      >
+                        Manter atendimento
+                      </Button>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setConfirmCancellation(true)}
+                  >
+                    Cancelar atendimento
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : assignmentError && recoveredRequestId ? (
+          <Alert variant="destructive" role="alert">
+            <AlertTriangle aria-hidden="true" />
+            <AlertTitle>Atendimento indisponível</AlertTitle>
+            <AlertDescription>{assignmentError}</AlertDescription>
+          </Alert>
         ) : null}
 
         {access === 'restricted' && !isInitialLoading ? (
@@ -515,18 +713,6 @@ export function ProfessionalOpportunitiesPage() {
               </Alert>
             ) : null}
 
-            {accepted ? (
-              <Alert variant="success" aria-live="polite">
-                <CheckCircle2 aria-hidden="true" />
-                <AlertTitle>Aceite confirmado</AlertTitle>
-                <AlertDescription>
-                  A atribuição {accepted.assignmentId} foi confirmada para{' '}
-                  {specialtyNames.get(accepted.opportunity.specialtyId) ?? 'o serviço'}.
-                  O acompanhamento completo ficará disponível na etapa de agendados.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
             {feedError ? (
               <Alert variant="destructive">
                 <AlertTriangle aria-hidden="true" />
@@ -584,7 +770,9 @@ export function ProfessionalOpportunitiesPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-xs font-semibold tracking-wide text-primary uppercase">
-                              {category ?? 'Oportunidade compatível'}
+                              {opportunity.reopenReason === 'PROFESSIONAL_CANCELLATION'
+                                ? 'Substituição solicitada'
+                                : category ?? 'Oportunidade compatível'}
                             </p>
                             <CardTitle className="mt-1">{specialty}</CardTitle>
                           </div>

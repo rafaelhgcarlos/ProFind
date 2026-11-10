@@ -162,6 +162,14 @@ export function cancellationEventId(round: number) {
   return `reopened-${roundDocumentId(round)}`
 }
 
+export function startEventId(round: number) {
+  return `started-${roundDocumentId(round)}`
+}
+
+export function clientEditEventId(round: number) {
+  return `edited-${roundDocumentId(round)}`
+}
+
 export function isAcceptanceAllowed(now: Date, acceptUntil: Date) {
   return now.getTime() < acceptUntil.getTime()
 }
@@ -171,4 +179,8 @@ export function isProfessionalCancellationAllowed(
   periodStartAt: Date,
 ) {
   return now.getTime() < periodStartAt.getTime()
+}
+
+export function isServiceStartAllowed(now: Date, periodStartAt: Date) {
+  return now.getTime() >= periodStartAt.getTime()
 }
