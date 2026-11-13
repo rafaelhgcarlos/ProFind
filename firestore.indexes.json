@@ -27,22 +27,6 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "reviewStatus", "order": "ASCENDING" },
-        { "fieldPath": "__name__", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "professionalOperationalProfiles",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "active", "order": "ASCENDING" },
-        { "fieldPath": "__name__", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "professionalOperationalProfiles",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "reviewStatus", "order": "ASCENDING" },
         { "fieldPath": "active", "order": "ASCENDING" },
         { "fieldPath": "__name__", "order": "ASCENDING" }
       ]
@@ -53,14 +37,6 @@
       "fields": [
         { "fieldPath": "assignedProfessionalId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "serviceRequests",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "serviceDate", "order": "DESCENDING" },
-        { "fieldPath": "__name__", "order": "DESCENDING" }
       ]
     },
     {
