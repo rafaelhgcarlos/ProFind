@@ -186,6 +186,12 @@ revogação e o roteiro com contas admin/comum estão em
 [`docs/admin-access.md`](docs/admin-access.md). A interface desta etapa prepara
 as áreas futuras sem expor links quebrados, operações ou indicadores fictícios.
 
+O item **Pedidos** consulta todas as solicitações com filtros e paginação real,
+abre detalhes com endereço privado autorizado, responsável, rodadas e histórico
+e sinaliza pedidos ainda sem aceite ou com prazo encerrado. Esta é uma entrega
+somente de leitura da #34; limites, índices, privacidade e pendências estão em
+[`docs/admin-service-requests.md`](docs/admin-service-requests.md).
+
 ## Núcleo de solicitações e distribuição
 
 O contrato transacional de solicitação aberta, aceite exclusivo, reserva de

@@ -7,10 +7,11 @@ import {
   LoaderCircle,
   LockKeyhole,
   MapPin,
+  RotateCcw,
   Send,
   Wrench,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ClientLayout } from '../../../components/layout/ClientLayout'
@@ -30,6 +31,14 @@ import { RadioGroup, RadioGroupItem } from '../../../components/ui/radio-group'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { Textarea } from '../../../components/ui/textarea'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
+import { listMunicipalitiesByState } from '../../../services/ibge-localities.service'
+import {
+  formatPostalCode,
+  lookupPostalCode,
+  normalizePostalCode,
+  PostalCodeError,
+  type PostalCodeResult,
+} from '../../../services/postal-code.service'
 import { serviceRequestService } from '../../../services/service-request.service'
 import {
   MAX_SCHEDULING_HORIZON_DAYS,
@@ -64,6 +73,16 @@ interface RequestDraft {
   postalCode: string
   serviceDate: string
   period: ServicePeriod | ''
+}
+
+type PostalCodeStatus = 'idle' | 'loading' | 'success' | 'not-found' | 'error'
+
+interface AutofilledAddress {
+  postalCode: string
+  street?: string
+  neighborhood?: string
+  stateCode?: string
+  municipality?: ProfessionalBaseLocation
 }
 
 const periods = Object.entries(SERVICE_PERIOD_DEFINITIONS) as Array<
@@ -155,6 +174,14 @@ export function ServiceRequestPage() {
   const [cancelling, setCancelling] = useState(false)
   const [cancellationError, setCancellationError] = useState('')
   const [cancellationOperationKey, setCancellationOperationKey] = useState(newOperationKey)
+  const [postalCodeStatus, setPostalCodeStatus] = useState<PostalCodeStatus>('idle')
+  const [postalCodeError, setPostalCodeError] = useState<string | null>(null)
+  const [postalCodeNotice, setPostalCodeNotice] = useState<string | null>(null)
+  const postalLookupVersion = useRef(0)
+  const currentPostalCode = useRef(normalizePostalCode(draft.postalCode))
+  const lastAutomaticLookup = useRef<string | null>(null)
+  const postalCodeCache = useRef(new Map<string, PostalCodeResult>())
+  const autofilledAddress = useRef<AutofilledAddress | null>(null)
   const [loadedAt] = useState(() => new Date())
   const [schedulingBounds] = useState(() => {
     const now = new Date()
@@ -245,6 +272,147 @@ export function ServiceRequestPage() {
     setSubmitError('')
   }
 
+  function canReplaceAutofilledValue(
+    currentValue: string,
+    previousValue: string | undefined,
+  ) {
+    return !currentValue.trim() || Boolean(previousValue && currentValue === previousValue)
+  }
+
+  async function queryPostalCode(value: string, force = false) {
+    const postalCode = normalizePostalCode(value)
+    if (postalCode.length !== 8) {
+      setPostalCodeStatus('error')
+      setPostalCodeError('Informe um CEP válido com oito dígitos.')
+      return
+    }
+    if (postalCodeStatus === 'loading' && !force) return
+
+    const version = ++postalLookupVersion.current
+    currentPostalCode.current = postalCode
+    lastAutomaticLookup.current = postalCode
+    setPostalCodeStatus('loading')
+    setPostalCodeError(null)
+    setPostalCodeNotice(null)
+
+    try {
+      let result = postalCodeCache.current.get(postalCode)
+      if (!result || force) {
+        result = await lookupPostalCode(postalCode)
+        postalCodeCache.current.set(postalCode, result)
+      }
+      const municipalities = await listMunicipalitiesByState(
+        result.baseLocation.stateCode,
+      )
+      const municipality = municipalities.find(
+        (candidate) => candidate.ibgeCode === result.baseLocation.ibgeCode,
+      )
+      if (!municipality) {
+        throw new PostalCodeError(
+          'invalid-response',
+          'Não foi possível validar o município deste CEP. Selecione a UF e o município manualmente.',
+        )
+      }
+      if (
+        version !== postalLookupVersion.current ||
+        currentPostalCode.current !== postalCode
+      ) {
+        return
+      }
+
+      setDraft((current) => {
+        if (normalizePostalCode(current.postalCode) !== postalCode) return current
+        const previous = autofilledAddress.current
+        const replaceStreet = canReplaceAutofilledValue(
+          current.street,
+          previous?.street,
+        )
+        const replaceNeighborhood = canReplaceAutofilledValue(
+          current.neighborhood,
+          previous?.neighborhood,
+        )
+        const previousMunicipality = previous?.municipality
+        const locationStillAutofilled = Boolean(
+          previous?.stateCode &&
+          previousMunicipality &&
+          current.stateCode === previous.stateCode &&
+          current.municipality?.ibgeCode === previousMunicipality.ibgeCode,
+        )
+        const replaceLocation =
+          (!current.stateCode && !current.municipality) || locationStillAutofilled
+        const street = replaceStreet && result.privateLocation.street
+          ? result.privateLocation.street
+          : current.street
+        const neighborhood = replaceNeighborhood && result.privateLocation.neighborhood
+          ? result.privateLocation.neighborhood
+          : current.neighborhood
+        const nextMunicipality = replaceLocation ? municipality : current.municipality
+        const nextStateCode = replaceLocation
+          ? municipality.stateCode
+          : current.stateCode
+
+        autofilledAddress.current = {
+          postalCode,
+          ...(replaceStreet && result.privateLocation.street
+            ? { street: result.privateLocation.street }
+            : {}),
+          ...(replaceNeighborhood && result.privateLocation.neighborhood
+            ? { neighborhood: result.privateLocation.neighborhood }
+            : {}),
+          ...(replaceLocation
+            ? { stateCode: municipality.stateCode, municipality }
+            : {}),
+        }
+        return {
+          ...current,
+          street,
+          neighborhood,
+          stateCode: nextStateCode,
+          municipality: nextMunicipality,
+          postalCode: formatPostalCode(postalCode),
+        }
+      })
+      const incomplete = !result.privateLocation.street || !result.privateLocation.neighborhood
+      setPostalCodeNotice(
+        incomplete
+          ? 'CEP localizado. Complete os campos que não vieram do provedor e revise o endereço.'
+          : 'Endereço preenchido pelo CEP. Revise e corrija qualquer campo, se necessário.',
+      )
+      setPostalCodeStatus('success')
+    } catch (error) {
+      if (
+        version !== postalLookupVersion.current ||
+        currentPostalCode.current !== postalCode
+      ) {
+        return
+      }
+      const lookupError = error instanceof PostalCodeError
+        ? error
+        : new PostalCodeError(
+            'provider-unavailable',
+            'Não foi possível consultar o CEP. Preencha o endereço manualmente ou tente novamente.',
+            { cause: error },
+          )
+      if (!force) postalCodeCache.current.delete(postalCode)
+      setPostalCodeStatus(lookupError.code === 'not-found' ? 'not-found' : 'error')
+      setPostalCodeError(lookupError.message)
+    }
+  }
+
+  function updatePostalCode(value: string) {
+    const formatted = formatPostalCode(value)
+    const normalized = normalizePostalCode(formatted)
+    currentPostalCode.current = normalized
+    postalLookupVersion.current += 1
+    update('postalCode', formatted)
+    setPostalCodeError(null)
+    setPostalCodeNotice(null)
+    setPostalCodeStatus('idle')
+    if (normalized.length === 8 && lastAutomaticLookup.current !== normalized) {
+      void queryPostalCode(formatted)
+    }
+  }
+
   async function rereadRequest() {
     const requestId = editingRequest?.requestId ?? confirmed?.requestId
     if (!requestId) return null
@@ -275,6 +443,12 @@ export function ServiceRequestPage() {
       serviceDate: confirmed.serviceDate,
       period: confirmed.period,
     })
+    currentPostalCode.current = privateData.address.postalCode
+    lastAutomaticLookup.current = privateData.address.postalCode
+    autofilledAddress.current = null
+    setPostalCodeStatus('idle')
+    setPostalCodeError(null)
+    setPostalCodeNotice(null)
     setEditingRequest(confirmed)
     setConfirmed(null)
     setSubmitError('')
@@ -675,6 +849,65 @@ export function ServiceRequestPage() {
                   <AlertTitle>Endereço protegido</AlertTitle>
                   <AlertDescription>Profissionais não veem endereço nem contato no resumo da oportunidade.</AlertDescription>
                 </Alert>
+                <div className="space-y-2">
+                  <Label htmlFor="request-postal-code">CEP *</Label>
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                    <Input
+                      id="request-postal-code"
+                      required
+                      inputMode="numeric"
+                      autoComplete="postal-code"
+                      maxLength={9}
+                      value={draft.postalCode}
+                      aria-invalid={
+                        Boolean(postalCodeError) ||
+                        (Boolean(draft.postalCode) && normalizePostalCode(draft.postalCode).length !== 8)
+                      }
+                      aria-describedby="request-postal-code-help request-postal-code-feedback"
+                      placeholder="00000-000"
+                      onChange={(event) => updatePostalCode(event.target.value)}
+                      onBlur={() => {
+                        const postalCode = normalizePostalCode(draft.postalCode)
+                        if (postalCode.length === 8 && postalCodeStatus === 'idle') {
+                          void queryPostalCode(postalCode)
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="sm:shrink-0"
+                      disabled={
+                        postalCodeStatus === 'loading' ||
+                        normalizePostalCode(draft.postalCode).length !== 8
+                      }
+                      loading={postalCodeStatus === 'loading'}
+                      loadingLabel="Consultando CEPâ€¦"
+                      onClick={() => void queryPostalCode(
+                        draft.postalCode,
+                        postalCodeStatus === 'error' || postalCodeStatus === 'not-found',
+                      )}
+                    >
+                      {postalCodeStatus === 'error' || postalCodeStatus === 'not-found'
+                        ? <RotateCcw aria-hidden="true" />
+                        : null}
+                      {postalCodeStatus === 'error' || postalCodeStatus === 'not-found'
+                        ? 'Tentar novamente'
+                        : 'Consultar CEP'}
+                    </Button>
+                  </div>
+                  <p id="request-postal-code-help" className="text-xs leading-5 text-muted-foreground">
+                    Preenchemos os dados disponíveis; número e complemento continuam manuais.
+                  </p>
+                  <div id="request-postal-code-feedback" aria-live="polite">
+                    {postalCodeNotice ? (
+                      <p className="text-sm text-success">{postalCodeNotice}</p>
+                    ) : null}
+                    {postalCodeError ? (
+                      <p className="text-sm text-destructive">{postalCodeError}</p>
+                    ) : null}
+                  </div>
+                </div>
                 <div className="grid gap-5 sm:grid-cols-[8rem_minmax(0,1fr)]">
                   <div className="space-y-2">
                     <Label htmlFor="request-state">UF *</Label>
@@ -684,7 +917,10 @@ export function ServiceRequestPage() {
                       value={draft.stateCode}
                       aria-invalid={!draft.stateCode}
                       className="min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-[3px] focus:ring-ring/25"
-                      onChange={(event) => setDraft((current) => ({ ...current, stateCode: event.target.value, municipality: null }))}
+                      onChange={(event) => {
+                        setDraft((current) => ({ ...current, stateCode: event.target.value, municipality: null }))
+                        setSubmitError('')
+                      }}
                     >
                       <option value="">UF</option>
                       {BRAZILIAN_STATE_CODES.map((code) => <option key={code} value={code}>{code}</option>)}
@@ -705,10 +941,7 @@ export function ServiceRequestPage() {
                   <div className="space-y-2"><Label htmlFor="request-street">Logradouro *</Label><Input id="request-street" required maxLength={160} value={draft.street} aria-invalid={!draft.street.trim()} onChange={(event) => update('street', event.target.value)} /></div>
                   <div className="space-y-2"><Label htmlFor="request-number">Número *</Label><Input id="request-number" required maxLength={30} value={draft.number} aria-invalid={!draft.number.trim()} onChange={(event) => update('number', event.target.value)} /></div>
                 </div>
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <div className="space-y-2"><Label htmlFor="request-neighborhood">Bairro *</Label><Input id="request-neighborhood" required maxLength={120} value={draft.neighborhood} aria-invalid={!draft.neighborhood.trim()} onChange={(event) => update('neighborhood', event.target.value)} /></div>
-                  <div className="space-y-2"><Label htmlFor="request-postal-code">CEP *</Label><Input id="request-postal-code" required inputMode="numeric" maxLength={9} value={draft.postalCode} aria-invalid={!/^\d{8}$/.test(draft.postalCode.replace(/\D/g, ''))} placeholder="00000-000" onChange={(event) => update('postalCode', event.target.value)} /></div>
-                </div>
+                <div className="space-y-2"><Label htmlFor="request-neighborhood">Bairro *</Label><Input id="request-neighborhood" required maxLength={120} value={draft.neighborhood} aria-invalid={!draft.neighborhood.trim()} onChange={(event) => update('neighborhood', event.target.value)} /></div>
                 <div className="space-y-2"><Label htmlFor="request-complement">Complemento <span className="text-muted-foreground">(opcional)</span></Label><Input id="request-complement" maxLength={120} value={draft.complement} onChange={(event) => update('complement', event.target.value)} /></div>
               </CardContent>
             </Card>

@@ -21,6 +21,7 @@ describe('postal code service', () => {
       const fetcher = vi.fn().mockResolvedValue(
         response({
           cep: '13083-852',
+          logradouro: 'Rua Doutor Quirino',
           bairro: 'Cidade Universitária',
           localidade: 'Campinas',
           uf: 'SP',
@@ -41,6 +42,7 @@ describe('postal code service', () => {
         },
         privateLocation: {
           postalCode: '13083852',
+          street: 'Rua Doutor Quirino',
           neighborhood: 'Cidade Universitária',
         },
       })
@@ -53,6 +55,25 @@ describe('postal code service', () => {
 
   it('aplica máscara sem aceitar mais de oito dígitos', () => {
     expect(formatPostalCode('1308385299')).toBe('13083-852')
+  })
+
+  it('aceita CEP genérico sem logradouro ou bairro', async () => {
+    await expect(
+      lookupPostalCode('13000000', {
+        fetcher: vi.fn().mockResolvedValue(response({
+          cep: '13000-000',
+          logradouro: '',
+          bairro: '',
+          localidade: 'Campinas',
+          uf: 'SP',
+          ibge: '3509502',
+        })) as typeof fetch,
+        isOnline: () => true,
+      }),
+    ).resolves.toEqual({
+      baseLocation: { city: 'Campinas', stateCode: 'SP', ibgeCode: '3509502' },
+      privateLocation: { postalCode: '13000000' },
+    })
   })
 
   it('não chama o provedor quando o CEP não possui oito dígitos', async () => {

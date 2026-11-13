@@ -174,4 +174,6 @@ Não há script de migração nesta entrega e nenhum dado remoto é alterado.
 - #13: feed profissional em tempo real, paginação e ciclo de listeners
   documentados em `docs/opportunity-feed.md`.
 - #21: experiência de cancelamento e substituição.
-- #34: pendências e intervenção administrativa.
+- #34: a consulta administrativa paginada e o detalhe protegido estão descritos
+  em `docs/admin-service-requests.md`; intervenções e resolução de pendências
+  continuam no restante da issue.

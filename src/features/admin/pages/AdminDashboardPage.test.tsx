@@ -54,7 +54,7 @@ describe('AdminDashboardPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Análise de profissionais')).toBeInTheDocument()
     expect(screen.getByText('Catálogo de serviços')).toBeInTheDocument()
-    expect(screen.getByText('Acompanhamento operacional')).toBeInTheDocument()
+    expect(screen.getAllByText('Pedidos')).not.toHaveLength(0)
     expect(
       screen.getByText(/revise cadastros, solicite ajustes e gerencie a aprovação/i),
     ).toBeInTheDocument()
@@ -64,11 +64,10 @@ describe('AdminDashboardPage', () => {
     expect(
       screen.getByText(/acompanhe solicitações, atendimentos, cancelamentos e substituições/i),
     ).toBeInTheDocument()
-    expect(within(screen.getByRole('main')).getAllByText('Em breve')).toHaveLength(2)
-    expect(screen.getByRole('link', { name: 'Abrir análise' })).toHaveAttribute(
-      'href',
-      '/admin/profissionais',
-    )
+    expect(within(screen.getByRole('main')).getAllByText('Em breve')).toHaveLength(1)
+    expect(
+      screen.getAllByRole('link', { name: 'Abrir área' }).map((link) => link.getAttribute('href')),
+    ).toEqual(expect.arrayContaining(['/admin/profissionais', '/admin/pedidos']))
     expect(screen.queryByText(/issue #/i)).not.toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Análise' })).not.toHaveLength(0)
     expect(
@@ -76,6 +75,6 @@ describe('AdminDashboardPage', () => {
         (link) => link.getAttribute('href') === '/admin/profissionais',
       ),
     ).toBe(true)
-    expect(screen.queryByRole('link', { name: /Operação/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Pedidos' })).not.toHaveLength(0)
   })
 })

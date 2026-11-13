@@ -132,6 +132,12 @@ const AdminProfessionalReviewPage = lazy(() =>
   })),
 )
 
+const AdminServiceRequestsPage = lazy(() =>
+  import('../features/admin/pages/AdminServiceRequestsPage').then((module) => ({
+    default: module.AdminServiceRequestsPage,
+  })),
+)
+
 function RouteFallback() {
   return (
     <div
@@ -204,6 +210,22 @@ export function AppRouter() {
             element={
               <Suspense fallback={<RouteFallback />}>
                 <AdminProfessionalReviewPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin/pedidos"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminServiceRequestsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin/pedidos/:requestId"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminServiceRequestsPage />
               </Suspense>
             }
           />

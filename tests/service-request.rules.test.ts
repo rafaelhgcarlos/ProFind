@@ -35,6 +35,7 @@ import type {
 } from '../src/repositories/service-request.repository'
 import { createProfessionalAvailabilityRepository } from '../src/repositories/professional-availability.repository'
 import { createProfessionalAvailabilityService } from '../src/services/professional-availability.service'
+import { createAdminServiceRequestService } from '../src/services/admin-service-request.service'
 import { createProfessionalReviewService } from '../src/services/professional-review.service'
 import { createServiceRequestService } from '../src/services/service-request.service'
 import {
@@ -446,6 +447,78 @@ describe('service request transactional proof', () => {
       period: created.period,
     }
   }
+
+  it('permite consulta administrativa paginada, filtros e detalhe, negando usuário comum', async () => {
+    const requestIds = Array.from({ length: 14 }, (_, index) => `admin-request-${String(index + 1).padStart(2, '0')}`)
+    await seedScenario(requestIds)
+    const adminFirestore = testEnvironment.authenticatedContext(adminId).firestore()
+    const commonId = 'common-user'
+    const commonFirestore = testEnvironment.authenticatedContext(commonId).firestore()
+    const admin = createAdminServiceRequestService({
+      firestore: adminFirestore,
+      getActorId: () => adminId,
+    })
+    const common = createAdminServiceRequestService({
+      firestore: commonFirestore,
+      getActorId: () => commonId,
+    })
+
+    const firstPage = await admin.listRequests({
+      status: 'OPEN',
+      period: 'MORNING',
+      scheduledFrom: serviceDate,
+      scheduledTo: serviceDate,
+      pageSize: 5,
+    })
+    expect(firstPage.items).toHaveLength(5)
+    expect(firstPage.nextCursor).not.toBeNull()
+    expect(firstPage.items.every((item) => (
+      item.request.status === 'OPEN' &&
+      item.request.period === 'MORNING' &&
+      item.city === 'Campinas'
+    ))).toBe(true)
+
+    const secondPage = await admin.listRequests({
+      status: 'OPEN',
+      period: 'MORNING',
+      scheduledFrom: serviceDate,
+      scheduledTo: serviceDate,
+      pageSize: 5,
+      cursor: firstPage.nextCursor,
+    })
+    expect(secondPage.items).toHaveLength(5)
+    expect(secondPage.items.map((item) => item.request.requestId)).not.toEqual(
+      firstPage.items.map((item) => item.request.requestId),
+    )
+
+    const exact = await admin.listRequests({ requestId: requestIds[3] })
+    expect(exact.items.map((item) => item.request.requestId)).toEqual([requestIds[3]])
+    const detail = await admin.getDetail(requestIds[3])
+    expect(detail.privateData.address).toMatchObject({
+      street: 'Rua Privada',
+      city: 'Campinas',
+      ibgeCode: cityIbgeCode,
+    })
+    expect(detail.rounds).toHaveLength(1)
+    expect(detail.history).toEqual([])
+
+    await expect(common.listRequests({ pageSize: 5 })).rejects.toMatchObject({
+      code: 'permission-denied',
+    })
+    await expect(common.getDetail(requestIds[3])).rejects.toMatchObject({
+      code: 'permission-denied',
+    })
+    await assertFails(
+      getDoc(doc(commonFirestore, 'serviceRequestPrivate', requestIds[3])),
+    )
+    await assertFails(
+      getDocs(query(
+        collection(commonFirestore, 'serviceRequests', requestIds[3], 'rounds'),
+        orderBy('round', 'desc'),
+        limit(50),
+      )),
+    )
+  })
 
   async function makeRequestStartable(requestId = 'request-1') {
     await inspect((firestore) =>

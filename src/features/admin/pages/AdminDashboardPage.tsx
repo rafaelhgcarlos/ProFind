@@ -26,12 +26,12 @@ const areas = [
     href: null,
   },
   {
-    title: 'Acompanhamento operacional',
+    title: 'Pedidos',
     description:
       'Acompanhe solicitações, atendimentos, cancelamentos e substituições.',
     icon: Activity,
-    status: 'Em breve',
-    href: null,
+    status: 'Disponível',
+    href: '/admin/pedidos',
   },
 ] as const
 
@@ -80,7 +80,7 @@ export function AdminDashboardPage() {
                     <p className="text-sm leading-6 text-muted-foreground">{area.description}</p>
                     {area.href ? (
                       <Link className="mt-4 inline-flex min-h-11 items-center font-semibold text-primary hover:underline" to={area.href}>
-                        Abrir análise
+                        Abrir área
                       </Link>
                     ) : null}
                   </CardContent>

@@ -61,6 +61,7 @@ Para validar as regras sem tocar em um projeto remoto, execute `npm run test:rul
 
 - Não há gerenciamento de administradores no painel; provisionamento e revogação são manuais.
 - A análise de profissionais pertence à issue #32.
-- O acompanhamento operacional pertence à issue #34.
+- A consulta de pedidos da issue #34 está disponível em `/admin/pedidos`; as
+  intervenções operacionais permanecem pendentes.
 - O catálogo existente foi preservado, mas sua manutenção administrativa não foi adicionada.
 - Não há Admin SDK, service account, Firebase Storage, Cloud Function obrigatória ou novo backend no frontend.

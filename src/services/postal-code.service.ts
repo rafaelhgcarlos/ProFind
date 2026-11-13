@@ -30,6 +30,7 @@ export interface PostalCodeResult {
   baseLocation: ProfessionalBaseLocation
   privateLocation: {
     postalCode: string
+    street?: string
     neighborhood?: string
   }
 }
@@ -42,6 +43,7 @@ export interface PostalCodeDependencies {
 
 interface ViaCepResponse {
   cep?: unknown
+  logradouro?: unknown
   bairro?: unknown
   localidade?: unknown
   uf?: unknown
@@ -94,6 +96,9 @@ function parseViaCepResponse(
   const neighborhood = typeof response.bairro === 'string'
     ? response.bairro.trim()
     : ''
+  const street = typeof response.logradouro === 'string'
+    ? response.logradouro.trim()
+    : ''
 
   if (
     !city ||
@@ -107,6 +112,7 @@ function parseViaCepResponse(
     baseLocation: { city, stateCode, ibgeCode },
     privateLocation: {
       postalCode,
+      ...(street ? { street } : {}),
       ...(neighborhood ? { neighborhood } : {}),
     },
   }

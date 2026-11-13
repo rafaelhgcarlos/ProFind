@@ -49,6 +49,14 @@ O índice composto necessário está versionado em `firestore.indexes.json`. Nen
 
 A listagem de `professionalOperationalProfiles` é autorizada apenas para administrador ativo e foi validada no emulador. O repository de fila será implementado com a tela da #32; até existir uma consulta funcional dessa tela, não foi criado índice especulativo.
 
+A consulta de pedidos da entrega parcial da #34 limita a coleção
+`serviceRequests`, pagina por `serviceDate` e ID e permite combinações de estado,
+período e intervalo agendado. Rodadas e atribuições mantêm `list` negado e são
+lidas pontualmente pelos IDs determinísticos do domínio; o endereço continua
+disponível somente por `get` em `serviceRequestPrivate`. Conta comum é negada
+tanto na query quanto nas leituras diretas protegidas. Os índices
+correspondentes estão versionados em `firestore.indexes.json`.
+
 ### Histórico de eventos
 
 As cronologias são ordenadas por `createdAt` decrescente e limitadas a 50 itens. Cliente e administrador consultam os eventos de uma solicitação; profissionais usam também `actorId == UID` e recebem somente seus próprios eventos. O histórico de análise é restrito ao profissional afetado e à administração. O índice `events: actorId ASC, createdAt DESC` atende a consulta operacional filtrada.
@@ -81,7 +89,8 @@ Os testes usam contextos autenticados independentes e `withSecurityRulesDisabled
 
 Permanecem fora do escopo porque ainda não existem os fluxos correspondentes:
 
-- criação/cancelamento de solicitação pelo cliente e consultas completas do painel operacional (#34);
+- intervenções, resolução de pendências e filas completas do painel operacional
+  (#34); a parte de consulta de pedidos já está coberta;
 - fila e filtros da interface administrativa (#32);
 - autocadastro completo da nova interface (#51), que consumirá os contratos já protegidos;
 - distribuição, pagamentos, chat, documentos reais, reputação e notificações.

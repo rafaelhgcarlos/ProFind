@@ -9,6 +9,7 @@ import {
   ServiceRequestError,
   type OwnServiceRequestDetails,
 } from '../../../types/service-request'
+import { PostalCodeError } from '../../../services/postal-code.service'
 
 const mocks = vi.hoisted(() => ({
   createRequest: vi.fn(),
@@ -20,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   useProfile: vi.fn(),
   useCatalog: vi.fn(),
+  lookupPostalCode: vi.fn(),
+  listMunicipalitiesByState: vi.fn(),
 }))
 
 vi.mock('../../../components/layout/ClientLayout', () => ({
@@ -29,6 +32,13 @@ vi.mock('../../onboarding/components/ModeSwitcher', () => ({ ModeSwitcher: () =>
 vi.mock('../../auth/use-auth', () => ({ useAuth: mocks.useAuth }))
 vi.mock('../../onboarding/use-profile', () => ({ useProfile: mocks.useProfile }))
 vi.mock('../../home/use-catalog', () => ({ useCatalog: mocks.useCatalog }))
+vi.mock('../../../services/postal-code.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../services/postal-code.service')>()),
+  lookupPostalCode: mocks.lookupPostalCode,
+}))
+vi.mock('../../../services/ibge-localities.service', () => ({
+  listMunicipalitiesByState: mocks.listMunicipalitiesByState,
+}))
 vi.mock('../../../services/service-request.service', () => ({
   serviceRequestService: {
     createRequest: mocks.createRequest,
@@ -150,6 +160,17 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
     mocks.useAuth.mockReturnValue({ status: 'authenticated', user: { uid: 'client-owner' } })
     mocks.useProfile.mockReturnValue(profileState)
     mocks.useCatalog.mockReturnValue({ status: 'ready', catalog, error: null, retry: vi.fn() })
+    mocks.lookupPostalCode.mockResolvedValue({
+      baseLocation: { city: 'Campinas', stateCode: 'SP', ibgeCode: '3509502' },
+      privateLocation: {
+        postalCode: '13083852',
+        street: 'Rua Doutor Quirino',
+        neighborhood: 'Centro',
+      },
+    })
+    mocks.listMunicipalitiesByState.mockResolvedValue([
+      { city: 'Campinas', stateCode: 'SP', ibgeCode: '3509502' },
+    ])
     mocks.createRequest.mockResolvedValue({
       idempotent: false,
       request: {
@@ -402,5 +423,115 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
     renderPage('/cliente/solicitar?specialty=removed')
     expect(await screen.findByText(/não está mais disponível/i)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Qual serviço você precisa?' })).toBeInTheDocument()
+  })
+
+  it('preenche endereço e município pelo CEP validado no IBGE', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await user.type(screen.getByLabelText('CEP *'), '13083852')
+
+    expect(await screen.findByText(/endereço preenchido pelo CEP/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Logradouro *')).toHaveValue('Rua Doutor Quirino')
+    expect(screen.getByLabelText('Bairro *')).toHaveValue('Centro')
+    expect(screen.getByLabelText('UF *')).toHaveValue('SP')
+    expect(mocks.listMunicipalitiesByState).toHaveBeenCalledWith('SP')
+  })
+
+  it('mantém correções manuais e permite preencher CEP genérico', async () => {
+    mocks.lookupPostalCode.mockResolvedValueOnce({
+      baseLocation: { city: 'Campinas', stateCode: 'SP', ibgeCode: '3509502' },
+      privateLocation: { postalCode: '13000000' },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await user.type(screen.getByLabelText('Logradouro *'), 'Estrada informada pelo cliente')
+    await user.type(screen.getByLabelText('Bairro *'), 'Bairro corrigido')
+    await user.type(screen.getByLabelText('CEP *'), '13000000')
+
+    expect(await screen.findByText(/complete os campos que não vieram/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Logradouro *')).toHaveValue('Estrada informada pelo cliente')
+    expect(screen.getByLabelText('Bairro *')).toHaveValue('Bairro corrigido')
+    expect(screen.getByLabelText('UF *')).toHaveValue('SP')
+  })
+
+  it('ignora resposta atrasada de um CEP anterior', async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined
+    const first = new Promise((resolve) => {
+      resolveFirst = resolve
+    })
+    mocks.lookupPostalCode
+      .mockReturnValueOnce(first)
+      .mockResolvedValueOnce({
+        baseLocation: { city: 'Campinas', stateCode: 'SP', ibgeCode: '3509502' },
+        privateLocation: { postalCode: '13083852', street: 'Rua Nova', neighborhood: 'Centro' },
+      })
+    mocks.listMunicipalitiesByState.mockResolvedValue([
+      { city: 'São Paulo', stateCode: 'SP', ibgeCode: '3550308' },
+      { city: 'Campinas', stateCode: 'SP', ibgeCode: '3509502' },
+    ])
+    const user = userEvent.setup()
+    renderPage()
+    const postalCode = screen.getByLabelText('CEP *')
+    await user.type(postalCode, '01001000')
+    await user.clear(postalCode)
+    await user.type(postalCode, '13083852')
+    expect(await screen.findByText(/endereço preenchido pelo CEP/i)).toBeInTheDocument()
+
+    resolveFirst?.({
+      baseLocation: { city: 'São Paulo', stateCode: 'SP', ibgeCode: '3550308' },
+      privateLocation: { postalCode: '01001000', street: 'Praça da Sé', neighborhood: 'Sé' },
+    })
+    await act(async () => undefined)
+    expect(screen.getByLabelText('CEP *')).toHaveValue('13083-852')
+    expect(screen.getByLabelText('Logradouro *')).toHaveValue('Rua Nova')
+  })
+
+  it('mostra CEP inexistente e preserva o preenchimento manual', async () => {
+    mocks.lookupPostalCode.mockRejectedValueOnce(
+      new PostalCodeError('not-found', 'CEP não encontrado. Preencha manualmente.'),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    await user.type(screen.getByLabelText('Logradouro *'), 'Rua Manual')
+    await user.type(screen.getByLabelText('CEP *'), '99999999')
+
+    expect(await screen.findByText(/CEP não encontrado/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Logradouro *')).toHaveValue('Rua Manual')
+    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeEnabled()
+  })
+
+  it('mantém o endereço editável quando o provedor de CEP está indisponível', async () => {
+    mocks.lookupPostalCode.mockRejectedValueOnce(
+      new PostalCodeError(
+        'provider-unavailable',
+        'O serviço de CEP está indisponível. Preencha manualmente.',
+      ),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    await user.type(screen.getByLabelText('CEP *'), '13083852')
+
+    expect(await screen.findByText(/serviço de CEP está indisponível/i)).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Logradouro *'), 'Rua informada manualmente')
+    expect(screen.getByLabelText('Logradouro *')).toHaveValue('Rua informada manualmente')
+  })
+
+  it('recupera rascunho com endereço sem disparar nova consulta de CEP', () => {
+    localStorage.setItem('profind:service-request-draft:client-owner', JSON.stringify({
+      operationKey: 'draft-operation-key-000001',
+      street: 'Rua corrigida no rascunho',
+      number: '45',
+      complement: 'Fundos',
+      neighborhood: 'Centro',
+      postalCode: '13083-852',
+      stateCode: 'SP',
+      municipality: { city: 'Campinas', stateCode: 'SP', ibgeCode: '3509502' },
+    }))
+    renderPage('/cliente/solicitar')
+
+    expect(screen.getByLabelText('Logradouro *')).toHaveValue('Rua corrigida no rascunho')
+    expect(screen.getByLabelText('Número *')).toHaveValue('45')
+    expect(screen.getByLabelText('Complemento (opcional)')).toHaveValue('Fundos')
+    expect(mocks.lookupPostalCode).not.toHaveBeenCalled()
   })
 })

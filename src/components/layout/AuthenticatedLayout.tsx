@@ -1,5 +1,4 @@
 import {
-  Activity,
   BookOpenText,
   BriefcaseBusiness,
   CalendarClock,
@@ -107,13 +106,7 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
       disabled: true,
       disabledReason: 'Disponível em breve.',
     },
-    {
-      label: 'Operação',
-      href: '/admin/operacao',
-      icon: Activity,
-      disabled: true,
-      disabledReason: 'Disponível em breve.',
-    },
+    { label: 'Pedidos', href: '/admin/pedidos', icon: ClipboardList },
   ],
 }
 
