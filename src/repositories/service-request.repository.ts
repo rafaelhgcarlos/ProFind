@@ -53,6 +53,7 @@ import {
   type OpportunityPage,
   type OpportunityPageCursor,
   type ProfessionalOpportunitySummary,
+  type ProfessionalOpportunityDetails,
   type ProfessionalAssignmentDetails,
   type ProfessionalAppointmentDetails,
   type ProfessionalAppointmentsCursor,
@@ -99,6 +100,17 @@ export interface OpportunityFeedPageSnapshot {
 export interface OpportunityFeedListeners {
   onAccessChange(eligible: boolean): void
   onPage(snapshot: OpportunityFeedPageSnapshot): void
+  onError(error: unknown): void
+}
+
+export interface ProfessionalOpportunityDetailsSnapshot {
+  details: ProfessionalOpportunityDetails
+  fromCache: boolean
+}
+
+export interface ProfessionalOpportunityDetailsListeners {
+  onDetails(snapshot: ProfessionalOpportunityDetailsSnapshot): void
+  onUnavailable(error: ServiceRequestError): void
   onError(error: unknown): void
 }
 
@@ -547,6 +559,45 @@ function professionalOpportunitySummary(
   }
 }
 
+function professionalOpportunityDetails(
+  snapshot: DocumentSnapshot<DocumentData>,
+  request: ServiceRequestSummary,
+): ProfessionalOpportunityDetails {
+  if (!snapshot.exists()) {
+    throw new ServiceRequestError(
+      'not-found',
+      'Os detalhes desta oportunidade ainda não estão disponíveis.',
+    )
+  }
+  const data = snapshot.data()
+  const stateCode = stringValue(data, 'stateCode')
+  const description = stringValue(data, 'description')
+  if (
+    stringValue(data, 'requestId') !== request.requestId ||
+    stringValue(data, 'categoryId') !== request.categoryId ||
+    stringValue(data, 'specialtyId') !== request.specialtyId ||
+    stringValue(data, 'cityIbgeCode') !== request.cityIbgeCode ||
+    stringValue(data, 'serviceDate') !== request.serviceDate ||
+    stringValue(data, 'period') !== request.period ||
+    data.round !== request.round ||
+    description.length < 10 ||
+    description.length > 1000 ||
+    !stringValue(data, 'city') ||
+    !/^[A-Z]{2}$/.test(stateCode)
+  ) {
+    throw new ServiceRequestError(
+      'round-changed',
+      'Os dados da oportunidade mudaram. Revise a versão atual.',
+    )
+  }
+  return {
+    opportunity: professionalOpportunitySummary(request),
+    description,
+    city: stringValue(data, 'city'),
+    stateCode,
+  }
+}
+
 function professionalAppointmentSummary(
   request: ServiceRequestSummary,
 ): ProfessionalAppointmentSummary {
@@ -988,6 +1039,11 @@ export function createServiceRequestRepository({
     return runTransaction(firestore, async (transaction) => {
       const requestReference = doc(firestore, 'serviceRequests', requestId)
       const privateReference = doc(firestore, 'serviceRequestPrivate', requestId)
+      const opportunityDetailsReference = doc(
+        firestore,
+        'serviceRequestOpportunityDetails',
+        requestId,
+      )
       const roundReference = doc(requestReference, 'rounds', 'round-1')
       const eventReference = doc(requestReference, 'events', 'created')
       const requestSnapshot = await transaction.get(requestReference)
@@ -1038,6 +1094,20 @@ export function createServiceRequestRepository({
         contactPhone: input.contactPhone,
         notes: input.description,
         address: { ...input.address, complement: input.address.complement ?? '' },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      transaction.set(opportunityDetailsReference, {
+        requestId,
+        categoryId: input.categoryId,
+        specialtyId: input.specialtyId,
+        cityIbgeCode: input.cityIbgeCode,
+        city: input.address.city,
+        stateCode: input.address.stateCode,
+        serviceDate: input.serviceDate,
+        period: input.period,
+        round: 1,
+        description: input.description,
         createdAt: timestamp,
         updatedAt: timestamp,
       })
@@ -1098,7 +1168,7 @@ export function createServiceRequestRepository({
   async function updateOwnRequest(
     input: UpdateRequestInput,
   ): Promise<UpdatedRequestResult> {
-    return runTransaction(firestore, async (transaction) => {
+    const result = await runTransaction(firestore, async (transaction) => {
       const requestReference = doc(firestore, 'serviceRequests', input.requestId)
       const privateReference = doc(firestore, 'serviceRequestPrivate', input.requestId)
       const requestSnapshot = await transaction.get(requestReference)
@@ -1240,6 +1310,71 @@ export function createServiceRequestRepository({
         idempotent: false,
       }
     })
+
+    await runTransaction(firestore, async (transaction) => {
+      const requestReference = doc(
+        firestore,
+        'serviceRequests',
+        input.requestId,
+      )
+      const privateReference = doc(
+        firestore,
+        'serviceRequestPrivate',
+        input.requestId,
+      )
+      const detailsReference = doc(
+        firestore,
+        'serviceRequestOpportunityDetails',
+        input.requestId,
+      )
+      const [requestSnapshot, privateSnapshot, detailsSnapshot] =
+        await Promise.all([
+          transaction.get(requestReference),
+          transaction.get(privateReference),
+          transaction.get(detailsReference),
+        ])
+      const request = requestFromSnapshot(requestSnapshot)
+      const privateData = privateRequestFromSnapshot(privateSnapshot)
+      if (
+        request.clientId !== input.clientId ||
+        request.status !== 'OPEN' ||
+        request.round !== result.request.round ||
+        privateData.notes !== input.description ||
+        privateData.address.ibgeCode !== request.cityIbgeCode
+      ) {
+        throw new ServiceRequestError(
+          'round-changed',
+          'A solicitação mudou antes da sincronização dos detalhes.',
+        )
+      }
+      const existing = detailsSnapshot.data()
+      if (
+        existing?.round === request.round &&
+        existing.description === privateData.notes &&
+        existing.categoryId === request.categoryId &&
+        existing.specialtyId === request.specialtyId &&
+        existing.cityIbgeCode === request.cityIbgeCode &&
+        existing.serviceDate === request.serviceDate &&
+        existing.period === request.period
+      ) {
+        return
+      }
+      transaction.set(detailsReference, {
+        requestId: input.requestId,
+        categoryId: request.categoryId,
+        specialtyId: request.specialtyId,
+        cityIbgeCode: request.cityIbgeCode,
+        city: privateData.address.city,
+        stateCode: privateData.address.stateCode,
+        serviceDate: request.serviceDate,
+        period: request.period,
+        round: request.round,
+        description: privateData.notes,
+        createdAt: privateSnapshot.data()!.createdAt,
+        updatedAt: serverTimestamp(),
+      })
+    })
+    return result
   }
 
   async function cancelOwnRequest(
@@ -1826,6 +1961,75 @@ export function createServiceRequestRepository({
       clearRequestListeners()
       unsubscribeOperational()
       unsubscribeProfile()
+    }
+  }
+
+  function subscribeProfessionalOpportunityDetails(
+    requestId: string,
+    _professionalId: string,
+    listeners: ProfessionalOpportunityDetailsListeners,
+  ) {
+    const requestReference = doc(firestore, 'serviceRequests', requestId)
+    const detailsReference = doc(
+      firestore,
+      'serviceRequestOpportunityDetails',
+      requestId,
+    )
+    let requestSnapshot: DocumentSnapshot<DocumentData> | undefined
+    let detailsSnapshot: DocumentSnapshot<DocumentData> | undefined
+    let stopped = false
+
+    const emit = () => {
+      if (stopped || !requestSnapshot || !detailsSnapshot) return
+      try {
+        const request = requestFromSnapshot(requestSnapshot)
+        if (request.status !== 'OPEN') {
+          listeners.onUnavailable(
+            new ServiceRequestError(
+              request.status === 'ASSIGNED' ? 'opportunity-taken' : 'not-open',
+              request.status === 'ASSIGNED'
+                ? 'Outro profissional confirmou esta oportunidade.'
+                : 'Esta oportunidade não está mais aberta.',
+            ),
+          )
+          return
+        }
+        listeners.onDetails({
+          details: professionalOpportunityDetails(detailsSnapshot, request),
+          fromCache:
+            requestSnapshot.metadata.fromCache ||
+            detailsSnapshot.metadata.fromCache,
+        })
+      } catch (error) {
+        if (error instanceof ServiceRequestError) listeners.onUnavailable(error)
+        else listeners.onError(error)
+      }
+    }
+
+    const requestUnsubscribe = onSnapshot(
+      requestReference,
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        requestSnapshot = snapshot
+        emit()
+      },
+      listeners.onError,
+    )
+    const detailsUnsubscribe = onSnapshot(
+      detailsReference,
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        detailsSnapshot = snapshot
+        emit()
+      },
+      listeners.onError,
+    )
+    return () => {
+      stopped = true
+      requestSnapshot = undefined
+      detailsSnapshot = undefined
+      requestUnsubscribe()
+      detailsUnsubscribe()
     }
   }
 
@@ -2725,6 +2929,7 @@ export function createServiceRequestRepository({
     listRequestHistory,
     listOpenOpportunities,
     subscribeOpportunityFeedPage,
+    subscribeProfessionalOpportunityDetails,
     acceptOpportunity: acceptRequest,
     declineOpportunity: refuseRequest,
     acceptRequest,

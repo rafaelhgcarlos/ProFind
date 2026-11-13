@@ -45,3 +45,43 @@ bloqueado enquanto a transação está pendente. Sucesso de aceite só é exibid
 depois da resolução do commit; a consulta nunca substitui a revalidação
 transacional. A recusa confirmada remove apenas o card daquele profissional e
 continua vinculada à rodada atual.
+
+## Detalhe pré-aceite — complemento da #13
+
+Os cards não aceitam mais o atendimento diretamente. `Ver detalhes` abre a
+rota protegida `/profissional/oportunidades/:requestId`, que permanece
+recuperável após recarga. O aceite exige revisão na própria página e uma
+confirmação explícita; somente depois do commit da transação da #17 a
+interface encaminha para o atendimento da #26.
+
+A descrição permitida antes do aceite, o nome do município e a UF ficam na
+projeção dedicada `serviceRequestOpportunityDetails/{requestId}`. O documento
+contém somente o contrato necessário para avaliar o trabalho e repete os
+identificadores de categoria, especialidade, município IBGE, agenda e rodada
+para validação de consistência. Ele nunca contém cliente, CEP, logradouro,
+número, complemento, bairro, telefone, e-mail ou instruções privadas.
+
+As Rules proíbem `list` nessa projeção e autorizam o `get` individual somente
+quando todas as condições do feed ainda valem: pedido `OPEN`, prazo vigente,
+perfil aprovado/ativo e compatível, disponibilidade, ausência de exclusão,
+recusa e reserva conflitante. A criação do documento ocorre no commit atômico
+do pedido. Na edição, o commit do domínio (pedido, privado, rodadas e evento)
+permanece dentro do limite de expressões do Firestore e a projeção é
+sincronizada logo depois, antes de o use case confirmar sucesso. As Rules
+exigem que ela coincida integralmente com o resumo e os campos permitidos do
+documento privado. Retry idempotente também repara uma sincronização pendente;
+durante qualquer divergência a tela bloqueia o aceite.
+
+Listeners do pedido e da projeção bloqueiam a ação quando outro profissional
+aceita, o cliente cancela/edita, a rodada muda ou a autorização é perdida. Uma
+mudança de conteúdo ou rodada exige nova confirmação de leitura. Dados vindos
+somente do cache e oportunidades vencidas nunca habilitam o aceite. Abrir o
+detalhe não escreve documentos, não reserva o período e não carrega o documento
+privado.
+
+Pedidos legados criados antes desta entrega não possuem a projeção. Nesses
+casos, a rota informa que os detalhes ainda não estão disponíveis e nunca usa o
+documento privado como fallback. A edição do próprio pedido sincroniza a
+projeção; os demais pedidos abertos exigem um backfill administrativo
+controlado antes da publicação da funcionalidade. Nenhum dado remoto foi
+alterado nesta entrega.

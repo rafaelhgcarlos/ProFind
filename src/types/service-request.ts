@@ -150,6 +150,18 @@ export interface ProfessionalOpportunitySummary {
   reopenReason: 'PROFESSIONAL_CANCELLATION' | null
 }
 
+/**
+ * Projeção mínima que pode ser lida por um profissional elegível antes do
+ * aceite. Endereço, contato e instruções privadas pertencem exclusivamente a
+ * ServiceRequestPrivateData.
+ */
+export interface ProfessionalOpportunityDetails {
+  opportunity: ProfessionalOpportunitySummary
+  description: string
+  city: string
+  stateCode: string
+}
+
 export interface OpportunityPageCursor {
   version: typeof OPPORTUNITY_QUERY_VERSION
   acceptUntil: Date

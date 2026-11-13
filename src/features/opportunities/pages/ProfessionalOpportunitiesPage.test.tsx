@@ -4,10 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { OpportunityFeedSubscriptionInput } from '../../../services/service-request.service'
-import {
-  ServiceRequestError,
-  type ProfessionalOpportunitySummary,
-} from '../../../types/service-request'
+import type { ProfessionalOpportunitySummary } from '../../../types/service-request'
 import { useAuth } from '../../auth/use-auth'
 import { useCatalog } from '../../home/use-catalog'
 import { useProfile } from '../../onboarding/use-profile'
@@ -169,6 +166,10 @@ function renderPageWithAppointmentRoute() {
       <Routes>
         <Route path="/profissional" element={<ProfessionalOpportunitiesPage />} />
         <Route
+          path="/profissional/oportunidades/:requestId"
+          element={<h1>Detalhe da oportunidade</h1>}
+        />
+        <Route
           path="/profissional/atendimentos/:requestId"
           element={<h1>Detalhe real do atendimento</h1>}
         />
@@ -247,13 +248,7 @@ describe('ProfessionalOpportunitiesPage', () => {
     expect(screen.queryByRole('button', { name: 'Aceitar' })).not.toBeInTheDocument()
   })
 
-  it('mostra somente a projeção autorizada e confirma o aceite apenas após o commit', async () => {
-    let resolveAcceptance: ((value: unknown) => void) | undefined
-    mocks.acceptOpportunity.mockReturnValue(
-      new Promise((resolve) => {
-        resolveAcceptance = resolve
-      }),
-    )
+  it('mostra somente o resumo autorizado e leva ao detalhe sem aceitar pelo card', async () => {
     const user = userEvent.setup()
     renderPageWithAppointmentRoute()
     await publishFirstPage()
@@ -262,33 +257,22 @@ describe('ProfessionalOpportunitiesPage', () => {
     expect(screen.getByText('Campinas')).toBeInTheDocument()
     expect(screen.queryByText(/telefone|endereço|cliente/i)).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Aceitar' }))
-    expect(screen.getByRole('button', { name: 'Confirmando…' })).toBeDisabled()
-    expect(screen.queryByText('Atendimento confirmado')).not.toBeInTheDocument()
-
-    await act(async () => {
-      resolveAcceptance?.({ assignmentId: 'round-1' })
-    })
+    await user.click(screen.getByRole('link', { name: 'Ver detalhes' }))
     expect(
-      await screen.findByRole('heading', { name: 'Detalhe real do atendimento' }),
+      await screen.findByRole('heading', { name: 'Detalhe da oportunidade' }),
     ).toBeInTheDocument()
-    expect(screen.queryByText('Eletricista')).not.toBeInTheDocument()
+    expect(mocks.acceptOpportunity).not.toHaveBeenCalled()
   })
 
-  it('mantém erro de disputa no card e impede um segundo clique', async () => {
-    mocks.acceptOpportunity.mockRejectedValue(
-      new ServiceRequestError('opportunity-taken', 'taken'),
-    )
-    const user = userEvent.setup()
+  it('não oferece aceite imediato no card', async () => {
     renderPage()
     await publishFirstPage()
 
-    await user.click(screen.getByRole('button', { name: 'Aceitar' }))
-    expect(
-      await screen.findByText('Outro profissional confirmou esta oportunidade primeiro.'),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Aceitar' })).toBeDisabled()
-    expect(mocks.acceptOpportunity).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Aceitar' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ver detalhes' })).toHaveAttribute(
+      'href',
+      '/profissional/oportunidades/request-1',
+    )
   })
 
   it('recusa somente o card escolhido e mantém as demais oportunidades', async () => {
@@ -326,7 +310,7 @@ describe('ProfessionalOpportunitiesPage', () => {
     ])
 
     expect(screen.getByText('Substituição solicitada')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Aceitar' })).toBeEnabled()
+    expect(screen.getByRole('link', { name: 'Ver detalhes' })).toBeInTheDocument()
   })
 
   it('permite ao profissional suspenso cancelar compromisso existente com confirmação e motivo', async () => {

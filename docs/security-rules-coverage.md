@@ -17,6 +17,7 @@ Este documento consolida a cobertura entregue pelas issues #31, #22, #43, #35 e 
 | `professionalReviewInternal/{uid}/events/**` | somente administrador ativo | criação administrativa na mesma revisão; alteração e exclusão negadas |
 | `professionalAvailability/{uid}/slots/**` | proprietário ou administrador | proprietário; não remove slot reservado |
 | `serviceRequests/{id}` | partes, administrador ou profissional aprovado; `list` restrita ao feed compatível e aos compromissos próprios | apenas aceite, início, conclusão e cancelamento transacionais validados |
+| `serviceRequestOpportunityDetails/{id}` | cliente ou profissional ainda elegível para o pedido; `list` negada | criação atômica e sincronização validada pelo cliente; alteração profissional negada |
 | `serviceRequestPrivate/{id}` | cliente, responsável atual ou administrador | negada no cliente web |
 | rodadas, recusas, atribuições, reservas e eventos | partes mínimas documentadas | somente transições atômicas da #22 |
 | `categories` e `specialties` | pública | negada; manutenção permanece em ambiente confiável |
@@ -76,6 +77,9 @@ As cronologias são ordenadas por `createdAt` decrescente e limitadas a 50 itens
 - Reserva concluída permanece no caminho único do slot e continua impedindo outro aceite conflitante.
 - Eventos são imutáveis. Eventos órfãos ou criados depois da transição são negados.
 - Endereço e contato do atendimento nunca aparecem no resumo do feed.
+- O detalhe pré-aceite contém somente descrição orientada, município/UF,
+  catálogo, agenda e rodada; CEP, endereço exato, cliente e contato continuam
+  no documento privado. Leitura direta exige toda a elegibilidade vigente.
 - Restrição administrativa impede novos aceites, mas não apaga atribuições ou reservas confirmadas.
 - Metadados ImageKit são limitados a HTTPS, finalidade e proprietário corretos; blobs, base64 e provider `MOCK` são negados.
 

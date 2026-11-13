@@ -367,6 +367,23 @@ async function seedScenario(requestIds = ['request-1']) {
         createdAt: new Date(),
         updatedAt: new Date(),
       })
+      await setDoc(
+        doc(firestore, 'serviceRequestOpportunityDetails', requestId),
+        {
+          requestId,
+          categoryId,
+          specialtyId,
+          cityIbgeCode,
+          city: 'Campinas',
+          stateCode: 'SP',
+          serviceDate,
+          period: 'MORNING',
+          round: 1,
+          description: 'Verificar a instalação elétrica da sala.',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      )
     }
   })
 }
@@ -618,6 +635,44 @@ describe('service request transactional proof', () => {
     await assertFails(
       getDoc(doc(testEnvironment.authenticatedContext('other-client').firestore(), 'serviceRequestPrivate', created.request.requestId)),
     )
+  })
+
+  it('protege o detalhe pré-aceite pelas mesmas condições da oportunidade', async () => {
+    await seedScenario()
+    const eligible = testEnvironment.authenticatedContext(professionalA).firestore()
+    const commonUser = testEnvironment.authenticatedContext('other-client').firestore()
+    const detailsReference = doc(
+      eligible,
+      'serviceRequestOpportunityDetails',
+      'request-1',
+    )
+
+    const snapshot = await assertSucceeds(getDoc(detailsReference))
+    expect(snapshot.data()).toMatchObject({
+      requestId: 'request-1',
+      description: 'Verificar a instalação elétrica da sala.',
+      city: 'Campinas',
+      stateCode: 'SP',
+    })
+    expect(snapshot.data()).not.toHaveProperty('address')
+    expect(snapshot.data()).not.toHaveProperty('contactPhone')
+    await assertFails(
+      getDoc(
+        doc(commonUser, 'serviceRequestOpportunityDetails', 'request-1'),
+      ),
+    )
+    await assertFails(
+      updateDoc(detailsReference, {
+        description: 'Conteúdo forjado pelo profissional.',
+        updatedAt: serverTimestamp(),
+      }),
+    )
+
+    await serviceFor(eligible, professionalA).declineOpportunity({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    await assertFails(getDoc(detailsReference))
   })
 
   it('exige somente a prontidão persistida do cliente, sem telefone ou avatar', async () => {

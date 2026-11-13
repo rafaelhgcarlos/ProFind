@@ -11,6 +11,7 @@ import {
   type CreateRequestInput,
   type DeclineOpportunityInput,
   type OpportunityFeedPageSnapshot,
+  type ProfessionalOpportunityDetailsSnapshot,
   type OpportunityQuery,
   type OwnRequestDetailsSnapshot,
   type ProfessionalAppointmentDetailsSnapshot,
@@ -79,6 +80,13 @@ export interface ProfessionalAppointmentsSubscriptionInput
   onError(error: ServiceRequestError): void
 }
 
+export interface ProfessionalOpportunityDetailsSubscriptionInput {
+  requestId: string
+  onDetails(snapshot: ProfessionalOpportunityDetailsSnapshot): void
+  onUnavailable(error: ServiceRequestError): void
+  onError(error: ServiceRequestError): void
+}
+
 export interface ProfessionalAppointmentDetailsSubscriptionInput {
   requestId: string
   onDetails(snapshot: ProfessionalAppointmentDetailsSnapshot): void
@@ -115,7 +123,11 @@ function normalizeCreationInput(
     validationError('Não foi possível identificar este envio. Recarregue a página.')
   }
 
-  const description = input.description.trim().replace(/\s+/g, ' ')
+  const description = input.description
+    .trim()
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
   const contactName = input.contactName.trim().replace(/\s+/g, ' ')
   const contactPhone = input.contactPhone.replace(/\D/g, '')
   const city = input.city.trim().replace(/\s+/g, ' ')
@@ -129,6 +141,16 @@ function normalizeCreationInput(
 
   if (description.length < 10 || description.length > 1000) {
     validationError('Descreva o serviço em 10 a 1.000 caracteres.')
+  }
+  if (
+    /\b[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}\b/i.test(description) ||
+    /(?:https?:\/\/|www\.)\S+/i.test(description) ||
+    /(?:\d[\s().+-]*){10,}/.test(description) ||
+    /\b\d{5}-?\d{3}\b/.test(description)
+  ) {
+    validationError(
+      'Não inclua telefone, e-mail, link ou CEP na descrição. Use os campos protegidos da solicitação.',
+    )
   }
   if (contactName.length < 2 || contactName.length > 120) {
     throw new ServiceRequestError(
@@ -530,6 +552,21 @@ export function createServiceRequestService(
       )
     },
 
+    subscribeProfessionalOpportunityDetails(
+      input: ProfessionalOpportunityDetailsSubscriptionInput,
+    ) {
+      const professionalId = actorId()
+      return repository.subscribeProfessionalOpportunityDetails(
+        input.requestId,
+        professionalId,
+        {
+          onDetails: input.onDetails,
+          onUnavailable: input.onUnavailable,
+          onError: (error) => input.onError(normalizeOperationError(error)),
+        },
+      )
+    },
+
     subscribeProfessionalAppointmentDetails(
       input: ProfessionalAppointmentDetailsSubscriptionInput,
     ) {
@@ -677,6 +714,11 @@ export const serviceRequestService = {
   },
   subscribeOpportunityFeed(input: OpportunityFeedSubscriptionInput) {
     return getDefaultService().subscribeOpportunityFeed(input)
+  },
+  subscribeProfessionalOpportunityDetails(
+    input: ProfessionalOpportunityDetailsSubscriptionInput,
+  ) {
+    return getDefaultService().subscribeProfessionalOpportunityDetails(input)
   },
   subscribeProfessionalAppointments(
     input: ProfessionalAppointmentsSubscriptionInput,

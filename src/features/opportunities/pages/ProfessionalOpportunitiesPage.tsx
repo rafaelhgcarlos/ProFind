@@ -43,7 +43,7 @@ import { ProfessionalReviewStatusCard } from '../../professional-profile/compone
 const FEED_PAGE_SIZE = 12
 
 type AccessState = 'loading' | 'eligible' | 'restricted'
-type OpportunityAction = 'accept' | 'decline'
+type OpportunityAction = 'decline'
 
 interface FeedPageState {
   items: ProfessionalOpportunitySummary[]
@@ -348,6 +348,17 @@ export function ProfessionalOpportunitiesPage() {
   const firstPage = pages.first
   const isInitialLoading =
     access === 'loading' || (access === 'eligible' && (!firstPage || firstPage.loading))
+
+  useEffect(() => {
+    if (isInitialLoading) return
+    const restoreScrollY = (location.state as { restoreScrollY?: unknown } | null)
+      ?.restoreScrollY
+    if (typeof restoreScrollY !== 'number') return
+    const frame = window.requestAnimationFrame(() =>
+      window.scrollTo(0, restoreScrollY),
+    )
+    return () => window.cancelAnimationFrame(frame)
+  }, [isInitialLoading, location.state])
   const lastPage = [...pageOrder]
     .reverse()
     .map((key) => pages[key])
@@ -378,43 +389,26 @@ export function ProfessionalOpportunitiesPage() {
     }))
   }
 
-  async function handleAction(
-    opportunity: ProfessionalOpportunitySummary,
-    action: OpportunityAction,
-  ) {
+  async function handleDecline(opportunity: ProfessionalOpportunitySummary) {
     if (pendingActions[opportunity.requestId]) return
     setCancellationNotice('')
     setPendingActions((current) => ({
       ...current,
-      [opportunity.requestId]: action,
+      [opportunity.requestId]: 'decline',
     }))
     setCardFeedback((current) => ({
       ...current,
       [opportunity.requestId]: {
         tone: 'info',
-        message:
-          action === 'accept'
-            ? 'Aguardando a confirmação segura do aceite…'
-            : 'Registrando sua recusa…',
+        message: 'Registrando sua recusa…',
       },
     }))
 
     try {
-      if (action === 'accept') {
-        const result = await serviceRequestService.acceptOpportunity({
-          requestId: opportunity.requestId,
-          expectedRound: opportunity.round,
-        })
-        setAccepted({ opportunity, assignmentId: result.assignmentId })
-        navigate(`/profissional/atendimentos/${opportunity.requestId}`, {
-          replace: true,
-        })
-      } else {
-        await serviceRequestService.declineOpportunity({
-          requestId: opportunity.requestId,
-          expectedRound: opportunity.round,
-        })
-      }
+      await serviceRequestService.declineOpportunity({
+        requestId: opportunity.requestId,
+        expectedRound: opportunity.round,
+      })
       removeOpportunity(opportunity.requestId)
       setCardFeedback((current) => {
         const next = { ...current }
@@ -826,23 +820,30 @@ export function ProfessionalOpportunitiesPage() {
                             type="button"
                             variant="outline"
                             disabled={Boolean(pending) || disabled || !online}
-                            onClick={() => void handleAction(opportunity, 'decline')}
+                            onClick={() => void handleDecline(opportunity)}
                           >
                             {pending === 'decline' ? (
                               <LoaderCircle aria-hidden="true" className="animate-spin" />
                             ) : null}
                             {pending === 'decline' ? 'Recusando…' : 'Recusar'}
                           </Button>
-                          <Button
-                            type="button"
-                            disabled={Boolean(pending) || disabled || !online}
-                            onClick={() => void handleAction(opportunity, 'accept')}
-                          >
-                            {pending === 'accept' ? (
-                              <LoaderCircle aria-hidden="true" className="animate-spin" />
-                            ) : null}
-                            {pending === 'accept' ? 'Confirmando…' : 'Aceitar'}
-                          </Button>
+                          {disabled ? (
+                            <Button type="button" disabled>
+                              Ver detalhes
+                            </Button>
+                          ) : (
+                            <Button asChild>
+                              <Link
+                                to={`/profissional/oportunidades/${opportunity.requestId}`}
+                                state={{
+                                  returnTo: `${location.pathname}${location.search}`,
+                                  scrollY: window.scrollY,
+                                }}
+                              >
+                                Ver detalhes
+                              </Link>
+                            </Button>
+                          )}
                         </div>
                       </CardContent>
                     </Card>

@@ -834,7 +834,11 @@ export function ServiceRequestPage() {
                     placeholder="Ex.: preciso verificar duas tomadas que pararam de funcionar."
                     onChange={(event) => update('description', event.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">{draft.description.length}/1000 caracteres</p>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Descreva somente o trabalho. Não inclua telefone, e-mail,
+                    link, CEP, endereço ou instruções de acesso.
+                    {' '}{draft.description.length}/1000 caracteres
+                  </p>
                 </div>
               </CardContent>
             </Card>

@@ -80,6 +80,24 @@ service cloud.firestore {
         && availability.available == true;
     }
 
+    function canReadOpportunityDetails(requestId, professionalId) {
+      let summaryPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let summary = get(summaryPath).data;
+      let slotId = summary.serviceDate + '_' + summary.period;
+      let reservationPath = /databases/$(database)/documents/professionalReservations/$(professionalId)/slots/$(slotId);
+      let refusalPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(summary.currentRoundId)/refusals/$(professionalId);
+
+      return request.auth != null
+        && request.auth.uid == professionalId
+        && exists(summaryPath)
+        && summary.status == 'OPEN'
+        && request.time < summary.acceptUntil
+        && professionalMatchesRequest(summary, professionalId)
+        && hasAvailableServiceSlot(summary, professionalId)
+        && !exists(reservationPath)
+        && !exists(refusalPath);
+    }
+
     function hasValidAcceptanceDocuments(requestId, professionalId, before, after) {
       let assignmentPath = /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(after.currentAssignmentId);
       let assignment = getAfter(assignmentPath).data;
@@ -542,15 +560,18 @@ service cloud.firestore {
     function hasAtomicCreationDocuments(requestId) {
       let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
       let privatePath = /databases/$(database)/documents/serviceRequestPrivate/$(requestId);
+      let opportunityDetailsPath = /databases/$(database)/documents/serviceRequestOpportunityDetails/$(requestId);
       let roundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/round-1;
       let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/created;
 
       return !exists(requestPath)
         && !exists(privatePath)
+        && !exists(opportunityDetailsPath)
         && !exists(roundPath)
         && !exists(eventPath)
         && existsAfter(requestPath)
         && existsAfter(privatePath)
+        && existsAfter(opportunityDetailsPath)
         && existsAfter(roundPath)
         && existsAfter(eventPath);
     }
@@ -647,6 +668,37 @@ service cloud.firestore {
         && privateData.updatedAt == request.time;
     }
 
+    function isSafeOpportunityDescription(description) {
+      return description is string
+        && description.size() >= 10
+        && description.size() <= 1000
+        && !description.matches('.*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}.*')
+        && !description.matches('.*(https?://|www\\.).*')
+        && !description.matches('.*[0-9]{5}-?[0-9]{3}.*')
+        && !description.matches('.*([0-9][^0-9]*){10,}.*');
+    }
+
+    function isValidOpportunityDetails(requestId, summary, privateData, details) {
+      return details.keys().hasOnly([
+          'requestId', 'categoryId', 'specialtyId', 'cityIbgeCode',
+          'city', 'stateCode', 'serviceDate', 'period', 'round',
+          'description', 'createdAt', 'updatedAt'
+        ])
+        && details.requestId == requestId
+        && details.categoryId == summary.categoryId
+        && details.specialtyId == summary.specialtyId
+        && details.cityIbgeCode == summary.cityIbgeCode
+        && details.city == privateData.address.city
+        && details.stateCode == privateData.address.stateCode
+        && details.serviceDate == summary.serviceDate
+        && details.period == summary.period
+        && details.round == summary.round
+        && details.description == privateData.notes
+        && isSafeOpportunityDescription(details.description)
+        && details.createdAt == privateData.createdAt
+        && details.updatedAt == request.time;
+    }
+
     function isValidInitialRound(requestId, round) {
       return round.roundId == 'round-1'
         && round.requestId == requestId
@@ -679,13 +731,22 @@ service cloud.firestore {
 
     function isServiceRequestCreation(requestId) {
       let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let privatePath = /databases/$(database)/documents/serviceRequestPrivate/$(requestId);
+      let detailsPath = /databases/$(database)/documents/serviceRequestOpportunityDetails/$(requestId);
       let summary = getAfter(requestPath).data;
 
       return request.auth != null
         && hasAtomicCreationDocuments(requestId)
         && isReadyClientForCreation(summary)
         && hasActiveCreationCatalog(summary)
-        && isValidCreatedSummary(requestId, summary);
+        && isValidCreatedSummary(requestId, summary)
+        && isValidCreatedPrivate(requestId, summary, getAfter(privatePath).data)
+        && isValidOpportunityDetails(
+          requestId,
+          summary,
+          getAfter(privatePath).data,
+          getAfter(detailsPath).data
+        );
     }
 
     function isServiceRequestCreationCompanion(requestId) {
@@ -802,6 +863,7 @@ service cloud.firestore {
         && newPrivate.notes is string
         && newPrivate.notes.size() >= 10
         && newPrivate.notes.size() <= 1000
+        && isSafeOpportunityDescription(newPrivate.notes)
         && isValidPrivateAddress(newPrivate.address, after.cityIbgeCode)
         && newPrivate.updatedAt == request.time
         && oldRound.status == 'OPEN'
@@ -899,6 +961,23 @@ service cloud.firestore {
         && after.status == 'OPEN'
         && after.round == before.round + 1
         && after.updatedAt == request.time;
+    }
+
+    function isClientOpportunityDetailsSync(requestId, details) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let privatePath = /databases/$(database)/documents/serviceRequestPrivate/$(requestId);
+      let summary = get(requestPath).data;
+      let privateData = get(privatePath).data;
+
+      return request.auth != null
+        && exists(requestPath)
+        && exists(privatePath)
+        && request.auth.uid == summary.clientId
+        && privateData.clientId == request.auth.uid
+        && summary.status == 'OPEN'
+        && isValidOpportunityDetails(
+          requestId, summary, privateData, details
+        );
     }
 
     function hasValidOpenClientCancellationDocuments(requestId, clientId, before) {
@@ -2395,6 +2474,24 @@ service cloud.firestore {
               )));
         allow update, delete: if false;
       }
+    }
+
+    // Projeção mínima para a revisão pré-aceite. Não admite consultas de
+    // coleção e não contém endereço, contato ou instruções privadas.
+    match /serviceRequestOpportunityDetails/{requestId} {
+      allow get: if request.auth != null
+        && (request.auth.uid == get(
+              /databases/$(database)/documents/serviceRequests/$(requestId)
+            ).data.clientId
+          || canReadOpportunityDetails(requestId, request.auth.uid));
+      allow create: if (isServiceRequestCreationCompanion(requestId)
+          || (request.auth != null
+            && isClientOpportunityDetailsSync(
+              requestId, request.resource.data
+            )));
+      allow update: if request.auth != null
+        && isClientOpportunityDetailsSync(requestId, request.resource.data);
+      allow list, delete: if false;
     }
 
     // Endereço, contato e observações ficam fora do resumo consultado no feed.
