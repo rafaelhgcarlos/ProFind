@@ -1,6 +1,6 @@
 # Solicitações, distribuição e reserva de agenda
 
-Este documento descreve a base transacional da issue #22. Ela não cria formulários, feed ou operação administrativa: fornece contratos tipados, repository/service reutilizáveis e uma prova funcional no emulador do Firestore.
+Este documento descreve a base transacional da issue #22 e suas extensões de atendimento das issues #26 e #27. Os contratos tipados e as camadas de repository/service sustentam as telas existentes e a prova funcional no emulador do Firestore.
 
 ## Entidades e relacionamentos
 
@@ -48,8 +48,8 @@ Política centralizada em `service-period-policy.ts`:
 | `OPEN` | Cancelamento pelo cliente dono | `CANCELLED` | solicitação, fechamento da rodada atual e evento |
 | `ASSIGNED` antes do início | Cancelamento pelo cliente dono | `CANCELLED` | solicitação, rodada, atribuição encerrada, remoção da reserva e evento; não abre substituição |
 | `ASSIGNED` | Cancelamento motivado pelo responsável antes do início | `OPEN` | solicitação, atribuição encerrada com motivo, remoção da reserva, nova rodada e evento |
-| `ASSIGNED` | Início, integração futura | `IN_PROGRESS` | fora desta entrega |
-| `IN_PROGRESS` | Conclusão, integração futura | `COMPLETED` | fora desta entrega |
+| `ASSIGNED` | Início pelo profissional atual | `IN_PROGRESS` | solicitação, atribuição e evento `SERVICE_STARTED`; reserva preservada |
+| `IN_PROGRESS` | Conclusão informada pelo profissional atual | `COMPLETED` | solicitação, atribuição, ocupação histórica da agenda e evento `SERVICE_COMPLETED` |
 | `IN_PROGRESS`/`COMPLETED` | Edição ou cancelamento comum | sem alteração | bloqueado; orientar suporte sem antecipar o fluxo da #28 |
 
 `COMPLETED` e `CANCELLED` são terminais para a substituição. Um atendimento iniciado, um período vencido ou outra situação não segura retorna `intervention-required`; nenhum cliente web força a reabertura.
@@ -79,8 +79,10 @@ Mudanças relevantes no perfil incrementam `profileVersion`, registram um evento
 - Identidade, `requestId`, `operationKey` original, `clientId`, contato, datas de criação e histórico são imutáveis durante a edição. Somente os campos editáveis do resumo e os dados privados de serviço/endereço são substituídos.
 - A atribuição ativa, a reserva e o evento de aceite são obrigatórios no mesmo commit.
 - O início exige `ASSIGNED`, responsável/atribuição/rodada atuais e horário igual ou posterior a `periodStartAt`. Pedido, atribuição e evento `SERVICE_STARTED` mudam atomicamente para representar `IN_PROGRESS`.
-- A reserva permanece inalterada durante `IN_PROGRESS`; conclusão e liberação posterior pertencem ao contrato da #27.
+- A reserva permanece inalterada durante `IN_PROGRESS`. Na conclusão, ela recebe `status: COMPLETED`, timestamp e ponteiro do evento, mas o documento não é removido: concluir antecipadamente não libera outro aceite no mesmo período.
 - O evento de início e seu ponteiro na atribuição são determinísticos. Retry da mesma atribuição é idempotente e uma atribuição substituída não pode iniciar o pedido.
+- A conclusão exige `IN_PROGRESS`, UID, atribuição e rodada atuais, além da reserva correspondente. Solicitação, atribuição, reserva e evento imutável mudam no mesmo commit; o ID determinístico torna retries e respostas perdidas idempotentes.
+- “Conclusão informada pelo profissional” é um registro operacional. Não representa confirmação do cliente, avaliação, pagamento ou garantia de qualidade.
 - A reserva é criada em um caminho único por profissional/slot.
 - `actorId`, `professionalId`, `clientId`, rodada e ponteiros devem concordar entre todos os documentos.
 - Recusas e eventos são imutáveis e usam caminhos da rodada atual.
@@ -90,7 +92,7 @@ Mudanças relevantes no perfil incrementam `profileVersion`, registram um evento
 - O motivo do cancelamento profissional é obrigatório, normalizado e preservado tanto na atribuição encerrada quanto no evento imutável.
 - O prazo de cancelamento profissional termina no início do período; o prazo de novos aceites termina 30 minutos antes. Um cancelamento entre esses dois marcos ainda libera a reserva e reabre o mesmo pedido, mas a rodada nasce vencida para novos aceites e fica como pendência de intervenção ou reagendamento.
 - Suspensão, desativação ou reanálise bloqueiam novas oportunidades, mas não retiram do profissional atualmente designado a autorização de cancelar o compromisso existente dentro das demais regras.
-- Suspensão, desativação ou reanálise também não retiram a leitura da agenda atual nem o início autorizado de um compromisso existente.
+- Suspensão, desativação ou reanálise também não retiram a leitura da agenda atual nem o início ou a conclusão autorizados de um compromisso existente.
 - O cancelamento exige a atribuição esperada. Um retry encontra o evento antigo e retorna sucesso idempotente sem tocar em uma atribuição posterior.
 - Edição e cancelamento do cliente carregam chave de operação, rodada esperada e atribuição esperada. Retries antigos podem reconhecer o próprio evento, mas não alteram uma rodada ou atribuição posterior.
 - A remoção da reserva, o encerramento da atribuição e a reabertura são inseparáveis.
@@ -149,7 +151,7 @@ npm run test:rules
 - edição do cliente contra aceite profissional;
 - cancelamento do cliente contra aceite profissional.
 
-A suíte também cobre cancelamento `OPEN`/`ASSIGNED`, liberação de reserva, ausência de substituição no cancelamento do cliente, recusa isolada, substituição profissional, retries antigos, rodada antiga, vencimento sem `EXPIRED`, aprovação/ativação/versão, acesso cruzado, writes incompletos, falsificação de proprietário, privacidade e bloqueio após o início.
+A suíte também cobre cancelamento `OPEN`/`ASSIGNED`, liberação de reserva, ausência de substituição no cancelamento do cliente, recusa isolada, substituição profissional, início e conclusão, retries, responsável substituído, conta restrita, preservação da ocupação concluída, rodada antiga, vencimento sem `EXPIRED`, aprovação/ativação/versão, acesso cruzado, writes incompletos, falsificação de proprietário e privacidade.
 
 ## Migração futura
 
@@ -174,6 +176,8 @@ Não há script de migração nesta entrega e nenhum dado remoto é alterado.
 - #13: feed profissional em tempo real, paginação e ciclo de listeners
   documentados em `docs/opportunity-feed.md`.
 - #21: experiência de cancelamento e substituição.
+- #26/#27: atendimentos, início e conclusão informada pelo profissional usam os
+  contratos descritos neste documento.
 - #34: a consulta administrativa paginada e o detalhe protegido estão descritos
   em `docs/admin-service-requests.md`; intervenções e resolução de pendências
   continuam no restante da issue.

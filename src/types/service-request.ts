@@ -25,6 +25,7 @@ export const SERVICE_EVENT_TYPES = [
   'PROFESSIONAL_REFUSED',
   'PROFESSIONAL_CANCELLED_AND_REOPENED',
   'SERVICE_STARTED',
+  'SERVICE_COMPLETED',
 ] as const
 
 export const SERVICE_EVENT_REASON_CODES = [
@@ -35,6 +36,7 @@ export const SERVICE_EVENT_REASON_CODES = [
   'PROFESSIONAL_REFUSAL',
   'PROFESSIONAL_CANCELLATION',
   'PROFESSIONAL_START',
+  'PROFESSIONAL_COMPLETION',
 ] as const
 
 export const SERVICE_EVENT_HISTORY_LIMIT = 50
@@ -104,6 +106,8 @@ export interface ServiceAssignment {
   acceptedEventId: string
   startedAt?: Date | null
   startedEventId?: string | null
+  endedAt?: Date | null
+  endReason?: 'PROFESSIONAL_CANCELLATION' | 'CLIENT_CANCELLATION' | 'PROFESSIONAL_COMPLETION' | null
   endedEventId?: string
 }
 
@@ -175,6 +179,9 @@ export interface ProfessionalReservation {
   serviceDate: string
   period: ServicePeriod
   round: number
+  status?: 'ACTIVE' | 'COMPLETED'
+  completedAt?: Date | null
+  completedEventId?: string | null
 }
 
 export interface ProfessionalOperationalProfile {
@@ -226,7 +233,7 @@ export interface ProfessionalAppointmentSummary {
   serviceDate: string
   period: ServicePeriod
   periodStartAt: Date
-  status: 'ASSIGNED' | 'IN_PROGRESS'
+  status: 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED'
   round: number
 }
 

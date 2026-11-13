@@ -612,7 +612,7 @@ export function ServiceRequestPage() {
         : confirmed.status === 'CANCELLED'
           ? 'Solicitação cancelada'
           : confirmed.status === 'COMPLETED'
-            ? 'Atendimento concluído'
+            ? 'Conclusão informada pelo profissional'
             : 'Atendimento iniciado'
     return (
       <ClientLayout pageTitle="Solicitar serviço" contextSwitcher={<ModeSwitcher />}>
@@ -635,7 +635,9 @@ export function ServiceRequestPage() {
                   ? 'Um profissional aceitou este pedido. O cancelamento ainda é permitido antes do início do período.'
                   : confirmed.status === 'CANCELLED'
                     ? 'O cancelamento foi salvo e este pedido não participa mais da procura.'
-                    : 'Para alterações após o início, procure o suporte pelos canais já informados no cadastro.'}
+                    : confirmed.status === 'COMPLETED'
+                      ? 'O profissional informou a conclusão. Este registro não representa confirmação do cliente, avaliação ou garantia de qualidade.'
+                      : 'Para alterações após o início, procure o suporte pelos canais já informados no cadastro.'}
             </p>
           </div>
           <CardContent className="space-y-5 pt-6">

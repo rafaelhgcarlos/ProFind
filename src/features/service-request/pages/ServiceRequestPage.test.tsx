@@ -275,6 +275,26 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
     ).toBeVisible()
   })
 
+  it('exibe a conclusão persistida sem tratá-la como confirmação do cliente', async () => {
+    renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
+    await screen.findByRole('heading', { name: 'Procurando profissional' })
+
+    act(() => {
+      mocks.ownDetailsSubscriptions[0].onDetails({
+        details: {
+          ...recoveredDetails,
+          request: { ...recoveredDetails.request, status: 'COMPLETED' },
+        },
+        fromCache: false,
+      })
+    })
+
+    expect(screen.getByRole('heading', {
+      name: 'Conclusão informada pelo profissional',
+    })).toBeVisible()
+    expect(screen.getByText(/não representa confirmação do cliente/i)).toBeVisible()
+  })
+
   it('cancela somente após confirmação explícita e mostra o estado persistido', async () => {
     const user = userEvent.setup()
     renderPage('/cliente/solicitar?pedido=request-operation-key-000001')

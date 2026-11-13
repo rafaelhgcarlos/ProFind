@@ -195,7 +195,8 @@ somente de leitura da #34; limites, índices, privacidade e pendências estão e
 ## Núcleo de solicitações e distribuição
 
 O contrato transacional de solicitação aberta, aceite exclusivo, reserva de
-agenda, recusa por rodada e cancelamento com reabertura está implementado nas
+agenda, recusa por rodada, cancelamento com reabertura, início e conclusão
+informada pelo profissional está implementado nas
 camadas de repository/service e protegido pelas Security Rules. A prova usa
 clientes autenticados independentes no emulador e não depende de telas ou de um
 backend novo.

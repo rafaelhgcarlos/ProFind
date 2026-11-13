@@ -65,6 +65,7 @@ const EVENT_LABELS: Record<string, string> = {
   PROFESSIONAL_REFUSED: 'Profissional recusou a rodada',
   PROFESSIONAL_CANCELLED_AND_REOPENED: 'Cancelamento e procura de substituto',
   SERVICE_STARTED: 'Atendimento iniciado',
+  SERVICE_COMPLETED: 'Conclusão informada pelo profissional',
 }
 
 const ROUND_REASON_LABELS: Record<string, string> = {
@@ -406,7 +407,9 @@ function AdminRequestDetailPage({ requestId }: { requestId: string }) {
               <CardContent><dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><dt className="text-muted-foreground">Data e período</dt><dd className="font-medium">{formatDate(detail.request.serviceDate)} · {SERVICE_PERIOD_DEFINITIONS[detail.request.period].label}</dd></div><div><dt className="text-muted-foreground">Criação</dt><dd className="font-medium">{formatDateTime(detail.createdAt)}</dd></div><div><dt className="text-muted-foreground">Última atualização</dt><dd className="font-medium">{formatDateTime(detail.updatedAt)}</dd></div><div><dt className="text-muted-foreground">Rodada atual</dt><dd className="font-medium">{detail.request.round}</dd></div></dl></CardContent>
             </Card>
 
-            {acceptanceExpired(detail.request) ? (
+            {detail.request.status === 'COMPLETED' ? (
+              <Alert variant="success"><ShieldCheck aria-hidden="true" /><AlertTitle>Conclusão informada pelo profissional</AlertTitle><AlertDescription>Registro operacional do responsável atual; não representa confirmação do cliente, avaliação ou garantia de qualidade.</AlertDescription></Alert>
+            ) : acceptanceExpired(detail.request) ? (
               <Alert variant="destructive"><ClockAlert aria-hidden="true" /><AlertTitle>Prazo de aceite encerrado</AlertTitle><AlertDescription>O pedido continua aberto e sem aceite. Esta sinalização não afirma ausência de profissionais elegíveis.</AlertDescription></Alert>
             ) : withoutAcceptance(detail.request) ? (
               <Alert><CalendarClock aria-hidden="true" /><AlertTitle>Pedido ainda sem aceite</AlertTitle><AlertDescription>A procura está aberta. A existência ou ausência de candidatos não foi verificada por esta consulta.</AlertDescription></Alert>

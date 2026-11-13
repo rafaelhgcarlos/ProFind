@@ -33,6 +33,7 @@ import {
   assignmentEventId,
   cancellationEventId,
   clientEditEventId,
+  completionEventId,
   isAcceptanceAllowed,
   isProfessionalCancellationAllowed,
   isServiceStartAllowed,
@@ -65,7 +66,7 @@ import {
 import type { ServiceCatalog } from '../types/catalog'
 
 export interface TransactionCoordinator {
-  afterRead(operation: 'create' | 'client-edit' | 'client-cancel' | 'accept' | 'refuse' | 'cancel' | 'start', key: string): Promise<void>
+  afterRead(operation: 'create' | 'client-edit' | 'client-cancel' | 'accept' | 'refuse' | 'cancel' | 'start' | 'complete', key: string): Promise<void>
 }
 
 interface RepositoryDependencies {
@@ -226,6 +227,8 @@ export interface StartAssignmentInput {
   expectedRound: number
 }
 
+export type CompleteAssignmentInput = StartAssignmentInput
+
 export interface AcceptedRequestResult {
   requestId: string
   assignmentId: string
@@ -249,6 +252,13 @@ export interface ReopenedRequestResult {
 }
 
 export interface StartedAssignmentResult {
+  requestId: string
+  assignmentId: string
+  round: number
+  idempotent: boolean
+}
+
+export interface CompletedAssignmentResult {
   requestId: string
   assignmentId: string
   round: number
@@ -541,7 +551,9 @@ function professionalAppointmentSummary(
   request: ServiceRequestSummary,
 ): ProfessionalAppointmentSummary {
   if (
-    (request.status !== 'ASSIGNED' && request.status !== 'IN_PROGRESS') ||
+    (request.status !== 'ASSIGNED' &&
+      request.status !== 'IN_PROGRESS' &&
+      request.status !== 'COMPLETED') ||
     !request.currentAssignmentId
   ) {
     throw new ServiceRequestError(
@@ -856,7 +868,7 @@ export function createServiceRequestRepository({
     const pageSize = professionalAppointmentsPageSize(input.pageSize)
     const constraints: QueryConstraint[] = [
       where('assignedProfessionalId', '==', professionalId),
-      where('status', 'in', ['ASSIGNED', 'IN_PROGRESS']),
+      where('status', 'in', ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED']),
       orderBy(documentId(), 'asc'),
       limit(pageSize + 1),
     ]
@@ -917,7 +929,7 @@ export function createServiceRequestRepository({
           if (
             request.assignedProfessionalId !== professionalId ||
             !request.currentAssignmentId ||
-            (request.status !== 'ASSIGNED' && request.status !== 'IN_PROGRESS')
+            !['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'].includes(request.status)
           ) {
             listeners.onUnavailable(
               new ServiceRequestError(
@@ -1987,6 +1999,9 @@ export function createServiceRequestRepository({
         serviceDate: request.serviceDate,
         period: request.period,
         round: expectedRound,
+        status: 'ACTIVE',
+        completedAt: null,
+        completedEventId: null,
         createdAt: timestamp,
       })
       transaction.set(eventReference, {
@@ -2292,6 +2307,229 @@ export function createServiceRequestRepository({
     })
   }
 
+  async function completeAssignment(
+    input: CompleteAssignmentInput,
+  ): Promise<CompletedAssignmentResult> {
+    const {
+      requestId,
+      professionalId,
+      expectedAssignmentId,
+      expectedRound,
+    } = input
+    return runTransaction(firestore, async (transaction) => {
+      const requestReference = doc(firestore, 'serviceRequests', requestId)
+      const assignmentReference = doc(
+        requestReference,
+        'assignments',
+        expectedAssignmentId,
+      )
+      const eventId = completionEventId(expectedRound)
+      const eventReference = doc(requestReference, 'events', eventId)
+      const [requestSnapshot, assignmentSnapshot] = await Promise.all([
+        transaction.get(requestReference),
+        transaction.get(assignmentReference),
+      ])
+      const request = requestFromSnapshot(requestSnapshot)
+      const assignment = assignmentSnapshot.data()
+      const reservationId = assignmentSnapshot.exists()
+        ? stringValue(assignmentSnapshot.data(), 'reservationId')
+        : serviceSlotId(request.serviceDate, request.period)
+      const reservationReference = doc(
+        firestore,
+        'professionalReservations',
+        professionalId,
+        'slots',
+        reservationId,
+      )
+      const [reservationSnapshot, eventSnapshot] = await Promise.all([
+        transaction.get(reservationReference),
+        transaction.get(eventReference),
+      ])
+
+      await coordinator?.afterRead('complete', requestId)
+
+      if (
+        request.status === 'COMPLETED' &&
+        request.assignedProfessionalId === professionalId &&
+        request.currentAssignmentId === expectedAssignmentId &&
+        request.round === expectedRound &&
+        assignmentSnapshot.exists() &&
+        assignment?.professionalId === professionalId &&
+        assignment.status === 'COMPLETED' &&
+        assignment.endedEventId === eventId &&
+        reservationSnapshot.exists() &&
+        reservationSnapshot.data().requestId === requestId &&
+        reservationSnapshot.data().assignmentId === expectedAssignmentId &&
+        reservationSnapshot.data().professionalId === professionalId &&
+        reservationSnapshot.data().status === 'COMPLETED' &&
+        reservationSnapshot.data().completedEventId === eventId &&
+        eventSnapshot.exists() &&
+        eventSnapshot.data().type === 'SERVICE_COMPLETED' &&
+        eventSnapshot.data().actorId === professionalId &&
+        eventSnapshot.data().assignmentId === expectedAssignmentId
+      ) {
+        return {
+          requestId,
+          assignmentId: expectedAssignmentId,
+          round: expectedRound,
+          idempotent: true,
+        }
+      }
+
+      if (
+        request.round !== expectedRound ||
+        request.currentAssignmentId !== expectedAssignmentId
+      ) {
+        throw new ServiceRequestError(
+          'round-changed',
+          'A atribuição mudou. Recarregue o atendimento antes de concluir.',
+        )
+      }
+      if (
+        request.status !== 'IN_PROGRESS' ||
+        request.assignedProfessionalId !== professionalId
+      ) {
+        throw new ServiceRequestError(
+          request.status === 'COMPLETED'
+            ? 'stale-assignment'
+            : 'not-assigned-professional',
+          'Somente o profissional atualmente designado pode concluir um atendimento em andamento.',
+        )
+      }
+      if (
+        !assignmentSnapshot.exists() ||
+        assignment?.status !== 'ACTIVE' ||
+        assignment.professionalId !== professionalId ||
+        assignment.round !== expectedRound ||
+        assignment.requestId !== requestId ||
+        assignment.startedEventId !== startEventId(expectedRound) ||
+        !assignment.startedAt ||
+        reservationId !== serviceSlotId(request.serviceDate, request.period)
+      ) {
+        throw new ServiceRequestError(
+          'stale-assignment',
+          'A atribuição deste atendimento está desatualizada.',
+        )
+      }
+      if (
+        !reservationSnapshot.exists() ||
+        reservationSnapshot.data().requestId !== requestId ||
+        reservationSnapshot.data().assignmentId !== expectedAssignmentId ||
+        reservationSnapshot.data().professionalId !== professionalId ||
+        reservationSnapshot.data().round !== expectedRound ||
+        reservationSnapshot.data().reservationId !== reservationId ||
+        reservationSnapshot.data().status === 'COMPLETED'
+      ) {
+        throw new ServiceRequestError(
+          'stale-assignment',
+          'A ocupação de agenda deste atendimento está desatualizada.',
+        )
+      }
+      if (eventSnapshot.exists()) {
+        throw new ServiceRequestError(
+          'stale-assignment',
+          'O registro de conclusão não corresponde ao estado atual.',
+        )
+      }
+
+      const timestamp = serverTimestamp()
+      transaction.update(requestReference, {
+        status: 'COMPLETED',
+        updatedAt: timestamp,
+      })
+      transaction.update(assignmentReference, {
+        status: 'COMPLETED',
+        endedAt: timestamp,
+        endReason: 'PROFESSIONAL_COMPLETION',
+        endedEventId: eventId,
+      })
+      transaction.update(reservationReference, {
+        status: 'COMPLETED',
+        completedAt: timestamp,
+        completedEventId: eventId,
+      })
+      transaction.set(eventReference, {
+        eventId,
+        entityType: 'SERVICE_REQUEST',
+        entityId: requestId,
+        requestId,
+        type: 'SERVICE_COMPLETED',
+        reasonCode: 'PROFESSIONAL_COMPLETION',
+        actorId: professionalId,
+        actorRole: 'PROFESSIONAL',
+        round: expectedRound,
+        assignmentId: expectedAssignmentId,
+        fromStatus: 'IN_PROGRESS',
+        toStatus: 'COMPLETED',
+        createdAt: timestamp,
+      })
+
+      return {
+        requestId,
+        assignmentId: expectedAssignmentId,
+        round: expectedRound,
+        idempotent: false,
+      }
+    })
+  }
+
+  async function reconcileCompletedAssignment(
+    input: CompleteAssignmentInput,
+  ): Promise<CompletedAssignmentResult> {
+    const requestReference = doc(firestore, 'serviceRequests', input.requestId)
+    const assignmentReference = doc(
+      requestReference,
+      'assignments',
+      input.expectedAssignmentId,
+    )
+    const eventId = completionEventId(input.expectedRound)
+    const [requestSnapshot, assignmentSnapshot, eventSnapshot] = await Promise.all([
+      getDoc(requestReference),
+      getDoc(assignmentReference),
+      getDoc(doc(requestReference, 'events', eventId)),
+    ])
+    const request = requestFromSnapshot(requestSnapshot)
+    const assignment = assignmentSnapshot.data()
+    const reservationId = assignmentSnapshot.exists()
+      ? stringValue(assignmentSnapshot.data(), 'reservationId')
+      : serviceSlotId(request.serviceDate, request.period)
+    const reservationSnapshot = await getDoc(doc(
+      firestore,
+      'professionalReservations',
+      input.professionalId,
+      'slots',
+      reservationId,
+    ))
+    if (
+      request.status === 'COMPLETED' &&
+      request.round === input.expectedRound &&
+      request.assignedProfessionalId === input.professionalId &&
+      request.currentAssignmentId === input.expectedAssignmentId &&
+      assignmentSnapshot.exists() &&
+      assignment?.status === 'COMPLETED' &&
+      assignment.professionalId === input.professionalId &&
+      assignment.endedEventId === eventId &&
+      reservationSnapshot.exists() &&
+      reservationSnapshot.data().assignmentId === input.expectedAssignmentId &&
+      reservationSnapshot.data().status === 'COMPLETED' &&
+      reservationSnapshot.data().completedEventId === eventId &&
+      eventSnapshot.exists() &&
+      eventSnapshot.data().type === 'SERVICE_COMPLETED' &&
+      eventSnapshot.data().actorId === input.professionalId
+    ) {
+      return {
+        requestId: input.requestId,
+        assignmentId: input.expectedAssignmentId,
+        round: input.expectedRound,
+        idempotent: true,
+      }
+    }
+    throw new ServiceRequestError(
+      'stale-assignment',
+      'A conclusão não foi confirmada. O atendimento foi relido; revise o estado atual.',
+    )
+  }
+
   async function cancelAssignment(
     input: CancelAssignmentInput,
   ): Promise<ReopenedRequestResult> {
@@ -2492,6 +2730,8 @@ export function createServiceRequestRepository({
     acceptRequest,
     refuseRequest,
     startAssignment,
+    completeAssignment,
+    reconcileCompletedAssignment,
     cancelAssignment,
   }
 }

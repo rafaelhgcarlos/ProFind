@@ -7,6 +7,7 @@ import {
   type AcceptRequestInput,
   type CancelAssignmentInput,
   type CancelClientRequestInput,
+  type CompleteAssignmentInput,
   type CreateRequestInput,
   type DeclineOpportunityInput,
   type OpportunityFeedPageSnapshot,
@@ -581,6 +582,42 @@ export function createServiceRequestService(
       return operation
     },
 
+    completeAssignment(input: Omit<CompleteAssignmentInput, 'professionalId'>) {
+      const professionalId = actorId()
+      const online = dependencies.isOnline?.() ??
+        (typeof navigator === 'undefined' || navigator.onLine !== false)
+      if (!online) {
+        return Promise.reject(
+          new ServiceRequestError(
+            'offline',
+            'Conecte-se à internet para informar a conclusão do atendimento.',
+          ),
+        )
+      }
+      const key = `complete:${input.requestId}:${input.expectedAssignmentId}`
+      const pending = mutationInFlight.get(key)
+      if (pending) return pending as ReturnType<typeof repository.completeAssignment>
+      const completionInput = { ...input, professionalId }
+      const operation = (async () => {
+        try {
+          return await safely(() => repository.completeAssignment(completionInput))
+        } catch (error) {
+          try {
+            return await safely(() =>
+              repository.reconcileCompletedAssignment(completionInput),
+            )
+          } catch {
+            throw error
+          }
+        }
+      })()
+      mutationInFlight.set(key, operation)
+      void operation.finally(() => {
+        if (mutationInFlight.get(key) === operation) mutationInFlight.delete(key)
+      }).catch(() => undefined)
+      return operation
+    },
+
     cancelAssignment(
       input: Omit<CancelAssignmentInput, 'professionalId'>,
     ) {
@@ -665,6 +702,9 @@ export const serviceRequestService = {
   },
   startAssignment(input: Omit<StartAssignmentInput, 'professionalId'>) {
     return getDefaultService().startAssignment(input)
+  },
+  completeAssignment(input: Omit<CompleteAssignmentInput, 'professionalId'>) {
+    return getDefaultService().completeAssignment(input)
   },
   cancelAssignment(input: Omit<CancelAssignmentInput, 'professionalId'>) {
     return getDefaultService().cancelAssignment(input)

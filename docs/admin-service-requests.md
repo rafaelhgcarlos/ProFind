@@ -22,6 +22,9 @@ ações que alterem atendimento, agenda ou histórico.
 - `OPEN` com `reopenReason: PROFESSIONAL_CANCELLATION` é exibido como procura de
   substituto. Os demais estados continuam usando `OPEN`, `ASSIGNED`,
   `IN_PROGRESS`, `COMPLETED` e `CANCELLED` do domínio existente.
+- `COMPLETED` e o evento `SERVICE_COMPLETED` são apresentados como “Conclusão
+  informada pelo profissional”, sem sugerir confirmação do cliente, avaliação
+  ou garantia de qualidade.
 - Pedido `OPEN` sem atribuição é sinalizado como ainda sem aceite. Se
   `acceptUntil` já passou, a interface sinaliza prazo encerrado. Nenhuma dessas
   condições é descrita como “sem candidatos”, pois a consulta não prova a

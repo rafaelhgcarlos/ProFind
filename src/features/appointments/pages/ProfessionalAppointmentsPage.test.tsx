@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   detailSubscriptions: [] as ProfessionalAppointmentDetailsSubscriptionInput[],
   unsubscribers: [] as ReturnType<typeof vi.fn>[],
   startAssignment: vi.fn(),
+  completeAssignment: vi.fn(),
   cancelAssignment: vi.fn(),
 }))
 
@@ -56,6 +57,7 @@ vi.mock('../../../services/service-request.service', async (importOriginal) => {
         return unsubscribe
       },
       startAssignment: mocks.startAssignment,
+      completeAssignment: mocks.completeAssignment,
       cancelAssignment: mocks.cancelAssignment,
     },
   }
@@ -153,6 +155,12 @@ describe('ProfessionalAppointmentsPage', () => {
       retry: vi.fn(),
     })
     mocks.startAssignment.mockResolvedValue({
+      requestId: 'request-1',
+      assignmentId: 'round-1',
+      round: 1,
+      idempotent: false,
+    })
+    mocks.completeAssignment.mockResolvedValue({
       requestId: 'request-1',
       assignmentId: 'round-1',
       round: 1,
@@ -274,6 +282,91 @@ describe('ProfessionalAppointmentsPage', () => {
     })
     expect(screen.getByText('Atendimento iniciado')).toBeVisible()
     expect(screen.queryByRole('button', { name: /concluir/i })).not.toBeInTheDocument()
+  })
+
+  it('informa conclusão somente depois do commit e exige confirmação explícita', async () => {
+    let resolveCompletion: ((value: unknown) => void) | undefined
+    mocks.completeAssignment.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCompletion = resolve
+      }),
+    )
+    const user = userEvent.setup()
+    renderPage('/profissional/atendimentos/request-1')
+    await publishDetails({
+      ...details,
+      appointment: { ...appointment, status: 'IN_PROGRESS' },
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Informar conclusão' }))
+    expect(screen.getByText(/Não representa confirmação do cliente/)).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Confirmar conclusão' }))
+    expect(screen.queryByText('Conclusão registrada')).not.toBeInTheDocument()
+    expect(mocks.completeAssignment).toHaveBeenCalledWith({
+      requestId: 'request-1',
+      expectedAssignmentId: 'round-1',
+      expectedRound: 1,
+    })
+
+    await act(async () => {
+      resolveCompletion?.({ idempotent: false })
+    })
+    expect(screen.getByText('Conclusão registrada')).toBeVisible()
+    expect(screen.getByText('Conclusão informada pelo profissional.')).toBeVisible()
+  })
+
+  it('mantém a conclusão persistida visível após recarregar o detalhe', async () => {
+    renderPage('/profissional/atendimentos/request-1')
+    await publishDetails({
+      ...details,
+      appointment: { ...appointment, status: 'COMPLETED' },
+    })
+
+    expect(screen.getByText('Conclusão informada pelo profissional')).toBeVisible()
+    expect(screen.getByText(/não representa confirmação do cliente/i)).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Informar conclusão' })).not.toBeInTheDocument()
+  })
+
+  it('mantém o detalhe e aceita a releitura persistida após conflito de conclusão', async () => {
+    mocks.completeAssignment.mockRejectedValue(
+      new Error('A atribuição mudou. O atendimento foi relido.'),
+    )
+    const user = userEvent.setup()
+    renderPage('/profissional/atendimentos/request-1')
+    await publishDetails({
+      ...details,
+      appointment: { ...appointment, status: 'IN_PROGRESS' },
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Informar conclusão' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar conclusão' }))
+    expect(await screen.findByText('A atribuição mudou. O atendimento foi relido.')).toBeVisible()
+    expect(screen.getByText(/Rua das Flores, 100/)).toBeVisible()
+
+    act(() => {
+      mocks.detailSubscriptions[0].onDetails({
+        details: {
+          ...details,
+          appointment: { ...appointment, status: 'COMPLETED' },
+        },
+        fromCache: false,
+      })
+    })
+    expect(screen.getByText('Conclusão informada pelo profissional')).toBeVisible()
+  })
+
+  it('bloqueia a conclusão enquanto o navegador está desconectado', async () => {
+    renderPage('/profissional/atendimentos/request-1')
+    await publishDetails({
+      ...details,
+      appointment: { ...appointment, status: 'IN_PROGRESS' },
+    })
+
+    act(() => window.dispatchEvent(new Event('offline')))
+    expect(screen.getByText('Dados possivelmente desatualizados')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Informar conclusão' })).toBeDisabled()
+    expect(mocks.completeAssignment).not.toHaveBeenCalled()
+    act(() => window.dispatchEvent(new Event('online')))
   })
 
   it('exige motivo e preserva o texto quando o cancelamento encontra conflito', async () => {

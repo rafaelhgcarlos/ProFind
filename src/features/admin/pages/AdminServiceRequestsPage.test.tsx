@@ -150,4 +150,48 @@ describe('AdminServiceRequestsPage', () => {
     expect(screen.queryByText(/sem candidatos/i)).not.toBeInTheDocument()
     expect(mocks.getDetail).toHaveBeenCalledWith(request.requestId)
   })
+
+  it('identifica a conclusão como informação do profissional', async () => {
+    const baseDetail = await mocks.getDetail()
+    mocks.getDetail.mockResolvedValueOnce({
+      ...baseDetail,
+      request: {
+        ...request,
+        status: 'COMPLETED',
+        assignedProfessionalId: 'professional-a',
+        currentAssignmentId: 'round-1',
+      },
+      assignments: [{
+        assignmentId: 'round-1',
+        professionalId: 'professional-a',
+        professionalName: 'Profissional A',
+        round: 1,
+        status: 'COMPLETED',
+        acceptedAt: new Date('2026-11-10T12:00:00Z'),
+        startedAt: new Date('2026-11-20T11:00:00Z'),
+        endedAt: new Date('2026-11-20T12:00:00Z'),
+        endedReason: 'PROFESSIONAL_COMPLETION',
+      }],
+      history: [{
+        eventId: 'completed-round-1',
+        entityType: 'SERVICE_REQUEST',
+        entityId: request.requestId,
+        requestId: request.requestId,
+        type: 'SERVICE_COMPLETED',
+        reasonCode: 'PROFESSIONAL_COMPLETION',
+        actorId: 'professional-a',
+        actorRole: 'PROFESSIONAL',
+        round: 1,
+        assignmentId: 'round-1',
+        fromStatus: 'IN_PROGRESS',
+        toStatus: 'COMPLETED',
+        createdAt: new Date('2026-11-20T12:00:00Z'),
+      }],
+    })
+    renderPage(`/admin/pedidos/${request.requestId}`)
+
+    expect(await screen.findAllByText('Conclusão informada pelo profissional')).not.toHaveLength(0)
+    expect(screen.getByText(/não representa confirmação do cliente/i)).toBeVisible()
+    expect(screen.getByText('Concluído')).toBeVisible()
+  })
 })

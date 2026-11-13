@@ -166,6 +166,10 @@ export function startEventId(round: number) {
   return `started-${roundDocumentId(round)}`
 }
 
+export function completionEventId(round: number) {
+  return `completed-${roundDocumentId(round)}`
+}
+
 export function clientEditEventId(round: number) {
   return `edited-${roundDocumentId(round)}`
 }

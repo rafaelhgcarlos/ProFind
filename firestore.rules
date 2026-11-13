@@ -133,11 +133,13 @@ service cloud.firestore {
         && assignment.endReason == null
         && reservation.keys().hasAll([
           'reservationId', 'professionalId', 'requestId', 'assignmentId',
-          'serviceDate', 'period', 'round', 'createdAt'
+          'serviceDate', 'period', 'round', 'status', 'completedAt',
+          'completedEventId', 'createdAt'
         ])
         && reservation.keys().hasOnly([
           'reservationId', 'professionalId', 'requestId', 'assignmentId',
-          'serviceDate', 'period', 'round', 'createdAt'
+          'serviceDate', 'period', 'round', 'status', 'completedAt',
+          'completedEventId', 'createdAt'
         ])
         && reservation.reservationId == assignment.reservationId
         && reservation.professionalId == professionalId
@@ -146,6 +148,9 @@ service cloud.firestore {
         && reservation.serviceDate == before.serviceDate
         && reservation.period == before.period
         && reservation.round == before.round
+        && reservation.status == 'ACTIVE'
+        && reservation.completedAt == null
+        && reservation.completedEventId == null
         && reservation.createdAt == request.time
         && event.keys().hasAll([
           'eventId', 'entityType', 'entityId', 'requestId', 'type',
@@ -389,6 +394,91 @@ service cloud.firestore {
         && after.updatedAt == request.time
         && after.diff(before).affectedKeys().hasOnly(['status', 'updatedAt'])
         && hasValidStartDocuments(requestId, professionalId, before);
+    }
+
+    function hasValidCompletionDocuments(requestId, professionalId, before) {
+      let assignmentPath = /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(before.currentAssignmentId);
+      let oldAssignment = get(assignmentPath).data;
+      let assignment = getAfter(assignmentPath).data;
+      let reservationPath = /databases/$(database)/documents/professionalReservations/$(professionalId)/slots/$(oldAssignment.reservationId);
+      let oldReservation = get(reservationPath).data;
+      let reservation = getAfter(reservationPath).data;
+      let eventId = 'completed-' + before.currentRoundId;
+      let eventPath = /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(eventId);
+      let event = getAfter(eventPath).data;
+
+      return exists(assignmentPath)
+        && exists(reservationPath)
+        && !exists(eventPath)
+        && existsAfter(assignmentPath)
+        && existsAfter(reservationPath)
+        && existsAfter(eventPath)
+        && oldAssignment.status == 'ACTIVE'
+        && oldAssignment.professionalId == professionalId
+        && oldAssignment.requestId == requestId
+        && oldAssignment.round == before.round
+        && oldAssignment.get('startedAt', null) != null
+        && oldAssignment.startedEventId == 'started-' + before.currentRoundId
+        && assignment.diff(oldAssignment).affectedKeys().hasOnly([
+          'status', 'endedAt', 'endReason', 'endedEventId'
+        ])
+        && assignment.status == 'COMPLETED'
+        && assignment.endedAt == request.time
+        && assignment.endReason == 'PROFESSIONAL_COMPLETION'
+        && assignment.endedEventId == eventId
+        && oldReservation.professionalId == professionalId
+        && oldReservation.requestId == requestId
+        && oldReservation.assignmentId == before.currentAssignmentId
+        && oldReservation.round == before.round
+        && oldReservation.reservationId == before.serviceDate + '_' + before.period
+        && oldReservation.get('status', 'ACTIVE') == 'ACTIVE'
+        && oldReservation.get('completedAt', null) == null
+        && oldReservation.get('completedEventId', null) == null
+        && reservation.diff(oldReservation).affectedKeys().hasOnly([
+          'status', 'completedAt', 'completedEventId'
+        ])
+        && reservation.status == 'COMPLETED'
+        && reservation.completedAt == request.time
+        && reservation.completedEventId == eventId
+        && event.keys().hasAll([
+          'eventId', 'entityType', 'entityId', 'requestId', 'type',
+          'reasonCode', 'actorId', 'actorRole', 'round', 'assignmentId',
+          'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.keys().hasOnly([
+          'eventId', 'entityType', 'entityId', 'requestId', 'type',
+          'reasonCode', 'actorId', 'actorRole', 'round', 'assignmentId',
+          'fromStatus', 'toStatus', 'createdAt'
+        ])
+        && event.eventId == eventId
+        && event.entityType == 'SERVICE_REQUEST'
+        && event.entityId == requestId
+        && event.requestId == requestId
+        && event.type == 'SERVICE_COMPLETED'
+        && event.reasonCode == 'PROFESSIONAL_COMPLETION'
+        && event.actorId == professionalId
+        && event.actorRole == 'PROFESSIONAL'
+        && event.round == before.round
+        && event.assignmentId == before.currentAssignmentId
+        && event.fromStatus == 'IN_PROGRESS'
+        && event.toStatus == 'COMPLETED'
+        && event.createdAt == request.time;
+    }
+
+    function isCompletionTransition(requestId, professionalId) {
+      let requestPath = /databases/$(database)/documents/serviceRequests/$(requestId);
+      let before = get(requestPath).data;
+      let after = getAfter(requestPath).data;
+
+      return request.auth != null
+        && request.auth.uid == professionalId
+        && before.status == 'IN_PROGRESS'
+        && before.assignedProfessionalId == professionalId
+        && before.currentAssignmentId is string
+        && after.status == 'COMPLETED'
+        && after.updatedAt == request.time
+        && after.diff(before).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && hasValidCompletionDocuments(requestId, professionalId, before);
     }
 
     function isRefusalCreate(requestId, roundId, professionalId) {
@@ -2167,7 +2257,7 @@ service cloud.firestore {
               resource.data,
               request.auth.uid
             ))
-          || (resource.data.status in ['ASSIGNED', 'IN_PROGRESS']
+          || (resource.data.status in ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED']
             && resource.data.assignedProfessionalId == request.auth.uid));
       allow get: if request.auth != null
         && (resource == null || canReadServiceRequest(requestId));
@@ -2176,6 +2266,7 @@ service cloud.firestore {
       allow update: if request.auth != null
         && (isAcceptanceTransition(requestId, request.auth.uid)
           || isStartTransition(requestId, request.auth.uid)
+          || isCompletionTransition(requestId, request.auth.uid)
           || isCancellationTransition(requestId, request.auth.uid)
           || isClientEditTransition(requestId, request.auth.uid)
           || isClientCancellationTransition(requestId, request.auth.uid));
@@ -2239,6 +2330,7 @@ service cloud.firestore {
           ).data.currentAssignmentId == assignmentId;
         allow update: if request.auth != null
           && (isStartTransition(requestId, request.auth.uid)
+            || isCompletionTransition(requestId, request.auth.uid)
             || isCancellationTransition(requestId, request.auth.uid)
             || isClientCancellationTransition(requestId, request.auth.uid))
           && get(
@@ -2285,6 +2377,8 @@ service cloud.firestore {
               && isCancellationTransition(requestId, request.auth.uid))
             || (request.resource.data.type == 'SERVICE_STARTED'
               && isStartTransition(requestId, request.auth.uid))
+            || (request.resource.data.type == 'SERVICE_COMPLETED'
+              && isCompletionTransition(requestId, request.auth.uid))
             || (request.resource.data.type == 'REQUEST_CANCELLED'
               && eventId == 'cancelled-by-client'
               && isClientCancellationCompanion(
@@ -2347,7 +2441,9 @@ service cloud.firestore {
           request.resource.data.requestId,
           professionalId
         );
-      allow update: if false;
+      allow update: if request.auth != null
+        && request.auth.uid == professionalId
+        && isCompletionTransition(resource.data.requestId, professionalId);
       allow delete: if request.auth != null
         && resource.data.reservationId == slotId
         && ((request.auth.uid == professionalId

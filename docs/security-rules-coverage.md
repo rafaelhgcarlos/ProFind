@@ -16,7 +16,7 @@ Este documento consolida a cobertura entregue pelas issues #31, #22, #43, #35 e 
 | `professionalOperationalProfiles/{uid}/events/**` | proprietário ou administrador | somente criação atômica com a transição; alteração e exclusão negadas |
 | `professionalReviewInternal/{uid}/events/**` | somente administrador ativo | criação administrativa na mesma revisão; alteração e exclusão negadas |
 | `professionalAvailability/{uid}/slots/**` | proprietário ou administrador | proprietário; não remove slot reservado |
-| `serviceRequests/{id}` | partes, administrador ou profissional aprovado; `list` restrita ao feed compatível | apenas aceite/cancelamento transacional validado |
+| `serviceRequests/{id}` | partes, administrador ou profissional aprovado; `list` restrita ao feed compatível e aos compromissos próprios | apenas aceite, início, conclusão e cancelamento transacionais validados |
 | `serviceRequestPrivate/{id}` | cliente, responsável atual ou administrador | negada no cliente web |
 | rodadas, recusas, atribuições, reservas e eventos | partes mínimas documentadas | somente transições atômicas da #22 |
 | `categories` e `specialties` | pública | negada; manutenção permanece em ambiente confiável |
@@ -72,6 +72,8 @@ As cronologias são ordenadas por `createdAt` decrescente e limitadas a 50 itens
 - Um slot aceita uma única reserva por profissional.
 - Recusa pertence ao profissional autenticado e à rodada corrente.
 - Cancelamento encerra a atribuição, remove a reserva, reabre uma única vez e cria nova rodada/evento atomicamente.
+- Conclusão exige o responsável, rodada e atribuição atuais em `IN_PROGRESS`; atualiza solicitação, atribuição, reserva histórica e evento imutável no mesmo commit.
+- Reserva concluída permanece no caminho único do slot e continua impedindo outro aceite conflitante.
 - Eventos são imutáveis. Eventos órfãos ou criados depois da transição são negados.
 - Endereço e contato do atendimento nunca aparecem no resumo do feed.
 - Restrição administrativa impede novos aceites, mas não apaga atribuições ou reservas confirmadas.
@@ -81,7 +83,7 @@ As cronologias são ordenadas por `createdAt` decrescente e limitadas a 50 itens
 
 - `firestore-privacy.rules.test.ts`: usuários, papéis, perfis, imagens, catálogo, administração e acesso cruzado.
 - `professional-review.rules.test.ts`: submissão, versão, decisões, ativação, suspensão, notas, histórico e concorrência administrativa.
-- `service-request.rules.test.ts`: query real, matching, aceite exclusivo, dupla reserva, recusa, substituição, privacidade e concorrência.
+- `service-request.rules.test.ts`: query real, matching, aceite exclusivo, dupla reserva, recusa, substituição, início, conclusão idempotente, ocupação histórica, privacidade e concorrência.
 
 Os testes usam contextos autenticados independentes e `withSecurityRulesDisabled` apenas para fixtures e inspeção. As operações sob teste passam pelas Rules.
 

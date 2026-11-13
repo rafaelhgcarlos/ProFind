@@ -60,6 +60,7 @@ function formatServiceDate(value: string) {
 }
 
 function statusLabel(status: ProfessionalAppointmentSummary['status']) {
+  if (status === 'COMPLETED') return 'Concluído'
   return status === 'IN_PROGRESS' ? 'Em andamento' : 'Confirmado'
 }
 
@@ -380,7 +381,7 @@ function AppointmentsList({
                   <div>
                     <Badge
                       variant={
-                        appointment.status === 'IN_PROGRESS' ? 'success' : 'secondary'
+                        appointment.status === 'ASSIGNED' ? 'secondary' : 'success'
                       }
                     >
                       {statusLabel(appointment.status)}
@@ -453,6 +454,9 @@ function AppointmentDetails({
   const [confirmStart, setConfirmStart] = useState(false)
   const [starting, setStarting] = useState(false)
   const [startNotice, setStartNotice] = useState('')
+  const [confirmCompletion, setConfirmCompletion] = useState(false)
+  const [completing, setCompleting] = useState(false)
+  const [completionNotice, setCompletionNotice] = useState('')
   const [confirmCancellation, setConfirmCancellation] = useState(false)
   const [cancellationReason, setCancellationReason] = useState('')
   const [cancelling, setCancelling] = useState(false)
@@ -473,6 +477,8 @@ function AppointmentDetails({
       setError('')
       setConfirmStart(false)
       setStartNotice('')
+      setConfirmCompletion(false)
+      setCompletionNotice('')
       setConfirmCancellation(false)
       setCancellationReason('')
     })
@@ -572,6 +578,28 @@ function AppointmentDetails({
     }
   }
 
+  async function handleCompletion() {
+    if (!details || completing) return
+    setCompleting(true)
+    setError('')
+    setCompletionNotice('')
+    try {
+      await serviceRequestService.completeAssignment({
+        requestId,
+        expectedAssignmentId: details.appointment.assignmentId,
+        expectedRound: details.appointment.round,
+      })
+      setConfirmCompletion(false)
+      setCompletionNotice('Conclusão informada pelo profissional.')
+    } catch (nextError) {
+      setError(
+        normalizedError(nextError, 'Não foi possível informar a conclusão do atendimento.'),
+      )
+    } finally {
+      setCompleting(false)
+    }
+  }
+
   return (
     <div className="mx-auto grid max-w-4xl gap-6">
       <div>
@@ -588,7 +616,7 @@ function AppointmentDetails({
           <WifiOff aria-hidden="true" />
           <AlertTitle>Dados possivelmente desatualizados</AlertTitle>
           <AlertDescription>
-            Reconecte-se antes de iniciar ou cancelar o atendimento.
+            Reconecte-se antes de iniciar, cancelar ou concluir o atendimento.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -631,13 +659,21 @@ function AppointmentDetails({
         </Alert>
       ) : null}
 
+      {completionNotice ? (
+        <Alert variant="success" aria-live="polite">
+          <CheckCircle2 aria-hidden="true" />
+          <AlertTitle>Conclusão registrada</AlertTitle>
+          <AlertDescription>{completionNotice}</AlertDescription>
+        </Alert>
+      ) : null}
+
       {details ? (
         <>
           <Card>
             <CardHeader>
               <Badge
                 variant={
-                  details.appointment.status === 'IN_PROGRESS' ? 'success' : 'secondary'
+                  details.appointment.status === 'ASSIGNED' ? 'secondary' : 'success'
                 }
                 className="w-fit"
               >
@@ -810,12 +846,62 @@ function AppointmentDetails({
                 )}
               </CardContent>
             </Card>
+          ) : details.appointment.status === 'IN_PROGRESS' ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Ações do atendimento</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {confirmCompletion ? (
+                  <Alert variant="warning">
+                    <CheckCircle2 aria-hidden="true" />
+                    <AlertTitle>Confirmar conclusão do atendimento?</AlertTitle>
+                    <AlertDescription>
+                      <p>
+                        Esta ação informa que o serviço foi concluído pelo profissional. Não representa confirmação do cliente, avaliação ou garantia de qualidade.
+                      </p>
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          type="button"
+                          loading={completing}
+                          loadingLabel="Confirmando…"
+                          disabled={!online || fromCache}
+                          onClick={() => void handleCompletion()}
+                        >
+                          Confirmar conclusão
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={completing}
+                          onClick={() => setConfirmCompletion(false)}
+                        >
+                          Voltar
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={!online || fromCache}
+                    onClick={() => {
+                      setError('')
+                      setConfirmCompletion(true)
+                    }}
+                  >
+                    <CheckCircle2 aria-hidden="true" />
+                    Informar conclusão
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
           ) : (
             <Alert variant="success">
               <CheckCircle2 aria-hidden="true" />
-              <AlertTitle>Serviço em andamento</AlertTitle>
+              <AlertTitle>Conclusão informada pelo profissional</AlertTitle>
               <AlertDescription>
-                A reserva continua ativa. A conclusão será disponibilizada em uma etapa própria.
+                Este registro não representa confirmação do cliente, avaliação ou garantia de qualidade.
               </AlertDescription>
             </Alert>
           )}
