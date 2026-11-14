@@ -82,7 +82,7 @@ function decodeValue(value) {
   if ('mapValue' in value) {
     return decodeFields(value.mapValue.fields ?? {})
   }
-  throw new Error('Tipo de campo Firestore nÃ£o suportado pelo backfill.')
+  throw new Error('Tipo de campo Firestore não suportado pelo backfill.')
 }
 
 function decodeFields(fields) {
@@ -107,7 +107,7 @@ function encodeValue(value) {
   if (value && typeof value === 'object') {
     return { mapValue: { fields: encodeFields(value) } }
   }
-  throw new Error('Valor nÃ£o suportado pelo backfill.')
+  throw new Error('Valor não suportado pelo backfill.')
 }
 
 function encodeFields(data) {
@@ -124,7 +124,7 @@ const apply = process.argv.includes('--apply')
 
 if (!projectId) {
   throw new Error(
-    'Informe --project=ID. A execuÃ§Ã£o padrÃ£o Ã© somente de prÃ©via.',
+    'Informe --project=ID. A execução padrão é somente de prévia.',
   )
 }
 if (apply && confirmedProject !== projectId) {
@@ -135,11 +135,11 @@ if (apply && confirmedProject !== projectId) {
 
 const account = firebaseAuth.getGlobalDefaultAccount()
 if (!account?.tokens?.refresh_token) {
-  throw new Error('Nenhuma sessÃ£o vÃ¡lida do Firebase CLI foi encontrada.')
+  throw new Error('Nenhuma sessão válida do Firebase CLI foi encontrada.')
 }
 const token = await firebaseAuth.getAccessToken(account.tokens.refresh_token, [])
 if (!token?.access_token) {
-  throw new Error('NÃ£o foi possÃ­vel obter uma credencial temporÃ¡ria do Firebase CLI.')
+  throw new Error('Não foi possível obter uma credencial temporária do Firebase CLI.')
 }
 
 const databaseRoot = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)`
@@ -262,6 +262,6 @@ if (apply && missing.length > 0) {
       })),
     },
   })
-  console.log(`Backfill concluÃ­do: ${missing.length} projeÃ§Ã£o(Ãµes) criada(s).`)
+  console.log(`Backfill concluído: ${missing.length} projeção(ões) criada(s).`)
 }
 
