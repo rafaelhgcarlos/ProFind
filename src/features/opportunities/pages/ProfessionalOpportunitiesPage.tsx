@@ -2,13 +2,9 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
-  Clock3,
   Compass,
-  LoaderCircle,
-  MapPin,
   RefreshCw,
   WifiOff,
-  Wrench,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
@@ -27,10 +23,8 @@ import { professionalReviewService } from '../../../services/professional-review
 import { serviceRequestService } from '../../../services/service-request.service'
 import { SERVICE_PERIOD_DEFINITIONS } from '../../../services/service-period-policy'
 import {
-  ServiceRequestError,
   type OpportunityFeedCursor,
   type ProfessionalOpportunitySummary,
-  type ServicePeriod,
 } from '../../../types/service-request'
 import type { ProfessionalOperationalReview } from '../../../types/professional-review'
 import { useAuth } from '../../auth/use-auth'
@@ -39,11 +33,12 @@ import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
 import { ProfessionalRegistrationSupport } from '../../professional-profile/components/ProfessionalRegistrationSupport'
 import { ProfessionalReviewStatusCard } from '../../professional-profile/components/ProfessionalReviewStatusCard'
+import { ProfessionalOpportunityCard } from '../components/ProfessionalOpportunityCard'
+import { formatServiceDate } from '../opportunity-formatters'
 
 const FEED_PAGE_SIZE = 12
 
 type AccessState = 'loading' | 'eligible' | 'restricted'
-type OpportunityAction = 'decline'
 
 interface FeedPageState {
   items: ProfessionalOpportunitySummary[]
@@ -52,56 +47,9 @@ interface FeedPageState {
   fromCache: boolean
 }
 
-interface CardFeedback {
-  tone: 'error' | 'info'
-  message: string
-}
-
 interface AcceptedConfirmation {
   opportunity: ProfessionalOpportunitySummary
   assignmentId: string
-}
-
-function formatServiceDate(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
-  return new Intl.DateTimeFormat('pt-BR', {
-    weekday: 'short',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(year, month - 1, day, 12))
-}
-
-function formatDeadline(value: Date) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(value)
-}
-
-function actionError(error: unknown) {
-  if (!(error instanceof ServiceRequestError)) {
-    return {
-      code: 'unknown',
-      message: 'Não foi possível atualizar esta oportunidade. Tente novamente.',
-    }
-  }
-
-  const messages: Partial<Record<ServiceRequestError['code'], string>> = {
-    'opportunity-taken': 'Outro profissional confirmou esta oportunidade primeiro.',
-    'request-expired': 'O prazo para aceitar esta oportunidade terminou.',
-    'round-changed': 'A rodada mudou e este card não pode mais ser usado.',
-    'slot-conflict': 'Sua agenda já possui um atendimento neste período.',
-    'professional-restricted':
-      'Sua elegibilidade mudou. Consulte o estado da análise antes de continuar.',
-    'excluded-from-round': 'Você não participa desta rodada de distribuição.',
-    'already-refused': 'Você já recusou esta oportunidade nesta rodada.',
-    offline: 'Você está offline. Reconecte-se antes de confirmar a ação.',
-    unavailable: 'A conexão falhou antes da confirmação. Tente novamente.',
-  }
-  return { code: error.code, message: messages[error.code] ?? error.message }
 }
 
 function pageKey(cursor?: OpportunityFeedCursor | null) {
@@ -126,15 +74,6 @@ export function ProfessionalOpportunitiesPage() {
   const [pageOrder, setPageOrder] = useState<string[]>([])
   const [feedError, setFeedError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
-  const [pendingActions, setPendingActions] = useState<
-    Record<string, OpportunityAction>
-  >({})
-  const [cardFeedback, setCardFeedback] = useState<Record<string, CardFeedback>>(
-    {},
-  )
-  const [disabledRequestIds, setDisabledRequestIds] = useState<Set<string>>(
-    () => new Set(),
-  )
   const [accepted, setAccepted] = useState<AcceptedConfirmation | null>(null)
   const [recoveringAssignment, setRecoveringAssignment] = useState(
     Boolean(recoveredRequestId && recoveredAssignmentId),
@@ -255,9 +194,6 @@ export function ProfessionalOpportunitiesPage() {
       setPages({})
       setPageOrder([])
       setFeedError(null)
-      setPendingActions({})
-      setCardFeedback({})
-      setDisabledRequestIds(new Set())
       setAccepted(null)
       setConfirmCancellation(false)
       setCancellationReason('')
@@ -366,96 +302,6 @@ export function ProfessionalOpportunitiesPage() {
   const nextCursor = lastPage?.nextCursor ?? null
   const isDisconnected =
     !online || Object.values(pages).some((page) => page.fromCache)
-
-  function removeOpportunity(requestId: string) {
-    setPages((current) =>
-      Object.fromEntries(
-        Object.entries(current).map(([key, page]) => [
-          key,
-          {
-            ...page,
-            items: page.items.filter((item) => item.requestId !== requestId),
-          },
-        ]),
-      ),
-    )
-  }
-
-  function disableOpportunity(requestId: string, message: string) {
-    setDisabledRequestIds((current) => new Set(current).add(requestId))
-    setCardFeedback((current) => ({
-      ...current,
-      [requestId]: { tone: 'error', message },
-    }))
-  }
-
-  async function handleDecline(opportunity: ProfessionalOpportunitySummary) {
-    if (pendingActions[opportunity.requestId]) return
-    setCancellationNotice('')
-    setPendingActions((current) => ({
-      ...current,
-      [opportunity.requestId]: 'decline',
-    }))
-    setCardFeedback((current) => ({
-      ...current,
-      [opportunity.requestId]: {
-        tone: 'info',
-        message: 'Registrando sua recusa…',
-      },
-    }))
-
-    try {
-      await serviceRequestService.declineOpportunity({
-        requestId: opportunity.requestId,
-        expectedRound: opportunity.round,
-      })
-      removeOpportunity(opportunity.requestId)
-      setCardFeedback((current) => {
-        const next = { ...current }
-        delete next[opportunity.requestId]
-        return next
-      })
-    } catch (error) {
-      const result = actionError(error)
-      if (result.code === 'professional-restricted') {
-        setAccess('restricted')
-        setPages({})
-        setPageOrder([])
-        if (userId) void reloadReview(userId, generation.current)
-      } else if (result.code === 'slot-conflict') {
-        setDisabledRequestIds((current) => {
-          const next = new Set(current)
-          for (const item of opportunities) {
-            if (
-              item.serviceDate === opportunity.serviceDate &&
-              item.period === opportunity.period
-            ) {
-              next.add(item.requestId)
-            }
-          }
-          return next
-        })
-        disableOpportunity(opportunity.requestId, result.message)
-      } else if (
-        ['opportunity-taken', 'request-expired', 'round-changed', 'excluded-from-round', 'already-refused'].includes(
-          result.code,
-        )
-      ) {
-        disableOpportunity(opportunity.requestId, result.message)
-      } else {
-        setCardFeedback((current) => ({
-          ...current,
-          [opportunity.requestId]: { tone: 'error', message: result.message },
-        }))
-      }
-    } finally {
-      setPendingActions((current) => {
-        const next = { ...current }
-        delete next[opportunity.requestId]
-        return next
-      })
-    }
-  }
 
   async function handleCancelAssignment() {
     if (!accepted || cancellingAssignment) return
@@ -745,108 +591,23 @@ export function ProfessionalOpportunitiesPage() {
             {opportunities.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {opportunities.map((opportunity) => {
-                  const pending = pendingActions[opportunity.requestId]
-                  const disabled = disabledRequestIds.has(opportunity.requestId)
-                  const feedback = cardFeedback[opportunity.requestId]
                   const specialty =
                     specialtyNames.get(opportunity.specialtyId) ?? 'Serviço profissional'
                   const category = categoryNames.get(opportunity.categoryId)
                   const municipality =
                     municipalityNames.get(opportunity.cityIbgeCode) ??
                     `Município IBGE ${opportunity.cityIbgeCode}`
-                  const period = SERVICE_PERIOD_DEFINITIONS[
-                    opportunity.period as ServicePeriod
-                  ]
 
                   return (
-                    <Card key={opportunity.requestId} className="flex flex-col">
-                      <CardHeader>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold tracking-wide text-primary uppercase">
-                              {opportunity.reopenReason === 'PROFESSIONAL_CANCELLATION'
-                                ? 'Substituição solicitada'
-                                : category ?? 'Oportunidade compatível'}
-                            </p>
-                            <CardTitle className="mt-1">{specialty}</CardTitle>
-                          </div>
-                          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                            <Wrench aria-hidden="true" className="size-5" />
-                          </span>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="flex flex-1 flex-col gap-4">
-                        <dl className="grid gap-3 text-sm">
-                          <div className="flex gap-2">
-                            <MapPin aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
-                            <div>
-                              <dt className="sr-only">Município</dt>
-                              <dd>{municipality}</dd>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
-                            <div>
-                              <dt className="sr-only">Data e período</dt>
-                              <dd>
-                                {formatServiceDate(opportunity.serviceDate)} · {period.label}
-                              </dd>
-                            </div>
-                          </div>
-                          <div className="flex gap-2 text-muted-foreground">
-                            <Clock3 aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                            <div>
-                              <dt className="sr-only">Prazo para aceitar</dt>
-                              <dd>Aceite até {formatDeadline(opportunity.acceptUntil)}</dd>
-                            </div>
-                          </div>
-                        </dl>
-
-                        {feedback ? (
-                          <p
-                            role={feedback.tone === 'error' ? 'alert' : 'status'}
-                            className={
-                              feedback.tone === 'error'
-                                ? 'rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive'
-                                : 'rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground'
-                            }
-                          >
-                            {feedback.message}
-                          </p>
-                        ) : null}
-
-                        <div className="mt-auto flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={Boolean(pending) || disabled || !online}
-                            onClick={() => void handleDecline(opportunity)}
-                          >
-                            {pending === 'decline' ? (
-                              <LoaderCircle aria-hidden="true" className="animate-spin" />
-                            ) : null}
-                            {pending === 'decline' ? 'Recusando…' : 'Recusar'}
-                          </Button>
-                          {disabled ? (
-                            <Button type="button" disabled>
-                              Ver detalhes
-                            </Button>
-                          ) : (
-                            <Button asChild>
-                              <Link
-                                to={`/profissional/oportunidades/${opportunity.requestId}`}
-                                state={{
-                                  returnTo: `${location.pathname}${location.search}`,
-                                  scrollY: window.scrollY,
-                                }}
-                              >
-                                Ver detalhes
-                              </Link>
-                            </Button>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <ProfessionalOpportunityCard
+                      key={opportunity.requestId}
+                      opportunity={opportunity}
+                      category={category}
+                      specialty={specialty}
+                      municipality={municipality}
+                      returnTo={`${location.pathname}${location.search}`}
+                      scrollY={window.scrollY}
+                    />
                   )
                 })}
               </div>

@@ -544,11 +544,13 @@ function assertValidOpportunityCursor(cursor?: OpportunityPageCursor | null) {
 
 function professionalOpportunitySummary(
   request: ServiceRequestSummary,
+  descriptionPreview?: string,
 ): ProfessionalOpportunitySummary {
   return {
     requestId: request.requestId,
     categoryId: request.categoryId,
     specialtyId: request.specialtyId,
+    ...(descriptionPreview ? { descriptionPreview } : {}),
     cityIbgeCode: request.cityIbgeCode,
     serviceDate: request.serviceDate,
     period: request.period,
@@ -557,6 +559,29 @@ function professionalOpportunitySummary(
     round: request.round,
     reopenReason: request.reopenReason,
   }
+}
+
+function opportunityDescriptionPreview(
+  snapshot: DocumentSnapshot<DocumentData>,
+  request: ServiceRequestSummary,
+) {
+  if (!snapshot.exists()) return undefined
+  const data = snapshot.data()
+  const description = stringValue(data, 'description')
+  if (
+    stringValue(data, 'requestId') !== request.requestId ||
+    stringValue(data, 'categoryId') !== request.categoryId ||
+    stringValue(data, 'specialtyId') !== request.specialtyId ||
+    stringValue(data, 'cityIbgeCode') !== request.cityIbgeCode ||
+    stringValue(data, 'serviceDate') !== request.serviceDate ||
+    stringValue(data, 'period') !== request.period ||
+    data.round !== request.round ||
+    description.length < 10 ||
+    description.length > 1000
+  ) {
+    return undefined
+  }
+  return description
 }
 
 function professionalOpportunityDetails(
@@ -1672,7 +1697,7 @@ export function createServiceRequestRepository({
             now: now(),
           }) === null,
       )
-      .map(professionalOpportunitySummary)
+      .map((request) => professionalOpportunitySummary(request))
     const lastRequest = requests.at(-1)
 
     return {
@@ -1831,37 +1856,45 @@ export function createServiceRequestRepository({
 
         for (const request of requests) {
           const slotId = serviceSlotId(request.serviceDate, request.period)
-          const [availability, reservation, refusal] = await Promise.all([
-            getDoc(
-              doc(
-                firestore,
-                'professionalAvailability',
-                professionalId,
-                'slots',
-                slotId,
+          const [availability, reservation, refusal, opportunityDetails] =
+            await Promise.all([
+              getDoc(
+                doc(
+                  firestore,
+                  'professionalAvailability',
+                  professionalId,
+                  'slots',
+                  slotId,
+                ),
               ),
-            ),
-            getDoc(
-              doc(
-                firestore,
-                'professionalReservations',
-                professionalId,
-                'slots',
-                slotId,
+              getDoc(
+                doc(
+                  firestore,
+                  'professionalReservations',
+                  professionalId,
+                  'slots',
+                  slotId,
+                ),
               ),
-            ),
-            getDoc(
-              doc(
-                firestore,
-                'serviceRequests',
-                request.requestId,
-                'rounds',
-                request.currentRoundId,
-                'refusals',
-                professionalId,
+              getDoc(
+                doc(
+                  firestore,
+                  'serviceRequests',
+                  request.requestId,
+                  'rounds',
+                  request.currentRoundId,
+                  'refusals',
+                  professionalId,
+                ),
               ),
-            ),
-          ])
+              getDoc(
+                doc(
+                  firestore,
+                  'serviceRequestOpportunityDetails',
+                  request.requestId,
+                ),
+              ),
+            ])
           if (stopped || currentEmission !== emission) return
           if (
             getOpportunityIneligibilityReason(request, {
@@ -1874,7 +1907,12 @@ export function createServiceRequestRepository({
               now: now(),
             }) === null
           ) {
-            items.push(professionalOpportunitySummary(request))
+            items.push(
+              professionalOpportunitySummary(
+                request,
+                opportunityDescriptionPreview(opportunityDetails, request),
+              ),
+            )
           }
         }
 

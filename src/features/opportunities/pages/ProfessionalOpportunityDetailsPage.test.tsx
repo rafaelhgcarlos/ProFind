@@ -137,6 +137,12 @@ describe('ProfessionalOpportunityDetailsPage', () => {
         'O endereço completo estará disponível após a confirmação do aceite.',
       ),
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Aceitar atendimento' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Recusar oportunidade' }),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/Rua Privada|13000-000|11999998888/)).not.toBeInTheDocument()
   })
 

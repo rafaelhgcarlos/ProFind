@@ -132,6 +132,10 @@ function opportunity(
     requestId,
     categoryId: 'maintenance',
     specialtyId,
+    descriptionPreview:
+      specialtyId === 'electrician'
+        ? 'Revisar duas tomadas que pararam de funcionar após uma oscilação.'
+        : 'Preparar e pintar a parede principal da sala.',
     cityIbgeCode: '3509502',
     serviceDate: '2099-11-20',
     period: 'MORNING' as const,
@@ -255,13 +259,18 @@ describe('ProfessionalOpportunitiesPage', () => {
 
     expect(screen.getByText('Eletricista')).toBeInTheDocument()
     expect(screen.getByText('Campinas')).toBeInTheDocument()
+    expect(screen.getByText(/Revisar duas tomadas/)).toHaveClass('line-clamp-2')
     expect(screen.queryByText(/telefone|endereço|cliente/i)).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('link', { name: 'Ver detalhes' }))
+    const cardLink = screen.getByRole('link', { name: /Ver detalhes/ })
+    expect(within(cardLink).queryByRole('button')).not.toBeInTheDocument()
+    cardLink.focus()
+    await user.keyboard('{Enter}')
     expect(
       await screen.findByRole('heading', { name: 'Detalhe da oportunidade' }),
     ).toBeInTheDocument()
     expect(mocks.acceptOpportunity).not.toHaveBeenCalled()
+    expect(mocks.declineOpportunity).not.toHaveBeenCalled()
   })
 
   it('não oferece aceite imediato no card', async () => {
@@ -269,34 +278,34 @@ describe('ProfessionalOpportunitiesPage', () => {
     await publishFirstPage()
 
     expect(screen.queryByRole('button', { name: 'Aceitar' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Ver detalhes' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Ver detalhes/ })).toHaveAttribute(
       'href',
       '/profissional/oportunidades/request-1',
     )
   })
 
-  it('recusa somente o card escolhido e mantém as demais oportunidades', async () => {
-    const user = userEvent.setup()
-    renderPage()
+  it('remove a recusa dos cards no início e na listagem', async () => {
+    const view = renderPage()
     await publishFirstPage([
       opportunity('request-1'),
       opportunity('request-2', 'painter'),
     ])
 
-    const electricianCard = screen
-      .getByRole('heading', { name: 'Eletricista' })
-      .closest('.rounded-lg')
-    expect(electricianCard).not.toBeNull()
-    await user.click(within(electricianCard as HTMLElement).getByRole('button', { name: 'Recusar' }))
+    expect(screen.queryByRole('button', { name: 'Recusar' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /Ver detalhes/ })).toHaveLength(2)
+    expect(mocks.declineOpportunity).not.toHaveBeenCalled()
 
-    await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: 'Eletricista' })).not.toBeInTheDocument(),
+    view.unmount()
+    mocks.subscriptions.length = 0
+    renderPage('/profissional/oportunidades')
+    await publishFirstPage([opportunity('request-3')])
+
+    expect(screen.queryByRole('button', { name: 'Recusar' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Ver detalhes/ })).toHaveAttribute(
+      'href',
+      '/profissional/oportunidades/request-3',
     )
-    expect(screen.getByRole('heading', { name: 'Pintor' })).toBeInTheDocument()
-    expect(mocks.declineOpportunity).toHaveBeenCalledWith({
-      requestId: 'request-1',
-      expectedRound: 1,
-    })
+    expect(mocks.declineOpportunity).not.toHaveBeenCalled()
   })
 
   it('identifica no feed a nova rodada aberta para substituição', async () => {
@@ -310,7 +319,7 @@ describe('ProfessionalOpportunitiesPage', () => {
     ])
 
     expect(screen.getByText('Substituição solicitada')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Ver detalhes' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Ver detalhes/ })).toBeInTheDocument()
   })
 
   it('permite ao profissional suspenso cancelar compromisso existente com confirmação e motivo', async () => {

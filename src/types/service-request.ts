@@ -141,6 +141,7 @@ export interface ProfessionalOpportunitySummary {
   requestId: string
   categoryId: string
   specialtyId: string
+  descriptionPreview?: string
   cityIbgeCode: string
   serviceDate: string
   period: ServicePeriod
