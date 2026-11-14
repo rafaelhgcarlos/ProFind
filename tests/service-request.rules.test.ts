@@ -1113,6 +1113,13 @@ describe('service request transactional proof', () => {
       expect(
         initialPages.every((snapshot) => snapshot.page.items.length === 1),
       ).toBe(true)
+      expect(
+        initialPages.every(
+          (snapshot) =>
+            snapshot.page.items[0]?.descriptionPreview ===
+            'Verificar a instalação elétrica da sala.',
+        ),
+      ).toBe(true)
       expect(feeds.every((feed) => feed.isEligible())).toBe(true)
 
       await professionals[1].acceptOpportunity({

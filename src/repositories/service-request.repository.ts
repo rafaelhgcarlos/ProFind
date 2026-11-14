@@ -1856,45 +1856,37 @@ export function createServiceRequestRepository({
 
         for (const request of requests) {
           const slotId = serviceSlotId(request.serviceDate, request.period)
-          const [availability, reservation, refusal, opportunityDetails] =
-            await Promise.all([
-              getDoc(
-                doc(
-                  firestore,
-                  'professionalAvailability',
-                  professionalId,
-                  'slots',
-                  slotId,
-                ),
+          const [availability, reservation, refusal] = await Promise.all([
+            getDoc(
+              doc(
+                firestore,
+                'professionalAvailability',
+                professionalId,
+                'slots',
+                slotId,
               ),
-              getDoc(
-                doc(
-                  firestore,
-                  'professionalReservations',
-                  professionalId,
-                  'slots',
-                  slotId,
-                ),
+            ),
+            getDoc(
+              doc(
+                firestore,
+                'professionalReservations',
+                professionalId,
+                'slots',
+                slotId,
               ),
-              getDoc(
-                doc(
-                  firestore,
-                  'serviceRequests',
-                  request.requestId,
-                  'rounds',
-                  request.currentRoundId,
-                  'refusals',
-                  professionalId,
-                ),
+            ),
+            getDoc(
+              doc(
+                firestore,
+                'serviceRequests',
+                request.requestId,
+                'rounds',
+                request.currentRoundId,
+                'refusals',
+                professionalId,
               ),
-              getDoc(
-                doc(
-                  firestore,
-                  'serviceRequestOpportunityDetails',
-                  request.requestId,
-                ),
-              ),
-            ])
+            ),
+          ])
           if (stopped || currentEmission !== emission) return
           if (
             getOpportunityIneligibilityReason(request, {
@@ -1907,11 +1899,29 @@ export function createServiceRequestRepository({
               now: now(),
             }) === null
           ) {
-            items.push(
-              professionalOpportunitySummary(
+            let descriptionPreview: string | undefined
+            try {
+              const opportunityDetails = await getDoc(
+                doc(
+                  firestore,
+                  'serviceRequestOpportunityDetails',
+                  request.requestId,
+                ),
+              )
+              if (stopped || currentEmission !== emission) return
+              descriptionPreview = opportunityDescriptionPreview(
+                opportunityDetails,
                 request,
-                opportunityDescriptionPreview(opportunityDetails, request),
-              ),
+              )
+            } catch (error) {
+              const code =
+                error && typeof error === 'object' && 'code' in error
+                  ? String(error.code).replace(/^firestore\//, '')
+                  : ''
+              if (code === 'permission-denied') continue
+            }
+            items.push(
+              professionalOpportunitySummary(request, descriptionPreview),
             )
           }
         }
