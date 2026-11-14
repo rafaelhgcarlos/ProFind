@@ -264,4 +264,3 @@ if (apply && missing.length > 0) {
   })
   console.log(`Backfill concluído: ${missing.length} projeção(ões) criada(s).`)
 }
-
