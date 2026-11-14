@@ -94,6 +94,71 @@ function unavailableMessage(error: ServiceRequestError) {
   return messages[error.code] ?? error.message
 }
 
+function OpportunityDetailsSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Carregando detalhes da oportunidade"
+      className="grid gap-5"
+    >
+      <span className="sr-only">Carregando detalhes da oportunidade…</span>
+
+      <Card role="group" aria-label="Carregando serviço solicitado">
+        <CardHeader>
+          <Skeleton className="h-6 w-40 max-w-full" />
+          <Skeleton className="h-7 w-2/3 max-w-full" />
+          <Skeleton className="h-5 w-1/2 max-w-full" />
+        </CardHeader>
+      </Card>
+
+      <Card role="group" aria-label="Carregando descrição do trabalho">
+        <CardHeader>
+          <Skeleton className="h-7 w-52 max-w-full" />
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-4/5 max-w-full" />
+        </CardContent>
+      </Card>
+
+      <Card role="group" aria-label="Carregando localização">
+        <CardHeader>
+          <Skeleton className="h-6 w-32 max-w-full" />
+          <Skeleton className="h-7 w-1/2 max-w-full" />
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 rounded-lg border p-4">
+            <Skeleton className="h-5 w-40 max-w-full" />
+            <Skeleton className="h-4 w-full" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card role="group" aria-label="Carregando agendamento">
+        <CardHeader>
+          <Skeleton className="h-6 w-32 max-w-full" />
+          <Skeleton className="h-7 w-3/4 max-w-full" />
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Skeleton className="h-5 w-20 max-w-full" />
+            <Skeleton className="h-4 w-28 max-w-full" />
+          </div>
+          <div className="grid gap-2">
+            <Skeleton className="h-5 w-44 max-w-full" />
+            <Skeleton className="h-4 w-32 max-w-full" />
+          </div>
+          <div className="grid gap-2 sm:col-span-2">
+            <Skeleton className="h-5 w-36 max-w-full" />
+            <Skeleton className="h-4 w-28 max-w-full" />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 export function ProfessionalOpportunityDetailsPage() {
   useDocumentTitle('Detalhes da oportunidade — ProFind')
   const { requestId = '' } = useParams()
@@ -279,14 +344,7 @@ export function ProfessionalOpportunityDetailsPage() {
           </Button>
         </div>
 
-        {loading ? (
-          <div role="status" className="grid gap-4">
-            <span className="sr-only">Carregando detalhes da oportunidade…</span>
-            <Skeleton className="h-40" />
-            <Skeleton className="h-56" />
-            <Skeleton className="h-40" />
-          </div>
-        ) : null}
+        {loading ? <OpportunityDetailsSkeleton /> : null}
 
         {error ? (
           <Alert variant="destructive">

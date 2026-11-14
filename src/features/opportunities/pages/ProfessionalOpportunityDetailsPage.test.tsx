@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -122,6 +122,22 @@ describe('ProfessionalOpportunityDetailsPage', () => {
     })
     mocks.acceptOpportunity.mockResolvedValue({ assignmentId: 'round-1' })
     mocks.declineOpportunity.mockResolvedValue({ idempotent: false })
+  })
+
+  it('mantém skeletons dentro dos cards enquanto os detalhes carregam', () => {
+    renderPage()
+
+    const loading = screen.getByRole('status', {
+      name: 'Carregando detalhes da oportunidade',
+    })
+    const cards = within(loading).getAllByRole('group')
+    expect(cards).toHaveLength(4)
+    expect(cards.map((card) => card.querySelectorAll('.animate-pulse').length)).toEqual([
+      3,
+      4,
+      4,
+      8,
+    ])
   })
 
   it('abre por URL própria, apresenta texto longo e não expõe dados privados', async () => {
