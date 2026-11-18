@@ -224,7 +224,7 @@ function RequestsList({
         <p className="text-sm text-muted-foreground">Acompanhe confirmações, substituições, conclusões e relatos em tempo real.</p>
       </div>
       {fromCache ? (
-        <Alert variant="warning"><WifiOff aria-hidden="true" /><AlertTitle>Mostrando dados salvos</AlertTitle><AlertDescription>Quando a conexão voltar, esta lista será atualizada automaticamente.</AlertDescription></Alert>
+        <Alert variant="warning"><WifiOff aria-hidden="true" /><AlertTitle>Mostrando dados salvos</AlertTitle><AlertDescription>Os estados abaixo podem estar desatualizados e não confirmam a situação atual. A lista será atualizada quando a conexão voltar.</AlertDescription></Alert>
       ) : null}
       {error ? (
         <Alert variant="destructive"><AlertCircle aria-hidden="true" /><AlertTitle>Não foi possível carregar</AlertTitle><AlertDescription><p>{error}</p><Button className="mt-3" size="sm" variant="outline" onClick={() => setAttempt((value) => value + 1)}><RefreshCw aria-hidden="true" />Tentar novamente</Button></AlertDescription></Alert>
@@ -237,7 +237,7 @@ function RequestsList({
       ) : null}
       {!loading && page?.items.length ? (
         <div className="grid gap-4 md:grid-cols-2">
-          {page.items.map((item) => <ClientRequestCard key={item.request.requestId} item={item} specialtyName={specialtyName(item.request.specialtyId, catalogState)} />)}
+          {page.items.map((item) => <ClientRequestCard key={item.request.requestId} item={item} specialtyName={specialtyName(item.request.specialtyId, catalogState)} stale={fromCache || Boolean(error)} />)}
         </div>
       ) : null}
       {!loading && (previous.length > 0 || page?.nextCursor) ? (
@@ -349,12 +349,12 @@ function RequestDetails({
   return (
     <div className="grid gap-6">
       <Button asChild variant="ghost" className="w-fit"><Link to="/cliente/pedidos"><ArrowLeft aria-hidden="true" />Meus pedidos</Link></Button>
-      {fromCache ? <Alert variant="warning"><WifiOff aria-hidden="true" /><AlertTitle>Dados salvos no dispositivo</AlertTitle><AlertDescription>As alterações mais recentes aparecerão quando a conexão for restabelecida.</AlertDescription></Alert> : null}
+      {fromCache ? <Alert variant="warning"><WifiOff aria-hidden="true" /><AlertTitle>Dados salvos no dispositivo</AlertTitle><AlertDescription>Este estado pode estar desatualizado e não confirma a situação atual. As alterações mais recentes aparecerão quando a conexão for restabelecida.</AlertDescription></Alert> : null}
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Pedido #{request.requestId.slice(-8)}</p><CardTitle className="mt-1">{specialtyName(request.specialtyId, catalogState)}</CardTitle></div>
-            <Badge variant={clientRequestStatusVariant(request)}>{clientRequestStatus(request)}</Badge>
+            {fromCache ? <Badge variant="outline"><WifiOff aria-hidden="true" className="size-3.5" />Estado salvo</Badge> : <Badge variant={clientRequestStatusVariant(request)}>{clientRequestStatus(request)}</Badge>}
           </div>
         </CardHeader>
         <CardContent className="grid gap-5">

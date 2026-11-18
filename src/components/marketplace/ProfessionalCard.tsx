@@ -38,7 +38,7 @@ export function ProfessionalCard({ name, specialty, photoUrl, verified, rating, 
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <h3 className="min-w-0 text-lg font-bold break-words">{name}</h3>
-              {verified ? <Badge variant="success" className="gap-1"><BadgeCheck className="size-3.5" aria-hidden="true" />Verificado</Badge> : null}
+              {verified ? <Badge variant="success" className="gap-1"><BadgeCheck className="size-3.5" aria-hidden="true" />Cadastro aprovado — demonstração</Badge> : null}
             </div>
             <p className="mt-1 text-sm break-words text-muted-foreground">{specialty}</p>
           </div>
@@ -66,7 +66,7 @@ export function ProfessionalCard({ name, specialty, photoUrl, verified, rating, 
         ) : null}
       </div>
       <div className="flex flex-col gap-2 border-t bg-muted/30 p-4 sm:flex-row sm:p-5">
-        <Button className="w-full sm:flex-1" disabled={!onRequestQuote} onClick={onRequestQuote}>Solicitar orçamento</Button>
+        <Button className="w-full sm:flex-1" disabled={!onRequestQuote} onClick={onRequestQuote}>Abrir catálogo</Button>
         {profileHref ? <Button variant="outline" className="w-full sm:flex-1" asChild><Link to={profileHref}>Ver perfil</Link></Button> : <Button variant="outline" className="w-full sm:flex-1" disabled>Ver perfil</Button>}
       </div>
     </Card>

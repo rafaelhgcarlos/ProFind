@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarDays, Clock3, Wrench } from 'lucide-react'
+import { ArrowRight, CalendarDays, Clock3, WifiOff, Wrench } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { Badge } from '../../../components/ui/badge'
@@ -15,9 +15,11 @@ import {
 export function ClientRequestCard({
   item,
   specialtyName,
+  stale = false,
 }: {
   item: ClientRequestListItem
   specialtyName: string
+  stale?: boolean
 }) {
   const { request } = item
   const guidance = requestGuidance(request)
@@ -34,7 +36,14 @@ export function ClientRequestCard({
               <span>{specialtyName}</span>
             </CardTitle>
           </div>
-          <Badge variant={clientRequestStatusVariant(request)}>{clientRequestStatus(request)}</Badge>
+          {stale ? (
+            <Badge variant="outline">
+              <WifiOff aria-hidden="true" className="size-3.5" />
+              Estado salvo
+            </Badge>
+          ) : (
+            <Badge variant={clientRequestStatusVariant(request)}>{clientRequestStatus(request)}</Badge>
+          )}
         </div>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -48,7 +57,13 @@ export function ClientRequestCard({
             <div><dt className="sr-only">Período</dt><dd>{SERVICE_PERIOD_DEFINITIONS[request.period].label}</dd></div>
           </div>
         </dl>
-        {guidance ? <p className="text-sm leading-5 text-muted-foreground">{guidance}</p> : null}
+        {stale ? (
+          <p className="text-sm leading-5 text-muted-foreground">
+            Último estado conhecido: {clientRequestStatus(request)}. Confirme depois da reconexão.
+          </p>
+        ) : guidance ? (
+          <p className="text-sm leading-5 text-muted-foreground">{guidance}</p>
+        ) : null}
         <Link
           to={`/cliente/pedidos/${encodeURIComponent(request.requestId)}`}
           className="inline-flex min-h-10 items-center justify-between gap-3 rounded-md font-semibold text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"

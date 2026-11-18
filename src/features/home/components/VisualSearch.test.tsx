@@ -13,10 +13,10 @@ describe('VisualSearch', () => {
   it('mostra indisponibilidade sem fabricar resultados', async () => {
     const user = userEvent.setup()
     renderSearch()
-    const form = screen.getByRole('search', { name: 'Buscar profissionais' })
-    await user.click(within(form).getByRole('button', { name: 'Encontrar profissionais' }))
-    expect(screen.getByText('Busca em preparação')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'criar sua conta' })).toHaveAttribute('href', '/cadastro')
+    const form = screen.getByRole('search', { name: 'Buscar no catálogo de serviços' })
+    await user.click(within(form).getByRole('button', { name: 'Explorar catálogo' }))
+    expect(screen.getByText('Escolha uma especialidade')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'catálogo de serviços' })).toHaveAttribute('href', '/#servicos')
   })
 
   it('entrega campos preenchidos apenas ao integrador e respeita disabled e loading', async () => {
@@ -25,12 +25,12 @@ describe('VisualSearch', () => {
     const view = renderSearch({ onSearch })
     await user.type(screen.getByLabelText('Qual serviço você precisa?'), '  Pintura  ')
     await user.type(screen.getByLabelText('Onde?'), '  Campinas  ')
-    await user.click(screen.getByRole('button', { name: 'Encontrar profissionais' }))
+    await user.click(screen.getByRole('button', { name: 'Explorar catálogo' }))
     expect(onSearch).toHaveBeenCalledWith({ service: 'Pintura', location: 'Campinas' })
 
     view.rerender(<MemoryRouter><VisualSearch disabled onSearch={onSearch} /></MemoryRouter>)
     expect(screen.getByLabelText('Onde?')).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Encontrar profissionais' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Explorar catálogo' })).toBeDisabled()
     view.rerender(<MemoryRouter><VisualSearch loading onSearch={onSearch} /></MemoryRouter>)
     expect(screen.getByRole('button', { name: 'Buscando…' })).toBeDisabled()
   })

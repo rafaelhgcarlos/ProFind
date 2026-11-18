@@ -50,6 +50,7 @@ import {
   OPPORTUNITY_QUERY_VERSION,
   type OpportunityFeedCursor,
   type ClientCurrentProfessional,
+  type ClientRequestListItem,
   type ClientRequestPage,
   type ClientRequestPageCursor,
   type ClientRequestTrackingDetails,
@@ -167,6 +168,16 @@ export interface ClientRequestsPageSnapshot {
 
 export interface ClientRequestsPageListeners {
   onPage(snapshot: ClientRequestsPageSnapshot): void
+  onError(error: unknown): void
+}
+
+export interface ClientActiveRequestsSnapshot {
+  items: ClientRequestListItem[]
+  fromCache: boolean
+}
+
+export interface ClientActiveRequestsListeners {
+  onRequests(snapshot: ClientActiveRequestsSnapshot): void
   onError(error: unknown): void
 }
 
@@ -1068,6 +1079,61 @@ export function createServiceRequestRepository({
                   }
                 : null,
             },
+            fromCache: snapshot.metadata.fromCache,
+          })
+        } catch (error) {
+          listeners.onError(error)
+        }
+      },
+      listeners.onError,
+    )
+  }
+
+  function subscribeOwnActiveRequests(
+    clientId: string,
+    listeners: ClientActiveRequestsListeners,
+  ) {
+    return onSnapshot(
+      query(
+        collection(firestore, 'serviceRequests'),
+        where('clientId', '==', clientId),
+        where('status', 'in', ['OPEN', 'ASSIGNED', 'IN_PROGRESS']),
+        limit(50),
+      ),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        try {
+          const items = snapshot.docs
+            .map((requestSnapshot) => {
+              const request = requestFromSnapshot(requestSnapshot)
+              if (request.clientId !== clientId) {
+                throw new ServiceRequestError('not-found', 'Solicitação não encontrada.')
+              }
+              return {
+                request,
+                createdAt: dateValue(requestSnapshot.data(), 'createdAt'),
+                updatedAt: dateValue(requestSnapshot.data(), 'updatedAt'),
+              }
+            })
+            .sort((first, second) => {
+              const dateComparison = first.request.serviceDate.localeCompare(
+                second.request.serviceDate,
+              )
+              if (dateComparison !== 0) return dateComparison
+
+              const periodOrder = { MORNING: 0, AFTERNOON: 1, EVENING: 2 }
+              const periodComparison =
+                periodOrder[first.request.period] - periodOrder[second.request.period]
+              if (periodComparison !== 0) return periodComparison
+
+              const createdAtComparison =
+                second.createdAt.getTime() - first.createdAt.getTime()
+              if (createdAtComparison !== 0) return createdAtComparison
+              return first.request.requestId.localeCompare(second.request.requestId)
+            })
+
+          listeners.onRequests({
+            items,
             fromCache: snapshot.metadata.fromCache,
           })
         } catch (error) {
@@ -3271,6 +3337,7 @@ export function createServiceRequestRepository({
     getOwnRequest,
     getOwnRequestDetails,
     subscribeOwnRequestDetails,
+    subscribeOwnActiveRequests,
     subscribeOwnRequestsPage,
     subscribeOwnRequestTracking,
     getCurrentProfessionalAssignment,

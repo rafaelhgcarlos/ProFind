@@ -430,6 +430,16 @@ describe('service request transactional proof', () => {
       'request-1',
       'request-2',
     ])
+    const activeOwnerPage = await assertSucceeds(getDocs(query(
+      collection(ownerFirestore, 'serviceRequests'),
+      where('clientId', '==', clientId),
+      where('status', 'in', ['OPEN', 'ASSIGNED', 'IN_PROGRESS']),
+      limit(50),
+    )))
+    expect(activeOwnerPage.docs.map((snapshot) => snapshot.id).sort()).toEqual([
+      'request-1',
+      'request-2',
+    ])
     await assertFails(getDoc(doc(otherFirestore, 'serviceRequests', 'request-1')))
     await assertFails(getDocs(query(
       collection(otherFirestore, 'serviceRequests'),
@@ -437,6 +447,12 @@ describe('service request transactional proof', () => {
       orderBy('createdAt', 'desc'),
       orderBy(documentId(), 'desc'),
       limit(11),
+    )))
+    await assertFails(getDocs(query(
+      collection(otherFirestore, 'serviceRequests'),
+      where('clientId', '==', clientId),
+      where('status', 'in', ['OPEN', 'ASSIGNED', 'IN_PROGRESS']),
+      limit(50),
     )))
   })
 

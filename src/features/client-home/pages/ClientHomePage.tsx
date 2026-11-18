@@ -6,8 +6,10 @@ import {
   Leaf,
   LayoutGrid,
   PaintRoller,
+  RefreshCw,
   Search,
   Sparkles,
+  WifiOff,
   Waves,
   Wrench,
   Zap,
@@ -24,8 +26,11 @@ import { Input } from '../../../components/ui/input'
 import { Label } from '../../../components/ui/label'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
+import { serviceRequestService } from '../../../services/service-request.service'
 import type { CatalogCategory, CatalogSpecialty } from '../../../types/catalog'
+import type { ClientRequestListItem } from '../../../types/service-request'
 import { cn } from '../../../utils/cn'
+import { ClientRequestCard } from '../../client-requests/components/ClientRequestCard'
 import { useCatalog } from '../../home/use-catalog'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
@@ -95,6 +100,11 @@ export function ClientHomePage() {
   const searchInput = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')
   const [selectedCategoryId, setSelectedCategoryId] = useState('all')
+  const [activeRequests, setActiveRequests] = useState<ClientRequestListItem[]>([])
+  const [activeRequestsLoading, setActiveRequestsLoading] = useState(true)
+  const [activeRequestsError, setActiveRequestsError] = useState('')
+  const [activeRequestsFromCache, setActiveRequestsFromCache] = useState(false)
+  const [activeRequestsAttempt, setActiveRequestsAttempt] = useState(0)
   const firstName = profile?.name?.trim().split(/\s+/)[0] || 'cliente'
 
   const catalog = catalogState.status === 'ready' ? catalogState.catalog : null
@@ -113,18 +123,86 @@ export function ClientHomePage() {
     if (!catalog) return []
     const query = normalizedSearch(search)
 
-    return catalog.specialties.filter((specialty) => {
-      const matchesCategory =
-        selectedCategoryId === 'all' || specialty.categoryId === selectedCategoryId
-      const category = categoryById.get(specialty.categoryId)
-      const matchesSearch =
-        !query ||
-        normalizedSearch(specialty.name).includes(query) ||
-        normalizedSearch(category?.name ?? '').includes(query)
-      return matchesCategory && matchesSearch
-    })
+    return catalog.specialties
+      .filter((specialty) => {
+        const matchesCategory =
+          selectedCategoryId === 'all' || specialty.categoryId === selectedCategoryId
+        const category = categoryById.get(specialty.categoryId)
+        const matchesSearch =
+          !query ||
+          normalizedSearch(specialty.name).includes(query) ||
+          normalizedSearch(category?.name ?? '').includes(query)
+        return matchesCategory && matchesSearch
+      })
+      .sort((first, second) => {
+        const nameComparison = first.name.localeCompare(second.name, 'pt-BR', {
+          sensitivity: 'base',
+        })
+        if (nameComparison !== 0) return nameComparison
+
+        const categoryComparison = (categoryById.get(first.categoryId)?.name ?? '')
+          .localeCompare(categoryById.get(second.categoryId)?.name ?? '', 'pt-BR', {
+            sensitivity: 'base',
+          })
+        if (categoryComparison !== 0) return categoryComparison
+        return first.id.localeCompare(second.id)
+      })
   }, [catalog, categoryById, search, selectedCategoryId])
   const hasFilters = Boolean(search.trim()) || selectedCategoryId !== 'all'
+
+  useEffect(() => {
+    let active = true
+    queueMicrotask(() => {
+      if (!active) return
+      setActiveRequests([])
+      setActiveRequestsLoading(true)
+      setActiveRequestsError('')
+      setActiveRequestsFromCache(false)
+    })
+
+    if (!profile?.userId) {
+      return () => {
+        active = false
+      }
+    }
+
+    let unsubscribe: () => void = () => undefined
+    try {
+      unsubscribe = serviceRequestService.subscribeOwnActiveRequests({
+        onRequests(snapshot) {
+          if (!active) return
+          setActiveRequests(snapshot.items)
+          setActiveRequestsFromCache(snapshot.fromCache)
+          setActiveRequestsLoading(false)
+          setActiveRequestsError('')
+        },
+        onError(error) {
+          if (!active) return
+          setActiveRequestsLoading(false)
+          setActiveRequestsError(
+            error instanceof Error
+              ? error.message
+              : 'Não foi possível carregar seus pedidos ativos.',
+          )
+        },
+      })
+    } catch (error) {
+      queueMicrotask(() => {
+        if (!active) return
+        setActiveRequestsLoading(false)
+        setActiveRequestsError(
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível carregar seus pedidos ativos.',
+        )
+      })
+    }
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [activeRequestsAttempt, profile?.userId])
 
   useEffect(() => {
     if (location.hash === '#catalogo-servicos') {
@@ -214,6 +292,89 @@ export function ClientHomePage() {
             </div>
           </div>
         </section>
+
+        {activeRequestsLoading ? (
+          <section aria-labelledby="active-requests-loading-title">
+            <h2 id="active-requests-loading-title" className="text-2xl font-bold tracking-[-0.035em]">
+              Seus pedidos ativos
+            </h2>
+            <div role="status" aria-label="Carregando pedidos ativos" className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <Skeleton className="h-64 rounded-xl" />
+              <Skeleton className="hidden h-64 rounded-xl md:block" />
+            </div>
+          </section>
+        ) : null}
+
+        {activeRequestsError ? (
+          <Alert variant="destructive">
+            <CircleAlert aria-hidden="true" />
+            <AlertTitle>Pedidos ativos indisponíveis</AlertTitle>
+            <AlertDescription>
+              <p>{activeRequestsError}</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => setActiveRequestsAttempt((current) => current + 1)}
+              >
+                <RefreshCw aria-hidden="true" />
+                Tentar carregar pedidos
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {!activeRequestsLoading && activeRequests.length > 0 ? (
+          <section aria-labelledby="active-requests-title">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+              <div>
+                <p className="text-xs font-bold tracking-[0.15em] text-primary uppercase">
+                  Acompanhamento
+                </p>
+                <h2 id="active-requests-title" className="mt-1 text-2xl font-bold tracking-[-0.035em] sm:text-[1.75rem]">
+                  {activeRequests.length === 1
+                    ? 'Seu pedido ativo'
+                    : activeRequests.length + ' pedidos ativos'}
+                </h2>
+                <p className="mt-1.5 text-sm text-muted-foreground sm:text-base">
+                  Ordenados por data, período, criação e identificador do pedido.
+                </p>
+              </div>
+              <Button asChild variant="outline">
+                <Link to="/cliente/pedidos">
+                  Meus pedidos
+                  <ArrowRight aria-hidden="true" />
+                </Link>
+              </Button>
+            </div>
+
+            {activeRequestsFromCache || activeRequestsError ? (
+              <Alert variant="warning" className="mt-5">
+                <WifiOff aria-hidden="true" />
+                <AlertTitle>Estados salvos no dispositivo</AlertTitle>
+                <AlertDescription>
+                  Os estados abaixo podem estar desatualizados e não confirmam a situação atual. Confira novamente quando a conexão voltar.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {activeRequests.map((item) => (
+                <ClientRequestCard
+                  key={item.request.requestId}
+                  item={item}
+                  specialtyName={
+                    catalog?.specialties.find(
+                      (specialty) => specialty.id === item.request.specialtyId,
+                    )?.name ?? 'Serviço solicitado'
+                  }
+                  stale={activeRequestsFromCache || Boolean(activeRequestsError)}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section
           id="catalogo-servicos"

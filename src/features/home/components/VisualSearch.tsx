@@ -41,7 +41,7 @@ export function VisualSearch({ disabled = false, loading = false, error, service
 
   return (
     <div className="rounded-xl border bg-card p-4 shadow-soft sm:p-5 lg:p-6">
-      <form role="search" aria-label="Buscar profissionais" aria-busy={loading} onSubmit={handleSubmit} className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)_auto] lg:items-end">
+      <form role="search" aria-label="Buscar no catálogo de serviços" aria-busy={loading} onSubmit={handleSubmit} className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)_auto] lg:items-end">
         <div className="min-w-0 space-y-2">
           <Label htmlFor="search-service">Qual serviço você precisa?</Label>
           <div className="relative">
@@ -62,16 +62,16 @@ export function VisualSearch({ disabled = false, loading = false, error, service
           </div>
         </div>
         <Button size="lg" type="submit" loading={loading} disabled={disabled} loadingLabel="Buscando…" className="w-full whitespace-nowrap lg:w-auto">
-          Encontrar profissionais <ArrowRight aria-hidden="true" />
+          Explorar catálogo <ArrowRight aria-hidden="true" />
         </Button>
       </form>
       {error ? <p id="visual-search-error" role="alert" className="mt-3 text-sm text-destructive">{error}</p> : null}
       {showUnavailable ? (
         <Alert className="mt-4">
           <Search aria-hidden="true" />
-          <AlertTitle>Busca em preparação</AlertTitle>
+          <AlertTitle>Escolha uma especialidade</AlertTitle>
           <AlertDescription>
-            Ainda não há resultados públicos para estes campos. Você pode <Link className="font-semibold text-primary underline underline-offset-4" to="/cadastro">criar sua conta</Link> para começar no ProFind.
+            Use o <Link className="font-semibold text-primary underline underline-offset-4" to="/#servicos">catálogo de serviços</Link> para selecionar uma especialidade real e iniciar a solicitação.
           </AlertDescription>
         </Alert>
       ) : null}

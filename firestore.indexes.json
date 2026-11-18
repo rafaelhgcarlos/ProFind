@@ -13,6 +13,14 @@
       "collectionGroup": "serviceRequests",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "serviceRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "categoryId", "order": "ASCENDING" },
         { "fieldPath": "specialtyId", "order": "ASCENDING" },

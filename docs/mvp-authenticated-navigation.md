@@ -1,8 +1,8 @@
 # Estrutura autenticada do MVP
 
-Este documento registra a estrutura visual iniciada na Issue #52, alinhada ao
-plano da Issue #50, e sua integração com a criação de solicitações. Distribuição
-e acompanhamento permanecem fora desta etapa.
+Este documento registra a conclusão das integrações da Issue #52, alinhada ao
+plano da Issue #50. A estrutura visual aprovada foi mantida e agora aponta para
+solicitações, acompanhamento, oportunidades, atendimentos e operação reais.
 
 ## Estrutura compartilhada
 
@@ -25,33 +25,60 @@ e acompanhamento permanecem fora desta etapa.
 - **Início:** saudação, orientação e catálogo real.
 - **Solicitar serviço:** abre o formulário e preserva a especialidade escolhida
   no catálogo, inclusive quando o login é necessário.
-- **Meus pedidos:** aparece como integração pendente da Issue #18.
+- **Meus pedidos:** lista e detalha somente pedidos da conta, com listeners em
+  tempo real, histórico, responsável atual e ações permitidas.
 - **Perfil:** mantém a rota existente `/cliente/perfil`.
 
-O início lê categorias e especialidades pelo serviço de catálogo existente. Não
-há cópia de categorias no componente, pedido fictício, profissional escolhido ou
-confirmação simulada. Endereço pertence à solicitação, não
-ao perfil privado do cliente.
+O início lê categorias e especialidades pelo serviço de catálogo existente e
+assina pedidos **OPEN**, **ASSIGNED** e **IN_PROGRESS** da conta. Quando há
+pedidos ativos, até o limite seguro de 50 aparecem antes do catálogo usando o mesmo
+**ClientRequestCard** da listagem. A ordenação é determinística: data do serviço,
+período manhã/tarde/noite, criação mais recente e identificador. **Meus
+pedidos** mantém o acesso à lista completa.
+
+Sem pedidos ativos, a saudação, a busca no catálogo e o CTA **Solicitar
+serviço** continuam sendo a hierarquia principal. A especialidade selecionada é
+transportada em **?specialty=** até o formulário; a rota completa é preservada
+pelo redirecionamento de autenticação. Não há cópia de categorias no
+componente, pedido fictício, profissional escolhido ou confirmação simulada.
+Endereço pertence à solicitação, não ao perfil privado do cliente.
+
+Loading, vazio e erro não reutilizam dados como sucesso. Quando o Firestore
+informa **fromCache**, cards e detalhes exibem **Estado salvo** no lugar do
+status operacional e avisam que a situação atual precisa ser confirmada após a
+reconexão.
 
 ### Profissional
 
 - **Início, Perfil, Análise, Portfólio e Ajuda** permanecem acessíveis conforme os
   fluxos já entregues. Assim, cadastros pendentes, rejeitados ou suspensos ainda
   têm orientação, análise e o canal de ajuda existente.
-- **Oportunidades** está visível como pendente da Issue #13. Quando integrada,
-  novas oportunidades devem continuar condicionadas a aprovação ativa, versão,
-  compatibilidade e disponibilidade.
-- **Atendimentos** está visível como pendente da Issue #18. Restrições não apagam
-  atendimentos existentes; o destino só será habilitado quando houver a tela que
-  leia a autorização e os dados reais.
+- **Oportunidades** abre o feed real da Issue #13. Novas oportunidades continuam
+  condicionadas à versão aprovada e ativa, compatibilidade regional/de
+  especialidade e disponibilidade. O próprio serviço e as Rules mantêm a
+  proteção; o menu não altera elegibilidade.
+- **Atendimentos** abre compromissos reais. Restrições não apagam histórico nem
+  compromissos existentes e as ações continuam validadas pelo domínio.
 
 Mensagens, favoritos, comparação de profissionais e orçamento direcionado foram
 retirados da jornada e da navegação do MVP.
 
-## Dependências que permanecem abertas
+### Administração
 
-- **#13:** oportunidades reais, elegibilidade e ações do profissional.
-- **#18:** acompanhamento de solicitações e atendimentos persistidos.
+- **Análise:** **/admin/profissionais** integra a fila e o detalhe da #32.
+- **Pedidos e Pendências:** **/admin/pedidos** e **/admin/pendencias** integram a
+  visão operacional da #34.
+- **Relatos:** **/admin/relatos** integra análise, ciência do cliente e resoluções
+  permitidas.
+- **Catálogo:** permanece desabilitado, pois não existe tela administrativa real.
 
-A interface mantém as áreas futuras sem rotas vazias, dados artificiais ou
-estados de sucesso locais.
+## Limitações reais
+
+- Não há pagamentos, garantias, certificação de identidade/qualidade, chat,
+  favoritos, comparação de propostas ou escolha manual de prestador.
+- Aprovação profissional é demonstrativa e não equivale a verificação real.
+- Atendimento depende de elegibilidade, disponibilidade e aceite transacional;
+  a interface não promete profissional nem prazo de chegada.
+- O índice local para pedidos ativos precisa ser implantado junto às demais
+  configurações Firestore em uma entrega autorizada; esta etapa não publica nem
+  altera dados remotos.

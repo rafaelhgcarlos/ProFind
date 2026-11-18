@@ -5,7 +5,19 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCatalog } from '../../home/use-catalog'
 import { useProfile } from '../../onboarding/use-profile'
+import type { ServiceRequestSummary } from '../../../types/service-request'
 import { ClientHomePage } from './ClientHomePage'
+
+const requestMocks = vi.hoisted(() => ({
+  subscribeOwnActiveRequests: vi.fn(),
+  unsubscribe: vi.fn(),
+}))
+
+vi.mock('../../../services/service-request.service', () => ({
+  serviceRequestService: {
+    subscribeOwnActiveRequests: requestMocks.subscribeOwnActiveRequests,
+  },
+}))
 
 vi.mock('../../../components/layout/ClientLayout', () => ({
   ClientLayout: ({ children }: { children: React.ReactNode }) => (
@@ -80,6 +92,32 @@ function renderPage(path = '/cliente') {
   )
 }
 
+function request(
+  requestId: string,
+  overrides: Partial<ServiceRequestSummary> = {},
+): ServiceRequestSummary {
+  return {
+    requestId,
+    operationKey: 'operation-key-0000000001',
+    clientId: 'client-123',
+    categoryId: 'construction',
+    specialtyId: 'electrician',
+    cityIbgeCode: '3509502',
+    serviceDate: '2030-01-15',
+    period: 'MORNING',
+    periodStartAt: new Date('2030-01-15T11:00:00.000Z'),
+    acceptUntil: new Date('2030-01-15T10:30:00.000Z'),
+    status: 'OPEN',
+    round: 1,
+    currentRoundId: 'round-1',
+    assignedProfessionalId: null,
+    currentAssignmentId: null,
+    reopenReason: null,
+    excludedProfessionalIds: [],
+    ...overrides,
+  }
+}
+
 describe('ClientHomePage', () => {
   beforeAll(() => {
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
@@ -90,6 +128,10 @@ describe('ClientHomePage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    requestMocks.subscribeOwnActiveRequests.mockImplementation((input) => {
+      queueMicrotask(() => input.onRequests({ items: [], fromCache: false }))
+      return requestMocks.unsubscribe
+    })
     vi.mocked(useProfile).mockReturnValue({
       profile: {
         userId: 'client-123',
@@ -135,6 +177,74 @@ describe('ClientHomePage', () => {
     )
   })
 
+  it('prioriza todos os pedidos ativos antes do catálogo com acesso à listagem', async () => {
+    requestMocks.subscribeOwnActiveRequests.mockImplementation((input) => {
+      queueMicrotask(() =>
+        input.onRequests({
+          items: [
+            {
+              request: request('request-first', {
+                serviceDate: '2030-01-10',
+                status: 'ASSIGNED',
+              }),
+              createdAt: new Date('2029-12-01T10:00:00.000Z'),
+              updatedAt: new Date('2029-12-02T10:00:00.000Z'),
+            },
+            {
+              request: request('request-second', {
+                serviceDate: '2030-01-11',
+                period: 'AFTERNOON',
+              }),
+              createdAt: new Date('2029-12-03T10:00:00.000Z'),
+              updatedAt: new Date('2029-12-03T10:00:00.000Z'),
+            },
+          ],
+          fromCache: false,
+        }),
+      )
+      return requestMocks.unsubscribe
+    })
+
+    renderPage()
+
+    expect(await screen.findByRole('heading', { name: '2 pedidos ativos' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Acompanhar pedido' })).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Meus pedidos' })).toHaveAttribute(
+      'href',
+      '/cliente/pedidos',
+    )
+    const activeHeading = screen.getByRole('heading', { name: '2 pedidos ativos' })
+    const catalogHeading = screen.getByRole('heading', { name: 'Explore os serviços' })
+    expect(
+      activeHeading.compareDocumentPosition(catalogHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('identifica dados offline sem usar o status salvo como confirmação atual', async () => {
+    requestMocks.subscribeOwnActiveRequests.mockImplementation((input) => {
+      queueMicrotask(() =>
+        input.onRequests({
+          items: [
+            {
+              request: request('request-offline', { status: 'ASSIGNED' }),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ],
+          fromCache: true,
+        }),
+      )
+      return requestMocks.unsubscribe
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('Estados salvos no dispositivo')).toBeInTheDocument()
+    expect(screen.getByText('Estado salvo')).toBeInTheDocument()
+    expect(screen.getByText(/não confirmam a situação atual/i)).toBeInTheDocument()
+  })
+
   it('leva o foco à busca ao abrir a ação da navegação por hash', () => {
     renderPage('/cliente#catalogo-servicos')
 
@@ -172,6 +282,18 @@ describe('ClientHomePage', () => {
         name: 'Solicitar Outros — Serviços residenciais',
       }),
     ).not.toBeInTheDocument()
+  })
+
+  it('exibe as especialidades em ordem alfabética com desempate estável', () => {
+    renderPage()
+
+    const serviceLinks = screen.getAllByRole('link', { name: /^Solicitar .+ — / })
+    expect(serviceLinks.map((link) => link.textContent?.trim())).toEqual([
+      'EletricistaConstrução e manutenção',
+      'JardineiroServiços residenciais',
+      'OutrosConstrução e manutenção',
+      'OutrosServiços residenciais',
+    ])
   })
 
   it('trata nenhum resultado e limpa busca e categoria em conjunto', async () => {

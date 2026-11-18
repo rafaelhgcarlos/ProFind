@@ -166,7 +166,23 @@ previews de layout ficam sob `/design-system/layouts/*`.
 Os layouts reutilizáveis estão separados em público, Cliente, Profissional e
 Admin. Cliente e Profissional compartilham os mesmos tokens e primitives, mas
 possuem navegação orientada às respectivas tarefas. A estrutura Admin permanece
-separada para não acoplar sua experiência ao marketplace.
+separada para não acoplar sua experiência à jornada do cliente.
+
+A homepage autenticada do cliente consulta o catálogo persistido e os próprios
+pedidos ativos em tempo real. Pedidos abertos, confirmados ou em atendimento
+aparecem antes do catálogo e reutilizam o mesmo card da listagem de
+acompanhamento. A ordenação é determinística por data, período, criação
+decrescente e identificador; a listagem completa continua em **Meus pedidos**.
+Seleções de especialidade via landing ou homepage seguem na query string da
+rota protegida e, por isso, sobrevivem ao redirecionamento para login. Snapshots
+do cache são identificados como estado salvo, nunca como confirmação atual.
+
+As rotas reais de oportunidades e atendimentos estão conectadas à navegação
+profissional. A elegibilidade de novas oportunidades continua validada pelo
+perfil operacional aprovado e ativo; restrições não removem acesso ao cadastro,
+análise, ajuda nem às ações autorizadas de compromissos existentes. A navegação
+administrativa liga a fila de análise, pedidos, pendências e relatos às áreas
+operacionais existentes.
 
 As [diretrizes globais de UX/UI](docs/ux-ui-guidelines.md) são requisito
 transversal para toda nova interface. Elas definem hierarquia, padrões por
@@ -184,12 +200,15 @@ fontes de autorização.
 A estrutura do documento, o bootstrap manual pelo Firebase Console, a
 revogação e o roteiro com contas admin/comum estão em
 [`docs/admin-access.md`](docs/admin-access.md). A interface desta etapa prepara
-as áreas futuras sem expor links quebrados, operações ou indicadores fictícios.
+somente o catálogo administrativo como área futura desabilitada; análise de
+profissionais, pedidos, pendências e relatos apontam para funcionalidades reais.
 
 O item **Pedidos** consulta todas as solicitações com filtros e paginação real,
 abre detalhes com endereço privado autorizado, responsável, rodadas e histórico
-e sinaliza pedidos ainda sem aceite ou com prazo encerrado. Esta é uma entrega
-somente de leitura da #34; limites, índices, privacidade e pendências estão em
+e sinaliza pedidos ainda sem aceite ou com prazo encerrado. Resoluções e
+reaberturas elegíveis usam as operações de domínio e a trilha existentes, sem
+edição livre de status ou atribuição silenciosa. Limites, índices, privacidade e
+pendências estão em
 [`docs/admin-service-requests.md`](docs/admin-service-requests.md).
 
 ## Núcleo de solicitações e distribuição

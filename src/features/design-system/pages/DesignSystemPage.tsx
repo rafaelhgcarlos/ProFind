@@ -254,8 +254,7 @@ export function DesignSystemPage() {
                   </div>
                   <CardTitle className="pt-2">Instalação de luminárias</CardTitle>
                   <CardDescription>
-                    Serviço residencial com escopo e prazo apresentados antes da
-                    proposta.
+                    Exemplo de pedido residencial com especialidade, data e período.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-3 text-sm text-muted-foreground">
@@ -268,8 +267,8 @@ export function DesignSystemPage() {
                     Prazo flexível nesta semana
                   </div>
                   <p>
-                    <span className="font-semibold text-foreground">Orçamento:</span>{' '}
-                    a combinar
+                    <span className="font-semibold text-foreground">Estado:</span>{' '}
+                    exemplo visual, sem atendimento confirmado
                   </p>
                 </CardContent>
                 <CardFooter>

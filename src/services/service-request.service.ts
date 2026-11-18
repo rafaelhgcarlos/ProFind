@@ -15,6 +15,7 @@ import {
   type OpportunityQuery,
   type OwnRequestDetailsSnapshot,
   type ClientRequestsPageInput,
+  type ClientActiveRequestsSnapshot,
   type ClientRequestsPageSnapshot,
   type ClientRequestTrackingSnapshot,
   type ProfessionalAppointmentDetailsSnapshot,
@@ -105,6 +106,11 @@ export interface OwnRequestDetailsSubscriptionInput {
 
 export interface ClientRequestsSubscriptionInput extends ClientRequestsPageInput {
   onPage(snapshot: ClientRequestsPageSnapshot): void
+  onError(error: ServiceRequestError): void
+}
+
+export interface ClientActiveRequestsSubscriptionInput {
+  onRequests(snapshot: ClientActiveRequestsSnapshot): void
   onError(error: ServiceRequestError): void
 }
 
@@ -416,6 +422,14 @@ export function createServiceRequestService(
       })
     },
 
+    subscribeOwnActiveRequests(input: ClientActiveRequestsSubscriptionInput) {
+      const clientId = actorId()
+      return repository.subscribeOwnActiveRequests(clientId, {
+        onRequests: input.onRequests,
+        onError: (error) => input.onError(normalizeOperationError(error)),
+      })
+    },
+
     subscribeOwnRequestTracking(input: ClientRequestTrackingSubscriptionInput) {
       const clientId = actorId()
       return repository.subscribeOwnRequestTracking(input.requestId, clientId, {
@@ -720,6 +734,9 @@ export const serviceRequestService = {
   },
   subscribeOwnRequests(input: ClientRequestsSubscriptionInput) {
     return getDefaultService().subscribeOwnRequests(input)
+  },
+  subscribeOwnActiveRequests(input: ClientActiveRequestsSubscriptionInput) {
+    return getDefaultService().subscribeOwnActiveRequests(input)
   },
   subscribeOwnRequestTracking(input: ClientRequestTrackingSubscriptionInput) {
     return getDefaultService().subscribeOwnRequestTracking(input)

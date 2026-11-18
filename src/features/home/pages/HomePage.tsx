@@ -17,7 +17,7 @@ import { useCatalog } from '../use-catalog'
 const availableSteps = [
   { icon: 'trust' as const, title: 'Crie sua conta', description: 'Cadastre-se com nome, e-mail e senha para ter uma identidade no ProFind.' },
   { icon: 'location' as const, title: 'Escolha o serviço', description: 'Use o mesmo catálogo que organiza profissões e especialidades.' },
-  { icon: 'conversation' as const, title: 'Acompanhe a procura', description: 'Em breve, você poderá acompanhar o andamento sem promessa de atendimento.' },
+  { icon: 'conversation' as const, title: 'Acompanhe o pedido', description: 'Veja procura, atribuição e atualizações reais sem promessa de atendimento.' },
 ]
 
 export function HomePage() {
@@ -133,7 +133,7 @@ export function HomePage() {
 
       <section className="border-y bg-card">
         <div className="mx-auto grid min-w-0 max-w-7xl gap-8 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1fr)] lg:items-center lg:gap-20 lg:px-8">
-          <div><Badge variant="secondary"><ShieldCheck className="size-3.5" aria-hidden="true" />Clareza em cada etapa</Badge><h2 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">A solicitação começa com informações objetivas.</h2><p className="mt-4 leading-7 text-muted-foreground">O ProFind está preparando um fluxo para distribuir cada pedido a profissionais compatíveis e mostrar o andamento sem prometer disponibilidade.</p></div>
+          <div><Badge variant="secondary"><ShieldCheck className="size-3.5" aria-hidden="true" />Clareza em cada etapa</Badge><h2 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">A solicitação começa com informações objetivas.</h2><p className="mt-4 leading-7 text-muted-foreground">O ProFind distribui cada pedido a profissionais compatíveis e mostra o andamento persistido, sem prometer disponibilidade ou atendimento.</p></div>
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="border-t pt-5"><LockKeyhole className="size-6 text-primary" aria-hidden="true" /><h3 className="mt-4 font-bold">Sua conta é privada</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Seu acesso é protegido; seus dados de contato não viram um perfil público ao se cadastrar.</p></div>
             <div className="border-t pt-5"><MapPin className="size-6 text-primary" aria-hidden="true" /><h3 className="mt-4 font-bold">Endereço por solicitação</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">O local do atendimento pertence ao pedido e não ao perfil público do cliente.</p></div>

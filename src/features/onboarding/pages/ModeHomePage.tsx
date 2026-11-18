@@ -127,15 +127,25 @@ export function ModeHomePage({ mode }: ModeHomePageProps) {
           </Card>
           <Card className="bg-surface-tint">
             <CardHeader>
-              <Badge variant="outline" className="w-fit">Em breve</Badge>
+              <Badge variant="outline" className="w-fit">Disponível conforme elegibilidade</Badge>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Compass className="size-5 text-primary" aria-hidden="true" />
                 Oportunidades e atendimentos
               </CardTitle>
             </CardHeader>
-            <CardContent className="text-sm leading-6 text-muted-foreground">
-              Novas oportunidades serão exibidas somente para profissionais
-              elegíveis. Seus atendimentos existentes continuarão preservados.
+            <CardContent>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Novas oportunidades são exibidas somente para profissionais
+                elegíveis. Atendimentos existentes continuam acessíveis quando permitidos.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link to="/profissional/oportunidades">Ver oportunidades</Link>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <Link to="/profissional/atendimentos">Ver atendimentos</Link>
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -153,8 +163,8 @@ export function ModeHomePage({ mode }: ModeHomePageProps) {
           <AlertTitle>Atendimentos existentes serão preservados</AlertTitle>
           <AlertDescription>
             Estados de análise ou suspensão não apagam histórico, reservas ou
-            atendimentos já autorizados. O acompanhamento estará disponível em
-            uma próxima etapa.
+            atendimentos já autorizados. Consulte a área de atendimentos para
+            acompanhar as ações ainda permitidas.
           </AlertDescription>
         </Alert>
       ) : null}
