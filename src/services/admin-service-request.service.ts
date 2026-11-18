@@ -88,6 +88,15 @@ export function createAdminServiceRequestService(
       }
       return safely(() => repository.getDetail(normalized))
     },
+    verifyEligibility(requestId: string) {
+      const normalized = requestId.trim()
+      if (!normalized) {
+        return Promise.reject(
+          new AdminRequestError('validation', 'Informe o identificador do pedido.'),
+        )
+      }
+      return safely(() => repository.verifyEligibility(normalized))
+    },
   }
 }
 
@@ -107,5 +116,8 @@ export const adminServiceRequestService = {
   },
   getDetail(requestId: string) {
     return getDefaultService().getDetail(requestId)
+  },
+  verifyEligibility(requestId: string) {
+    return getDefaultService().verifyEligibility(requestId)
   },
 }

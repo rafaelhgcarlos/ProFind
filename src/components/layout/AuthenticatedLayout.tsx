@@ -5,6 +5,7 @@ import {
   CircleHelp,
   ClipboardCheck,
   ClipboardList,
+  FileWarning,
   Compass,
   Home,
   Images,
@@ -48,11 +49,8 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
     },
     {
       label: 'Meus pedidos',
-      href: '/cliente#solicitacoes',
+      href: '/cliente/pedidos',
       icon: ClipboardList,
-      disabled: true,
-      disabledLabel: 'Em breve',
-      disabledReason: 'Em breve você poderá acompanhar seus pedidos por aqui.',
     },
     { label: 'Perfil', href: '/cliente/perfil', icon: UserRound },
   ],
@@ -107,6 +105,8 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
       disabledReason: 'Disponível em breve.',
     },
     { label: 'Pedidos', href: '/admin/pedidos', icon: ClipboardList },
+    { label: 'Pendências', href: '/admin/pendencias', icon: CalendarClock },
+    { label: 'Relatos', href: '/admin/relatos', icon: FileWarning },
   ],
 }
 

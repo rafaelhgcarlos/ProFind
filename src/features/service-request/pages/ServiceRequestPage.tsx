@@ -57,6 +57,7 @@ import { MunicipalityCombobox } from '../../professional-profile/components/Muni
 import { useAuth } from '../../auth/use-auth'
 import { useCatalog } from '../../home/use-catalog'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
+import { ClientServiceReports } from '../../service-reports/components/ClientServiceReports'
 import { useProfile } from '../../onboarding/use-profile'
 
 interface RequestDraft {
@@ -163,6 +164,7 @@ export function ServiceRequestPage() {
   const [searchParams] = useSearchParams()
   const requestedSpecialty = searchParams.get('specialty') ?? ''
   const recoveredRequestId = searchParams.get('pedido') ?? ''
+  const requestedAction = searchParams.get('acao') ?? ''
   const [draft, setDraft] = useState<RequestDraft>(() => loadDraft(user?.uid))
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -182,6 +184,7 @@ export function ServiceRequestPage() {
   const lastAutomaticLookup = useRef<string | null>(null)
   const postalCodeCache = useRef(new Map<string, PostalCodeResult>())
   const autofilledAddress = useRef<AutofilledAddress | null>(null)
+  const handledRequestedAction = useRef('')
   const [loadedAt] = useState(() => new Date())
   const [schedulingBounds] = useState(() => {
     const now = new Date()
@@ -214,6 +217,21 @@ export function ServiceRequestPage() {
       },
     })
   }, [editingRequest, recoveredRequestId, user?.uid])
+
+  useEffect(() => {
+    if (!confirmed || !requestDetails || !requestedAction) return
+    const actionKey = `${confirmed.requestId}:${requestedAction}`
+    if (handledRequestedAction.current === actionKey) return
+    handledRequestedAction.current = actionKey
+    queueMicrotask(() => {
+      if (requestedAction === 'editar') beginEdit()
+      if (requestedAction === 'cancelar' && ['OPEN', 'ASSIGNED'].includes(confirmed.status)) {
+        setConfirmCancellation(true)
+      }
+    })
+  // `beginEdit` intentionally consumes the confirmed snapshot captured above.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmed, requestDetails, requestedAction])
 
   const categories = catalogState.status === 'ready' ? catalogState.catalog.categories : []
   const requestedCatalogSpecialty =
@@ -595,8 +613,8 @@ export function ServiceRequestPage() {
   if (confirmed) {
     const isOpen = confirmed.status === 'OPEN'
     const isExpired = isOpen && confirmed.acceptUntil.getTime() <= loadedAt.getTime()
-    const isReplacement =
-      isOpen && confirmed.reopenReason === 'PROFESSIONAL_CANCELLATION'
+    const isReplacement = isOpen && confirmed.reopenReason !== null
+    const isAdminReopen = confirmed.reopenReason === 'ADMIN_INTERVENTION'
     const isAssigned = confirmed.status === 'ASSIGNED'
     const canCancel = isOpen || isAssigned
     const statusTitle = isReplacement && isExpired
@@ -624,9 +642,13 @@ export function ServiceRequestPage() {
             </h2>
             <p className="mt-2 max-w-xl text-sm leading-6 text-brand-panel-foreground/80">
               {isReplacement && isExpired
-                ? 'O profissional cancelou após o prazo de novos aceites. O pedido continua aberto para intervenção ou reagendamento, sem confirmação de substituto.'
+                ? isAdminReopen
+                  ? 'A administração reabriu o pedido, mas o prazo de novos aceites terminou. O caso continua pendente sem substituto confirmado.'
+                  : 'O profissional cancelou após o prazo de novos aceites. O pedido continua aberto para intervenção ou reagendamento, sem confirmação de substituto.'
                 : isReplacement
-                  ? 'O profissional cancelou e uma nova rodada foi iniciada. A substituição depende de um novo aceite válido.'
+                  ? isAdminReopen
+                    ? 'A administração encerrou a atribuição anterior e iniciou uma nova rodada. A substituição depende de um novo aceite válido.'
+                    : 'O profissional cancelou e uma nova rodada foi iniciada. A substituição depende de um novo aceite válido.'
               : isExpired
                 ? 'O prazo desta rodada terminou sem aceite. O pedido continua visível; edite a data ou procure o suporte se precisar de ajuda.'
                 : isOpen
@@ -654,6 +676,7 @@ export function ServiceRequestPage() {
             <p className="text-sm leading-6 text-muted-foreground">
               Código do pedido: <span className="font-mono text-foreground">{confirmed.requestId}</span>
             </p>
+            <ClientServiceReports requestId={confirmed.requestId} />
             {cancellationError ? (
               <Alert variant="destructive" role="alert">
                 <CircleAlert aria-hidden="true" />

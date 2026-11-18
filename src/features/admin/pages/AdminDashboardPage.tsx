@@ -1,4 +1,4 @@
-import { Activity, BookOpenText, ClipboardCheck, ShieldCheck } from 'lucide-react'
+import { Activity, BookOpenText, CalendarClock, ClipboardCheck, FileWarning, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { AdminLayout } from '../../../components/layout/AdminLayout'
@@ -33,6 +33,22 @@ const areas = [
     status: 'Disponível',
     href: '/admin/pedidos',
   },
+  {
+    title: 'Pendências',
+    description:
+      'Priorize pedidos sem aceite, vencidos, com relatos ou responsável restrito.',
+    icon: CalendarClock,
+    status: 'Disponível',
+    href: '/admin/pendencias',
+  },
+  {
+    title: 'Relatos',
+    description:
+      'Analise problemas informados por clientes e registre decisões auditáveis.',
+    icon: FileWarning,
+    status: 'Disponível',
+    href: '/admin/relatos',
+  },
 ] as const
 
 export function AdminDashboardPage() {
@@ -62,7 +78,7 @@ export function AdminDashboardPage() {
             </p>
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {areas.map((area) => {
               const Icon = area.icon
               return (

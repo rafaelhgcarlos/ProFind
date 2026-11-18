@@ -17,6 +17,7 @@ import {
   type DocumentSnapshot,
   type Firestore,
   type QueryConstraint,
+  type QuerySnapshot,
   type Unsubscribe,
 } from 'firebase/firestore'
 
@@ -48,6 +49,10 @@ import {
   OPPORTUNITY_FEED_CURSOR_VERSION,
   OPPORTUNITY_QUERY_VERSION,
   type OpportunityFeedCursor,
+  type ClientCurrentProfessional,
+  type ClientRequestPage,
+  type ClientRequestPageCursor,
+  type ClientRequestTrackingDetails,
   type OwnServiceRequestDetails,
   type OpportunityFeedPage,
   type OpportunityPage,
@@ -150,6 +155,32 @@ export interface OwnRequestDetailsListeners {
   onError(error: unknown): void
 }
 
+export interface ClientRequestsPageInput {
+  pageSize?: number
+  cursor?: ClientRequestPageCursor | null
+}
+
+export interface ClientRequestsPageSnapshot {
+  page: ClientRequestPage
+  fromCache: boolean
+}
+
+export interface ClientRequestsPageListeners {
+  onPage(snapshot: ClientRequestsPageSnapshot): void
+  onError(error: unknown): void
+}
+
+export interface ClientRequestTrackingSnapshot {
+  details: ClientRequestTrackingDetails
+  fromCache: boolean
+}
+
+export interface ClientRequestTrackingListeners {
+  onDetails(snapshot: ClientRequestTrackingSnapshot): void
+  onProfileError(error: unknown): void
+  onError(error: unknown): void
+}
+
 export interface ServiceHistoryQuery {
   requestId: string
   actorId?: string
@@ -159,6 +190,7 @@ export interface ServiceHistoryQuery {
 export const OPPORTUNITY_QUERY_LIMIT = 50
 export const OPPORTUNITY_FEED_PAGE_SIZE = 12
 export const PROFESSIONAL_APPOINTMENTS_PAGE_SIZE = 12
+export const CLIENT_REQUESTS_PAGE_SIZE = 10
 
 export interface CreateRequestInput {
   operationKey: string
@@ -298,6 +330,81 @@ function dateValue(data: DocumentData, field: string) {
   throw new ServiceRequestError('unknown', `Campo temporal inválido: ${field}.`)
 }
 
+function nullableNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function clientProfessionalImage(
+  value: unknown,
+  ownerId: string,
+  purpose: 'PROFESSIONAL_AVATAR' | 'PROFESSIONAL_PORTFOLIO',
+  fallbackOrder: number,
+) {
+  if (typeof value !== 'object' || value === null) return null
+  const image = value as DocumentData
+  const provider = image.provider === undefined ? 'LEGACY' : image.provider
+  if (
+    !['IMAGEKIT', 'BACKEND', 'LEGACY'].includes(provider)
+    || image.ownerId !== ownerId
+    || image.purpose !== purpose
+    || typeof image.url !== 'string'
+    || !image.url.startsWith('https://')
+    || typeof image.providerId !== 'string'
+    || !image.providerId.trim()
+    || typeof image.createdAt !== 'number'
+    || typeof image.updatedAt !== 'number'
+  ) {
+    return null
+  }
+  return {
+    provider,
+    ownerId,
+    purpose,
+    url: image.url,
+    providerId: image.providerId,
+    createdAt: image.createdAt,
+    updatedAt: image.updatedAt,
+    order: typeof image.order === 'number' ? image.order : fallbackOrder,
+    altText: typeof image.altText === 'string' ? image.altText : '',
+  } as NonNullable<ClientCurrentProfessional['profileImage']>
+}
+
+function clientProfessionalFromSnapshot(
+  snapshot: DocumentSnapshot<DocumentData>,
+  professionalId: string,
+): ClientCurrentProfessional | null {
+  if (!snapshot.exists()) return null
+  const data = snapshot.data()
+  if (data.ownerId !== professionalId || data.status !== 'PUBLISHED') return null
+  const profileImage = clientProfessionalImage(
+    data.profileImage,
+    professionalId,
+    'PROFESSIONAL_AVATAR',
+    0,
+  )
+  const portfolioImages = Array.isArray(data.portfolioImages)
+    ? data.portfolioImages
+        .map((image: unknown, index: number) => clientProfessionalImage(
+          image,
+          professionalId,
+          'PROFESSIONAL_PORTFOLIO',
+          index,
+        ))
+        .filter((image): image is NonNullable<typeof image> => image !== null)
+        .sort((first, second) => first.order - second.order)
+    : []
+  return {
+    professionalId,
+    publicName: stringValue(data, 'publicName'),
+    headline: stringValue(data, 'headline'),
+    specialtyIds: stringArray(data, 'specialtyIds'),
+    profileImage,
+    portfolioImages,
+    rating: nullableNumber(data.rating),
+    reviewCount: nullableNumber(data.reviewCount),
+  }
+}
+
 function requestFromSnapshot(
   snapshot: DocumentSnapshot<DocumentData>,
 ): ServiceRequestSummary {
@@ -334,6 +441,8 @@ function requestFromSnapshot(
     reopenReason:
       data.reopenReason === 'PROFESSIONAL_CANCELLATION'
         ? 'PROFESSIONAL_CANCELLATION'
+        : data.reopenReason === 'ADMIN_INTERVENTION'
+          ? 'ADMIN_INTERVENTION'
         : null,
     excludedProfessionalIds: stringArray(data, 'excludedProfessionalIds'),
   }
@@ -402,7 +511,11 @@ function serviceEventFromSnapshot(
     type,
     reasonCode: (stringValue(data, 'reasonCode') || fallbackReason) as ServiceRequestEvent['reasonCode'],
     actorId: stringValue(data, 'actorId'),
-    actorRole: data.actorRole === 'CLIENT' ? 'CLIENT' : 'PROFESSIONAL',
+    actorRole: data.actorRole === 'CLIENT'
+      ? 'CLIENT'
+      : data.actorRole === 'ADMIN'
+        ? 'ADMIN'
+        : 'PROFESSIONAL',
     round: typeof data.round === 'number' ? data.round : 0,
     assignmentId: nullableString(data, 'assignmentId'),
     fromStatus: stringValue(data, 'fromStatus') as ServiceRequestEvent['fromStatus'],
@@ -902,6 +1015,196 @@ export function createServiceRequestRepository({
     return () => {
       requestUnsubscribe()
       privateUnsubscribe()
+    }
+  }
+
+  function subscribeOwnRequestsPage(
+    input: ClientRequestsPageInput,
+    clientId: string,
+    listeners: ClientRequestsPageListeners,
+  ) {
+    const pageSize = input.pageSize === undefined
+      ? CLIENT_REQUESTS_PAGE_SIZE
+      : Math.max(1, Math.min(Math.trunc(input.pageSize), 20))
+    const constraints: QueryConstraint[] = [
+      where('clientId', '==', clientId),
+      orderBy('createdAt', 'desc'),
+      orderBy(documentId(), 'desc'),
+      limit(pageSize + 1),
+    ]
+    if (input.cursor) {
+      constraints.splice(
+        constraints.length - 1,
+        0,
+        startAfter(Timestamp.fromDate(input.cursor.createdAt), input.cursor.requestId),
+      )
+    }
+
+    return onSnapshot(
+      query(collection(firestore, 'serviceRequests'), ...constraints),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        try {
+          const visibleDocuments = snapshot.docs.slice(0, pageSize)
+          const items = visibleDocuments.map((requestSnapshot) => {
+            const request = requestFromSnapshot(requestSnapshot)
+            if (request.clientId !== clientId) {
+              throw new ServiceRequestError('not-found', 'Solicitação não encontrada.')
+            }
+            return {
+              request,
+              createdAt: dateValue(requestSnapshot.data(), 'createdAt'),
+              updatedAt: dateValue(requestSnapshot.data(), 'updatedAt'),
+            }
+          })
+          const lastDocument = visibleDocuments.at(-1)
+          listeners.onPage({
+            page: {
+              items,
+              nextCursor: snapshot.size > pageSize && lastDocument
+                ? {
+                    createdAt: dateValue(lastDocument.data(), 'createdAt'),
+                    requestId: lastDocument.id,
+                  }
+                : null,
+            },
+            fromCache: snapshot.metadata.fromCache,
+          })
+        } catch (error) {
+          listeners.onError(error)
+        }
+      },
+      listeners.onError,
+    )
+  }
+
+  function subscribeOwnRequestTracking(
+    requestId: string,
+    clientId: string,
+    listeners: ClientRequestTrackingListeners,
+  ) {
+    let requestSnapshot: DocumentSnapshot<DocumentData> | undefined
+    let privateSnapshot: DocumentSnapshot<DocumentData> | undefined
+    let historySnapshot: QuerySnapshot<DocumentData> | undefined
+    let professionalSnapshot: DocumentSnapshot<DocumentData> | null | undefined
+    let currentProfessionalId: string | null = null
+    let professionalUnsubscribe: Unsubscribe | null = null
+
+    const emit = () => {
+      if (
+        !requestSnapshot
+        || !privateSnapshot
+        || !historySnapshot
+        || professionalSnapshot === undefined
+      ) return
+      try {
+        const request = requestFromSnapshot(requestSnapshot)
+        const privateData = privateRequestFromSnapshot(privateSnapshot)
+        if (request.clientId !== clientId || privateData.clientId !== clientId) {
+          throw new ServiceRequestError('not-found', 'Solicitação não encontrada.')
+        }
+        listeners.onDetails({
+          details: {
+            request,
+            privateData,
+            history: historySnapshot.docs.map(serviceEventFromSnapshot),
+            currentProfessional: professionalSnapshot && currentProfessionalId
+              ? clientProfessionalFromSnapshot(professionalSnapshot, currentProfessionalId)
+              : null,
+          },
+          fromCache:
+            requestSnapshot.metadata.fromCache
+            || privateSnapshot.metadata.fromCache
+            || historySnapshot.metadata.fromCache
+            || Boolean(professionalSnapshot?.metadata.fromCache),
+        })
+      } catch (error) {
+        listeners.onError(error)
+      }
+    }
+
+    const reconcileProfessional = (snapshot: DocumentSnapshot<DocumentData>) => {
+      try {
+        const request = requestFromSnapshot(snapshot)
+        if (request.clientId !== clientId) {
+          throw new ServiceRequestError('not-found', 'Solicitação não encontrada.')
+        }
+        const nextProfessionalId =
+          ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'].includes(request.status)
+          && request.currentAssignmentId
+          && request.assignedProfessionalId
+            ? request.assignedProfessionalId
+            : null
+        if (nextProfessionalId === currentProfessionalId) {
+          if (nextProfessionalId === null && professionalSnapshot === undefined) {
+            professionalSnapshot = null
+          }
+          emit()
+          return
+        }
+        professionalUnsubscribe?.()
+        professionalUnsubscribe = null
+        currentProfessionalId = nextProfessionalId
+        professionalSnapshot = nextProfessionalId ? undefined : null
+        if (!nextProfessionalId) {
+          emit()
+          return
+        }
+        professionalUnsubscribe = onSnapshot(
+          doc(firestore, 'professionalProfiles', nextProfessionalId),
+          { includeMetadataChanges: true },
+          (profileSnapshot) => {
+            professionalSnapshot = profileSnapshot
+            emit()
+          },
+          (error) => {
+            professionalSnapshot = null
+            listeners.onProfileError(error)
+            emit()
+          },
+        )
+      } catch (error) {
+        listeners.onError(error)
+      }
+    }
+
+    const requestUnsubscribe = onSnapshot(
+      doc(firestore, 'serviceRequests', requestId),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        requestSnapshot = snapshot
+        reconcileProfessional(snapshot)
+      },
+      listeners.onError,
+    )
+    const privateUnsubscribe = onSnapshot(
+      doc(firestore, 'serviceRequestPrivate', requestId),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        privateSnapshot = snapshot
+        emit()
+      },
+      listeners.onError,
+    )
+    const historyUnsubscribe = onSnapshot(
+      query(
+        collection(firestore, 'serviceRequests', requestId, 'events'),
+        orderBy('createdAt', 'desc'),
+        limit(SERVICE_EVENT_HISTORY_LIMIT),
+      ),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        historySnapshot = snapshot
+        emit()
+      },
+      listeners.onError,
+    )
+
+    return () => {
+      requestUnsubscribe()
+      privateUnsubscribe()
+      historyUnsubscribe()
+      professionalUnsubscribe?.()
     }
   }
 
@@ -2968,6 +3271,8 @@ export function createServiceRequestRepository({
     getOwnRequest,
     getOwnRequestDetails,
     subscribeOwnRequestDetails,
+    subscribeOwnRequestsPage,
+    subscribeOwnRequestTracking,
     getCurrentProfessionalAssignment,
     subscribeProfessionalAppointmentsPage,
     subscribeProfessionalAppointmentDetails,

@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../components/layout/ClientLayout', () => ({
   ClientLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
 }))
+
+vi.mock('../../service-reports/components/ClientServiceReports', () => ({
+  ClientServiceReports: () => null,
+}))
 vi.mock('../../onboarding/components/ModeSwitcher', () => ({ ModeSwitcher: () => null }))
 vi.mock('../../auth/use-auth', () => ({ useAuth: mocks.useAuth }))
 vi.mock('../../onboarding/use-profile', () => ({ useProfile: mocks.useProfile }))

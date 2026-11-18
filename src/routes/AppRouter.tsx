@@ -126,6 +126,12 @@ const ServiceRequestPage = lazy(() =>
   })),
 )
 
+const ClientRequestsPage = lazy(() =>
+  import('../features/client-requests/pages/ClientRequestsPage').then((module) => ({
+    default: module.ClientRequestsPage,
+  })),
+)
+
 const AdminDashboardPage = lazy(() =>
   import('../features/admin/pages/AdminDashboardPage').then((module) => ({
     default: module.AdminDashboardPage,
@@ -141,6 +147,12 @@ const AdminProfessionalReviewPage = lazy(() =>
 const AdminServiceRequestsPage = lazy(() =>
   import('../features/admin/pages/AdminServiceRequestsPage').then((module) => ({
     default: module.AdminServiceRequestsPage,
+  })),
+)
+
+const AdminServiceReportsPage = lazy(() =>
+  import('../features/admin/pages/AdminServiceReportsPage').then((module) => ({
+    default: module.AdminServiceReportsPage,
   })),
 )
 
@@ -235,6 +247,38 @@ export function AppRouter() {
               </Suspense>
             }
           />
+          <Route
+            path="/admin/pendencias"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminServiceRequestsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin/pendencias/:requestId"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminServiceRequestsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin/relatos"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminServiceReportsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin/relatos/:reportId"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <AdminServiceReportsPage />
+              </Suspense>
+            }
+          />
         </Route>
         <Route element={<ProfileRoute />}>
           <Route path="/conta" element={<ProfileHomeRedirect />} />
@@ -273,6 +317,8 @@ export function AppRouter() {
                 </Suspense>
               }
             />
+            <Route path="/cliente/pedidos" element={<Suspense fallback={<RouteFallback />}><ClientRequestsPage /></Suspense>} />
+            <Route path="/cliente/pedidos/:requestId" element={<Suspense fallback={<RouteFallback />}><ClientRequestsPage /></Suspense>} />
           </Route>
           <Route element={<ModeRoute mode="professional" />}>
             <Route

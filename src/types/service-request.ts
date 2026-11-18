@@ -1,4 +1,5 @@
 import type { ProfessionalReviewStatus } from './professional-review'
+import type { ProfessionalImageMetadata } from './professional-profile'
 
 export const SERVICE_REQUEST_STATUSES = [
   'OPEN',
@@ -15,6 +16,7 @@ export const DISTRIBUTION_ROUND_REASONS = [
   'INITIAL',
   'CLIENT_EDIT',
   'PROFESSIONAL_CANCELLATION',
+  'ADMIN_INTERVENTION',
 ] as const
 export const ASSIGNMENT_STATUSES = ['ACTIVE', 'CANCELLED', 'COMPLETED'] as const
 export const SERVICE_EVENT_TYPES = [
@@ -26,6 +28,7 @@ export const SERVICE_EVENT_TYPES = [
   'PROFESSIONAL_CANCELLED_AND_REOPENED',
   'SERVICE_STARTED',
   'SERVICE_COMPLETED',
+  'ADMIN_REOPENED_FROM_REPORT',
 ] as const
 
 export const SERVICE_EVENT_REASON_CODES = [
@@ -37,6 +40,7 @@ export const SERVICE_EVENT_REASON_CODES = [
   'PROFESSIONAL_CANCELLATION',
   'PROFESSIONAL_START',
   'PROFESSIONAL_COMPLETION',
+  'ADMIN_REPORT_INTERVENTION',
 ] as const
 
 export const SERVICE_EVENT_HISTORY_LIMIT = 50
@@ -70,7 +74,7 @@ export interface ServiceRequestSummary {
   currentRoundId: string
   assignedProfessionalId: string | null
   currentAssignmentId: string | null
-  reopenReason: 'PROFESSIONAL_CANCELLATION' | null
+  reopenReason: 'PROFESSIONAL_CANCELLATION' | 'ADMIN_INTERVENTION' | null
   excludedProfessionalIds: string[]
 }
 
@@ -107,7 +111,7 @@ export interface ServiceAssignment {
   startedAt?: Date | null
   startedEventId?: string | null
   endedAt?: Date | null
-  endReason?: 'PROFESSIONAL_CANCELLATION' | 'CLIENT_CANCELLATION' | 'PROFESSIONAL_COMPLETION' | null
+  endReason?: 'PROFESSIONAL_CANCELLATION' | 'CLIENT_CANCELLATION' | 'PROFESSIONAL_COMPLETION' | 'ADMIN_INTERVENTION' | null
   endedEventId?: string
 }
 
@@ -148,7 +152,7 @@ export interface ProfessionalOpportunitySummary {
   periodStartAt: Date
   acceptUntil: Date
   round: number
-  reopenReason: 'PROFESSIONAL_CANCELLATION' | null
+  reopenReason: 'PROFESSIONAL_CANCELLATION' | 'ADMIN_INTERVENTION' | null
 }
 
 /**
@@ -222,7 +226,7 @@ export interface ServiceRequestEvent {
   type: ServiceEventType
   reasonCode: ServiceEventReasonCode
   actorId: string
-  actorRole: 'CLIENT' | 'PROFESSIONAL'
+  actorRole: 'CLIENT' | 'PROFESSIONAL' | 'ADMIN'
   round: number
   assignmentId: string | null
   fromStatus: ServiceRequestStatus
@@ -267,6 +271,38 @@ export interface ProfessionalAppointmentsPage {
 export interface OwnServiceRequestDetails {
   request: ServiceRequestSummary
   privateData: ServiceRequestPrivateData
+}
+
+export interface ClientRequestPageCursor {
+  createdAt: Date
+  requestId: string
+}
+
+export interface ClientRequestListItem {
+  request: ServiceRequestSummary
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface ClientRequestPage {
+  items: ClientRequestListItem[]
+  nextCursor: ClientRequestPageCursor | null
+}
+
+export interface ClientCurrentProfessional {
+  professionalId: string
+  publicName: string
+  headline: string
+  specialtyIds: string[]
+  profileImage: ProfessionalImageMetadata | null
+  portfolioImages: ProfessionalImageMetadata[]
+  rating: number | null
+  reviewCount: number | null
+}
+
+export interface ClientRequestTrackingDetails extends OwnServiceRequestDetails {
+  history: ServiceRequestEvent[]
+  currentProfessional: ClientCurrentProfessional | null
 }
 
 export type ServiceRequestErrorCode =

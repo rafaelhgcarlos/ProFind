@@ -1135,6 +1135,328 @@ service cloud.firestore {
           || professionalMatchesOpportunity(summary, request.auth.uid));
     }
 
+    function canReadServiceReport(reportId) {
+      let report = get(
+        /databases/$(database)/documents/serviceReports/$(reportId)
+      ).data;
+
+      return request.auth != null
+        && (request.auth.uid == report.clientId || isActiveAdmin());
+    }
+
+    function isValidServiceReportCreate(reportId) {
+      let data = request.resource.data;
+      let summaryPath = /databases/$(database)/documents/serviceRequests/$(data.requestId);
+      let summary = get(summaryPath).data;
+
+      return request.auth != null
+        && data.reportId == reportId
+        && data.operationKey == reportId
+        && reportId.matches('^[A-Za-z0-9_-]{20,100}$')
+        && data.clientId == request.auth.uid
+        && exists(summaryPath)
+        && summary.clientId == request.auth.uid
+        && data.requestId is string
+        && data.reason in ['NO_SHOW', 'SERVICE_PROBLEM', 'OTHER']
+        && data.description is string
+        && data.description.size() >= 10
+        && data.description.size() <= 500
+        && data.status == 'OPEN'
+        && data.requestStatusAtOpen == summary.status
+        && data.roundAtOpen == summary.round
+        && data.assignmentIdAtOpen == summary.currentAssignmentId
+        && data.professionalIdAtOpen == summary.assignedProfessionalId
+        && data.revision == 1
+        && data.lastEventId == 'opened'
+        && data.resolutionDecision == null
+        && data.proposedServiceDate == null
+        && data.proposedPeriod == null
+        && data.proposalRevision == 0
+        && data.clientAcknowledgedProposalRevision == null
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function hasValidReportUpdateEvent(reportId, before, after) {
+      let eventPath = /databases/$(database)/documents/serviceReports/$(reportId)/history/$(after.lastEventId);
+      let event = getAfter(eventPath).data;
+
+      return after.lastEventId is string
+        && after.lastEventId.matches('^[A-Za-z0-9_-]{1,160}$')
+        && !exists(eventPath)
+        && existsAfter(eventPath)
+        && event.eventId == after.lastEventId
+        && event.reportId == reportId
+        && event.requestId == before.requestId
+        && event.actorId == request.auth.uid
+        && event.fromStatus == before.status
+        && event.toStatus == after.status
+        && event.createdAt == request.time;
+    }
+
+    function isValidOpenedReportEvent(reportId, eventId) {
+      let reportPath = /databases/$(database)/documents/serviceReports/$(reportId);
+      let report = getAfter(reportPath).data;
+
+      return request.auth != null
+        && eventId == 'opened'
+        && !exists(reportPath)
+        && existsAfter(reportPath)
+        && report.lastEventId == eventId
+        && report.clientId == request.auth.uid
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.actorRole == 'CLIENT'
+        && request.resource.data.type == 'REPORT_OPENED'
+        && request.resource.data.reportId == reportId
+        && request.resource.data.requestId == report.requestId
+        && request.resource.data.fromStatus == null
+        && request.resource.data.toStatus == 'OPEN'
+        && request.resource.data.decision == null
+        && request.resource.data.justification == null
+        && request.resource.data.proposalRevision == null
+        && request.resource.data.createdAt == request.time;
+    }
+
+    function isClientReportAcknowledgement(reportId) {
+      let reportPath = /databases/$(database)/documents/serviceReports/$(reportId);
+      let before = get(reportPath).data;
+      let after = getAfter(reportPath).data;
+
+      return request.auth != null
+        && request.auth.uid == before.clientId
+        && before.status != 'RESOLVED'
+        && before.proposalRevision > 0
+        && before.proposedServiceDate is string
+        && before.proposedPeriod in ['MORNING', 'AFTERNOON', 'EVENING']
+        && after.diff(before).affectedKeys().hasOnly([
+          'clientAcknowledgedProposalRevision', 'clientAcknowledgedAt',
+          'clientAcknowledgedBy', 'revision', 'lastEventId', 'updatedAt'
+        ])
+        && after.clientAcknowledgedProposalRevision == before.proposalRevision
+        && after.clientAcknowledgedAt == request.time
+        && after.clientAcknowledgedBy == request.auth.uid
+        && after.revision == before.revision + 1
+        && after.updatedAt == request.time
+        && hasValidReportUpdateEvent(reportId, before, after)
+        && getAfter(
+          /databases/$(database)/documents/serviceReports/$(reportId)/history/$(after.lastEventId)
+        ).data.type == 'RESCHEDULE_ACKNOWLEDGED'
+        && getAfter(
+          /databases/$(database)/documents/serviceReports/$(reportId)/history/$(after.lastEventId)
+        ).data.actorRole == 'CLIENT'
+        && getAfter(
+          /databases/$(database)/documents/serviceReports/$(reportId)/history/$(after.lastEventId)
+        ).data.proposalRevision == before.proposalRevision;
+    }
+
+    function isAdminServiceReportUpdate(reportId) {
+      let reportPath = /databases/$(database)/documents/serviceReports/$(reportId);
+      let before = get(reportPath).data;
+      let after = getAfter(reportPath).data;
+      let event = getAfter(
+        /databases/$(database)/documents/serviceReports/$(reportId)/history/$(after.lastEventId)
+      ).data;
+
+      return isActiveAdmin()
+        && before.status != 'RESOLVED'
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'reviewedAt', 'reviewedBy', 'resolutionDecision',
+          'resolutionJustification', 'resolvedAt', 'resolvedBy',
+          'proposedServiceDate', 'proposedPeriod', 'proposalRevision',
+          'proposedAt', 'proposedBy', 'clientAcknowledgedProposalRevision',
+          'clientAcknowledgedAt', 'clientAcknowledgedBy', 'revision',
+          'lastEventId', 'updatedAt'
+        ])
+        && after.revision == before.revision + 1
+        && after.updatedAt == request.time
+        && hasValidReportUpdateEvent(reportId, before, after)
+        && event.actorRole == 'ADMIN'
+        && ((after.status == 'UNDER_REVIEW'
+            && after.reviewedAt == request.time
+            && after.reviewedBy == request.auth.uid
+            && after.resolutionDecision == null
+            && after.resolutionJustification == null
+            && after.resolvedAt == null
+            && after.resolvedBy == null
+            && after.proposalRevision in [before.proposalRevision, before.proposalRevision + 1]
+            && (after.proposalRevision == before.proposalRevision
+              || (after.proposedServiceDate is string
+                && after.proposedPeriod in ['MORNING', 'AFTERNOON', 'EVENING']
+                && after.proposedAt == request.time
+                && after.proposedBy == request.auth.uid
+                && after.clientAcknowledgedProposalRevision == null
+                && after.clientAcknowledgedAt == null
+                && after.clientAcknowledgedBy == null)))
+          || (after.status == 'RESOLVED'
+            && after.resolutionDecision in [
+              'NO_OPERATIONAL_CHANGE', 'REOPEN_CURRENT_SCHEDULE',
+              'RESCHEDULE_AND_REOPEN'
+            ]
+            && after.resolutionJustification is string
+            && after.resolutionJustification.size() >= 10
+            && after.resolutionJustification.size() <= 1000
+            && after.resolvedAt == request.time
+            && after.resolvedBy == request.auth.uid
+            && event.type == 'REPORT_RESOLVED'
+            && event.decision == after.resolutionDecision
+            && event.justification == after.resolutionJustification
+            && (after.resolutionDecision == 'NO_OPERATIONAL_CHANGE'
+              || isAdminReportReopenCompanion(before.requestId))));
+    }
+
+    function isAdminReportReopenCompanion(requestId) {
+      let before = get(
+        /databases/$(database)/documents/serviceRequests/$(requestId)
+      ).data;
+      let after = getAfter(
+        /databases/$(database)/documents/serviceRequests/$(requestId)
+      ).data;
+      let report = getAfter(
+        /databases/$(database)/documents/serviceReports/$(after.lastAdminReportId)
+      ).data;
+
+      return isActiveAdmin()
+        && before.status == 'ASSIGNED'
+        && before.currentAssignmentId is string
+        && before.assignedProfessionalId is string
+        && after.status == 'OPEN'
+        && after.lastAdminReportId is string
+        && after.lastAdminEventId is string
+        && report.status == 'RESOLVED'
+        && report.resolvedBy == request.auth.uid
+        && report.requestId == requestId
+        && report.assignmentIdAtOpen == before.currentAssignmentId
+        && report.professionalIdAtOpen == before.assignedProfessionalId
+        && report.roundAtOpen == before.round
+        && report.resolutionDecision in [
+          'REOPEN_CURRENT_SCHEDULE', 'RESCHEDULE_AND_REOPEN'
+        ];
+    }
+
+    function isAdminReportReopenTransition(requestId) {
+      let before = get(
+        /databases/$(database)/documents/serviceRequests/$(requestId)
+      ).data;
+      let after = getAfter(
+        /databases/$(database)/documents/serviceRequests/$(requestId)
+      ).data;
+      let report = getAfter(
+        /databases/$(database)/documents/serviceReports/$(after.lastAdminReportId)
+      ).data;
+      let oldAssignment = get(
+        /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(before.currentAssignmentId)
+      ).data;
+      let assignment = getAfter(
+        /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(before.currentAssignmentId)
+      ).data;
+      let reservationPath = /databases/$(database)/documents/professionalReservations/$(before.assignedProfessionalId)/slots/$(oldAssignment.reservationId);
+      let nextRoundPath = /databases/$(database)/documents/serviceRequests/$(requestId)/rounds/$(after.currentRoundId);
+      let nextRound = getAfter(nextRoundPath).data;
+      let event = getAfter(
+        /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(after.lastAdminEventId)
+      ).data;
+
+      return isActiveAdmin()
+        && before.status == 'ASSIGNED'
+        && before.currentAssignmentId is string
+        && before.assignedProfessionalId is string
+        && after.status == 'OPEN'
+        && after.round == before.round + 1
+        && after.currentRoundId == 'round-' + string(after.round)
+        && after.assignedProfessionalId == null
+        && after.currentAssignmentId == null
+        && after.reopenReason == 'ADMIN_INTERVENTION'
+        && after.excludedProfessionalIds == [before.assignedProfessionalId]
+        && after.acceptUntil == after.periodStartAt - duration.value(30, 'm')
+        && request.time < after.acceptUntil
+        && after.lastAdminReportId is string
+        && after.lastAdminEventId is string
+        && after.updatedAt == request.time
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'round', 'currentRoundId', 'assignedProfessionalId',
+          'currentAssignmentId', 'reopenReason', 'excludedProfessionalIds',
+          'serviceDate', 'period', 'periodStartAt', 'acceptUntil',
+          'lastAdminReportId', 'lastAdminEventId', 'updatedAt'
+        ])
+        && exists(
+          /databases/$(database)/documents/serviceReports/$(after.lastAdminReportId)
+        )
+        && existsAfter(
+          /databases/$(database)/documents/serviceReports/$(after.lastAdminReportId)
+        )
+        && report.status == 'RESOLVED'
+        && report.resolvedBy == request.auth.uid
+        && report.requestId == requestId
+        && report.assignmentIdAtOpen == before.currentAssignmentId
+        && report.professionalIdAtOpen == before.assignedProfessionalId
+        && report.roundAtOpen == before.round
+        && report.resolutionDecision in [
+          'REOPEN_CURRENT_SCHEDULE', 'RESCHEDULE_AND_REOPEN'
+        ]
+        && ((report.resolutionDecision == 'REOPEN_CURRENT_SCHEDULE'
+            && after.serviceDate == before.serviceDate
+            && after.period == before.period
+            && after.periodStartAt == before.periodStartAt
+            && after.acceptUntil == before.acceptUntil)
+          || (report.resolutionDecision == 'RESCHEDULE_AND_REOPEN'
+            && report.proposedServiceDate == after.serviceDate
+            && report.proposedPeriod == after.period
+            && report.clientAcknowledgedProposalRevision == report.proposalRevision
+            && report.clientAcknowledgedBy == report.clientId))
+        && exists(
+          /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(before.currentAssignmentId)
+        )
+        && existsAfter(
+          /databases/$(database)/documents/serviceRequests/$(requestId)/assignments/$(before.currentAssignmentId)
+        )
+        && oldAssignment.status == 'ACTIVE'
+        && oldAssignment.get('startedAt', null) == null
+        && oldAssignment.professionalId == before.assignedProfessionalId
+        && assignment.diff(oldAssignment).affectedKeys().hasOnly([
+          'status', 'endedAt', 'endReason', 'endedEventId',
+          'cancellationReason'
+        ])
+        && assignment.status == 'CANCELLED'
+        && assignment.endedAt == request.time
+        && assignment.endReason == 'ADMIN_INTERVENTION'
+        && assignment.endedEventId == after.lastAdminEventId
+        && assignment.cancellationReason == report.resolutionJustification
+        && exists(reservationPath)
+        && !existsAfter(reservationPath)
+        && !exists(nextRoundPath)
+        && existsAfter(nextRoundPath)
+        && nextRound.roundId == after.currentRoundId
+        && nextRound.requestId == requestId
+        && nextRound.round == after.round
+        && nextRound.status == 'OPEN'
+        && nextRound.reason == 'ADMIN_INTERVENTION'
+        && nextRound.excludedProfessionalIds == [before.assignedProfessionalId]
+        && nextRound.previousAssignmentId == before.currentAssignmentId
+        && nextRound.openedAt == request.time
+        && nextRound.closedAt == null
+        && nextRound.closedReason == null
+        && nextRound.updatedAt == request.time
+        && !exists(
+          /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(after.lastAdminEventId)
+        )
+        && existsAfter(
+          /databases/$(database)/documents/serviceRequests/$(requestId)/events/$(after.lastAdminEventId)
+        )
+        && event.eventId == after.lastAdminEventId
+        && event.type == 'ADMIN_REOPENED_FROM_REPORT'
+        && event.reasonCode == 'ADMIN_REPORT_INTERVENTION'
+        && event.actorId == request.auth.uid
+        && event.actorRole == 'ADMIN'
+        && event.round == before.round
+        && event.targetRound == after.round
+        && event.assignmentId == before.currentAssignmentId
+        && event.reason == report.resolutionJustification
+        && event.fromStatus == 'ASSIGNED'
+        && event.toStatus == 'OPEN'
+        && event.reportId == report.reportId
+        && event.createdAt == request.time;
+    }
+
     function hasValidLegalAcceptances() {
       let acceptances = request.resource.data.legalAcceptances;
 
@@ -2331,6 +2653,7 @@ service cloud.firestore {
         && request.query.limit != null
         && request.query.limit <= 50
         && (isActiveAdmin()
+          || resource.data.clientId == request.auth.uid
           || (resource.data.status == 'OPEN'
             && professionalMatchesOpportunity(
               resource.data,
@@ -2339,7 +2662,11 @@ service cloud.firestore {
           || (resource.data.status in ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED']
             && resource.data.assignedProfessionalId == request.auth.uid));
       allow get: if request.auth != null
-        && (resource == null || canReadServiceRequest(requestId));
+        && (resource == null
+          || request.auth.uid == resource.data.clientId
+          || request.auth.uid == resource.data.assignedProfessionalId
+          || isActiveAdmin()
+          || professionalMatchesOpportunity(resource.data, request.auth.uid));
       allow create: if isServiceRequestCreation(requestId);
       allow delete: if false;
       allow update: if request.auth != null
@@ -2348,7 +2675,8 @@ service cloud.firestore {
           || isCompletionTransition(requestId, request.auth.uid)
           || isCancellationTransition(requestId, request.auth.uid)
           || isClientEditTransition(requestId, request.auth.uid)
-          || isClientCancellationTransition(requestId, request.auth.uid));
+          || isClientCancellationTransition(requestId, request.auth.uid)
+          || isAdminReportReopenTransition(requestId));
 
       match /rounds/{roundId} {
         allow get: if request.auth != null
@@ -2364,6 +2692,11 @@ service cloud.firestore {
             ).data.currentRoundId == roundId)
           || (request.auth != null
             && isClientEditCompanion(requestId, request.auth.uid)
+            && getAfter(
+              /databases/$(database)/documents/serviceRequests/$(requestId)
+            ).data.currentRoundId == roundId)
+          || (isActiveAdmin()
+            && isAdminReportReopenCompanion(requestId)
             && getAfter(
               /databases/$(database)/documents/serviceRequests/$(requestId)
             ).data.currentRoundId == roundId);
@@ -2411,7 +2744,8 @@ service cloud.firestore {
           && (isStartTransition(requestId, request.auth.uid)
             || isCompletionTransition(requestId, request.auth.uid)
             || isCancellationTransition(requestId, request.auth.uid)
-            || isClientCancellationTransition(requestId, request.auth.uid))
+            || isClientCancellationTransition(requestId, request.auth.uid)
+            || isAdminReportReopenCompanion(requestId))
           && get(
             /databases/$(database)/documents/serviceRequests/$(requestId)
           ).data.currentAssignmentId == assignmentId;
@@ -2471,7 +2805,15 @@ service cloud.firestore {
               && isClientEditCompanion(
                 requestId,
                 request.auth.uid
-              )));
+              ))
+            || (request.resource.data.type == 'ADMIN_REOPENED_FROM_REPORT'
+              && isAdminReportReopenCompanion(requestId)
+              && getAfter(
+                /databases/$(database)/documents/serviceRequests/$(requestId)
+              ).data.lastAdminEventId == eventId
+              && request.resource.data.reportId == getAfter(
+                /databases/$(database)/documents/serviceRequests/$(requestId)
+              ).data.lastAdminReportId));
         allow update, delete: if false;
       }
     }
@@ -2522,6 +2864,59 @@ service cloud.firestore {
       allow list, delete: if false;
     }
 
+    match /serviceReports/{reportId} {
+      allow get: if request.auth != null
+        && (resource == null || canReadServiceReport(reportId));
+      allow list: if request.auth != null
+        && request.query.limit != null
+        && request.query.limit <= 25
+        && (isActiveAdmin() || request.auth.uid == resource.data.clientId);
+      allow create: if isValidServiceReportCreate(reportId);
+      allow update: if isClientReportAcknowledgement(reportId)
+        || isAdminServiceReportUpdate(reportId);
+      allow delete: if false;
+
+      match /history/{eventId} {
+        allow get: if request.auth != null
+          && (resource == null || canReadServiceReport(reportId));
+        allow list: if request.auth != null
+          && request.query.limit != null
+          && request.query.limit <= 50
+          && canReadServiceReport(reportId);
+        allow create: if request.auth != null
+          && request.resource.data.eventId == eventId
+          && (isValidOpenedReportEvent(reportId, eventId)
+            || (exists(
+                /databases/$(database)/documents/serviceReports/$(reportId)
+              )
+              && getAfter(
+                /databases/$(database)/documents/serviceReports/$(reportId)
+              ).data.lastEventId == eventId
+              && (isClientReportAcknowledgement(reportId)
+                || isAdminServiceReportUpdate(reportId))));
+        allow update, delete: if false;
+      }
+
+      match /adminNotes/{noteId} {
+        allow get, list: if isActiveAdmin();
+        allow create: if isActiveAdmin()
+          && request.resource.data.keys().hasAll([
+            'noteId', 'reportId', 'authorId', 'text', 'createdAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'noteId', 'reportId', 'authorId', 'text', 'createdAt'
+          ])
+          && request.resource.data.noteId == noteId
+          && request.resource.data.reportId == reportId
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 10
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
     match /professionalReservations/{professionalId}/slots/{slotId} {
       allow get: if isDocumentOwner(professionalId)
         || (request.auth != null
@@ -2548,7 +2943,8 @@ service cloud.firestore {
           || isClientCancellationTransition(
             resource.data.requestId,
             request.auth.uid
-          ));
+          )
+          || isAdminReportReopenCompanion(resource.data.requestId));
     }
 
     // O catálogo é público, mas sua manutenção acontece somente por

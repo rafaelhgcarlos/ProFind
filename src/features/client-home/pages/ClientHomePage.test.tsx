@@ -128,7 +128,11 @@ describe('ClientHomePage', () => {
         name: 'Solicitar Jardineiro — Serviços residenciais',
       }),
     ).toHaveAttribute('href', '/cliente/solicitar?specialty=gardener')
-    expect(screen.getByText('Em breve: acompanhe seus pedidos por aqui.')).toBeInTheDocument()
+    expect(screen.getByText('Acompanhe cada pedido e suas atualizações em tempo real.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ver meus pedidos' })).toHaveAttribute(
+      'href',
+      '/cliente/pedidos',
+    )
   })
 
   it('leva o foco à busca ao abrir a ação da navegação por hash', () => {

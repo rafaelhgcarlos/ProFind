@@ -14,8 +14,34 @@ export interface AdminRequestCursor {
   requestId: string
 }
 
+export type AdminOperationalState = ServiceRequestStatus | 'REPLACEMENT'
+
+export type AdminPendingKind =
+  | 'ALL'
+  | 'WITHOUT_ACCEPTANCE'
+  | 'ACCEPTANCE_EXPIRED'
+  | 'PERIOD_OVERDUE'
+  | 'OPEN_REPORT'
+  | 'RESTRICTED_PROFESSIONAL'
+  | 'NO_ELIGIBLE'
+
+export type AdminEligibilityVerification =
+  | 'NOT_CHECKED'
+  | 'ELIGIBLE_FOUND'
+  | 'NONE_FOUND'
+  | 'INCONCLUSIVE'
+
+export interface AdminRelatedReport {
+  reportId: string
+  status: 'OPEN' | 'UNDER_REVIEW' | 'RESOLVED'
+  reason: 'NO_SHOW' | 'SERVICE_PROBLEM' | 'OTHER'
+  createdAt: Date
+}
+
 export interface AdminRequestFilters {
   status?: ServiceRequestStatus
+  operationalState?: AdminOperationalState
+  pending?: AdminPendingKind
   period?: ServicePeriod
   scheduledFrom?: string
   scheduledTo?: string
@@ -30,6 +56,9 @@ export interface AdminRequestListItem {
   stateCode: string
   createdAt: Date
   responsibleName: string | null
+  responsibleRestricted: boolean
+  openReportCount: number
+  eligibilityVerification: AdminEligibilityVerification
 }
 
 export interface AdminRequestPage {
@@ -67,9 +96,17 @@ export interface AdminRequestDetail {
   createdAt: Date
   updatedAt: Date
   responsibleName: string | null
+  responsibleRestricted: boolean
+  relatedReports: AdminRelatedReport[]
   rounds: AdminDistributionRound[]
   assignments: AdminAssignment[]
   history: ServiceRequestEvent[]
+}
+
+export interface AdminEligibilityResult {
+  verification: AdminEligibilityVerification
+  checkedProfessionals: number
+  eligibleProfessionalIds: string[]
 }
 
 export type AdminRequestErrorCode =

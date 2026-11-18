@@ -38,6 +38,7 @@ import { createProfessionalAvailabilityService } from '../src/services/professio
 import { createAdminServiceRequestService } from '../src/services/admin-service-request.service'
 import { createProfessionalReviewService } from '../src/services/professional-review.service'
 import { createServiceRequestService } from '../src/services/service-request.service'
+import { createServiceReportService } from '../src/services/service-report.service'
 import {
   assignmentEventId,
   completionEventId,
@@ -412,6 +413,116 @@ afterAll(async () => {
 })
 
 describe('service request transactional proof', () => {
+  it('permite lista paginada somente ao cliente dono e bloqueia acesso cruzado', async () => {
+    await seedScenario(['request-1', 'request-2'])
+    const ownerFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const otherFirestore = testEnvironment.authenticatedContext('client-other').firestore()
+    const ownerQuery = query(
+      collection(ownerFirestore, 'serviceRequests'),
+      where('clientId', '==', clientId),
+      orderBy('createdAt', 'desc'),
+      orderBy(documentId(), 'desc'),
+      limit(11),
+    )
+
+    const ownerPage = await assertSucceeds(getDocs(ownerQuery))
+    expect(ownerPage.docs.map((snapshot) => snapshot.id).sort()).toEqual([
+      'request-1',
+      'request-2',
+    ])
+    await assertFails(getDoc(doc(otherFirestore, 'serviceRequests', 'request-1')))
+    await assertFails(getDocs(query(
+      collection(otherFirestore, 'serviceRequests'),
+      where('clientId', '==', clientId),
+      orderBy('createdAt', 'desc'),
+      orderBy(documentId(), 'desc'),
+      limit(11),
+    )))
+  })
+
+  it('atualiza o acompanhamento sem recarga e remove o antigo responsável na substituição', async () => {
+    await seedScenario()
+    const client = serviceFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+    )
+    const first = serviceFor(
+      testEnvironment.authenticatedContext(professionalA).firestore(),
+      professionalA,
+    )
+    const second = serviceFor(
+      testEnvironment.authenticatedContext(professionalB).firestore(),
+      professionalB,
+    )
+    const snapshots: Array<{ status: string; professionalId: string | null }> = []
+    const waiters: Array<{
+      predicate(value: { status: string; professionalId: string | null }): boolean
+      resolve(value: { status: string; professionalId: string | null }): void
+      reject(error: unknown): void
+    }> = []
+    const waitForTracking = (
+      label: string,
+      predicate: (value: { status: string; professionalId: string | null }) => boolean,
+    ) => {
+      const existing = snapshots.find(predicate)
+      if (existing) return Promise.resolve(existing)
+      return new Promise<{ status: string; professionalId: string | null }>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(
+            `Acompanhamento não chegou a ${label}: ${JSON.stringify(snapshots)}`,
+          )), 4_000)
+        waiters.push({
+          predicate,
+          resolve(value) {
+            clearTimeout(timer)
+            resolve(value)
+          },
+          reject(error) {
+            clearTimeout(timer)
+            reject(error)
+          },
+        })
+      })
+    }
+    const unsubscribe = client.subscribeOwnRequestTracking({
+      requestId: 'request-1',
+      onDetails(snapshot) {
+        const value = {
+          status: snapshot.details.request.status,
+          professionalId: snapshot.details.currentProfessional?.professionalId ?? null,
+        }
+        snapshots.push(value)
+        for (const waiter of [...waiters]) {
+          if (!waiter.predicate(value)) continue
+          waiters.splice(waiters.indexOf(waiter), 1)
+          waiter.resolve(value)
+        }
+      },
+      onProfileError(error) {
+        for (const waiter of waiters.splice(0)) waiter.reject(error)
+      },
+      onError(error) {
+        for (const waiter of waiters.splice(0)) waiter.reject(error)
+      },
+    })
+
+    try {
+      await waitForTracking('OPEN inicial', (value) => value.status === 'OPEN' && value.professionalId === null)
+      const accepted = await first.acceptRequest({ requestId: 'request-1', expectedRound: 1 })
+      await waitForTracking('ASSIGNED com A', (value) => value.status === 'ASSIGNED' && value.professionalId === professionalA)
+      await first.cancelAssignment({
+        requestId: 'request-1',
+        expectedAssignmentId: accepted.assignmentId,
+        reason: 'Não conseguirei comparecer ao atendimento agendado.',
+      })
+      await waitForTracking('OPEN sem A', (value) => value.status === 'OPEN' && value.professionalId === null)
+      await second.acceptRequest({ requestId: 'request-1', expectedRound: 2 })
+      await waitForTracking('ASSIGNED com B', (value) => value.status === 'ASSIGNED' && value.professionalId === professionalB)
+      expect(snapshots.at(-1)).toEqual({ status: 'ASSIGNED', professionalId: professionalB })
+    } finally {
+      unsubscribe()
+    }
+  }, 15_000)
+
   function creationInput(operationKey = 'request-operation-key-000001') {
     return {
       operationKey,
@@ -536,6 +647,89 @@ describe('service request transactional proof', () => {
         limit(50),
       )),
     )
+  })
+
+  it('calcula pendências, separa substituição e verifica elegibilidade sem cancelar compromisso restrito', async () => {
+    await seedScenario(['request-1', 'request-2', 'request-3'])
+    const adminFirestore = testEnvironment.authenticatedContext(adminId).firestore()
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const professionalFirestore = testEnvironment.authenticatedContext(professionalA).firestore()
+    const admin = createAdminServiceRequestService({
+      firestore: adminFirestore,
+      getActorId: () => adminId,
+    })
+    await serviceFor(professionalFirestore, professionalA).acceptRequest({
+      requestId: 'request-2',
+      expectedRound: 1,
+    })
+    await createServiceReportService({
+      firestore: clientFirestore,
+      getActorId: () => clientId,
+    }).openReport({
+      operationKey: 'admin-pending-report-0001',
+      requestId: 'request-1',
+      reason: 'SERVICE_PROBLEM',
+      description: 'Relato usado para validar a fila administrativa de pendências.',
+    })
+    await inspect(async (firestore) => {
+      await updateDoc(doc(firestore, 'professionalOperationalProfiles', professionalA), {
+        active: false,
+        reviewStatus: 'SUSPENDED',
+      })
+      await updateDoc(doc(firestore, 'serviceRequests', 'request-3'), {
+        round: 2,
+        currentRoundId: 'round-2',
+        reopenReason: 'PROFESSIONAL_CANCELLATION',
+      })
+    })
+
+    const reports = await admin.listRequests({ pending: 'OPEN_REPORT', pageSize: 5 })
+    expect(reports.items.map((item) => item.request.requestId)).toContain('request-1')
+    expect(reports.items[0].openReportCount).toBeGreaterThan(0)
+
+    const restricted = await admin.listRequests({
+      pending: 'RESTRICTED_PROFESSIONAL',
+      pageSize: 5,
+    })
+    expect(restricted.items).toEqual([
+      expect.objectContaining({
+        responsibleRestricted: true,
+        request: expect.objectContaining({
+          requestId: 'request-2',
+          status: 'ASSIGNED',
+          assignedProfessionalId: professionalA,
+        }),
+      }),
+    ])
+    const replacement = await admin.listRequests({
+      operationalState: 'REPLACEMENT',
+      pageSize: 5,
+    })
+    expect(replacement.items.map((item) => item.request.requestId)).toEqual(['request-3'])
+
+    await inspect(async (firestore) => {
+      await Promise.all([professionalA, professionalB, professionalC].map((professionalId) =>
+        updateDoc(doc(firestore, 'professionalAvailability', professionalId, 'slots', slotId), {
+          available: false,
+        }),
+      ))
+    })
+    await expect(admin.verifyEligibility('request-1')).resolves.toMatchObject({
+      verification: 'NONE_FOUND',
+      checkedProfessionals: 2,
+      eligibleProfessionalIds: [],
+    })
+    const detail = await admin.getDetail('request-2')
+    expect(detail.responsibleRestricted).toBe(true)
+    expect(detail.request.status).toBe('ASSIGNED')
+
+    const common = createAdminServiceRequestService({
+      firestore: testEnvironment.authenticatedContext('common-user').firestore(),
+      getActorId: () => 'common-user',
+    })
+    await expect(common.verifyEligibility('request-1')).rejects.toMatchObject({
+      code: 'permission-denied',
+    })
   })
 
   async function makeRequestStartable(requestId = 'request-1') {
@@ -3940,5 +4134,247 @@ describe('service request transactional proof', () => {
         expect(assignments.size).toBe(0)
       }
     })
+  })
+})
+
+describe('service report authorization and intervention', () => {
+  function reportsFor(firestore: Firestore, actorId: string) {
+    return createServiceReportService({
+      firestore,
+      getActorId: () => actorId,
+      now: () => new Date(),
+    })
+  }
+
+  const reportInput = {
+    operationKey: 'report-operation-key-0001',
+    requestId: 'request-1',
+    reason: 'NO_SHOW' as const,
+    description: 'O profissional nÃ£o compareceu no perÃ­odo combinado.',
+  }
+
+  it('aceita um Ãºnico relato em retry concorrente e bloqueia acesso cruzado', async () => {
+    await seedScenario()
+    const first = reportsFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+    )
+    const second = reportsFor(
+      testEnvironment.authenticatedContext(clientId).firestore(),
+      clientId,
+    )
+
+    const results = await Promise.all([
+      first.openReport(reportInput),
+      second.openReport(reportInput),
+    ])
+    expect(results.filter((result) => result.idempotent)).toHaveLength(1)
+    expect(results.filter((result) => !result.idempotent)).toHaveLength(1)
+
+    const otherClient = testEnvironment.authenticatedContext('other-client').firestore()
+    const professional = testEnvironment.authenticatedContext(professionalA).firestore()
+    const admin = testEnvironment.authenticatedContext(adminId).firestore()
+    await assertFails(getDoc(doc(otherClient, 'serviceReports', reportInput.operationKey)))
+    await assertFails(getDoc(doc(professional, 'serviceReports', reportInput.operationKey)))
+    await assertSucceeds(getDoc(doc(admin, 'serviceReports', reportInput.operationKey)))
+    await assertFails(setDoc(doc(otherClient, 'serviceReports', 'report-operation-key-0002'), {
+      reportId: 'report-operation-key-0002',
+      requestId: 'request-1',
+      clientId,
+      reason: 'OTHER',
+      description: 'Tentativa de relato cruzado que deve ser bloqueada.',
+    }))
+  })
+
+  it('mantÃ©m notas administrativas privadas e expÃµe somente a resposta ao cliente', async () => {
+    await seedScenario()
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const adminFirestore = testEnvironment.authenticatedContext(adminId).firestore()
+    const client = reportsFor(clientFirestore, clientId)
+    const admin = reportsFor(adminFirestore, adminId)
+    const opened = await client.openReport(reportInput)
+
+    await admin.reviewReport({
+      reportId: opened.report.reportId,
+      operationKey: 'review-operation-key-0001',
+      expectedRevision: opened.report.revision,
+      internalNote: 'Validar contato e horÃ¡rio antes de tomar uma decisÃ£o.',
+    })
+
+    const notePath = doc(
+      clientFirestore,
+      'serviceReports',
+      opened.report.reportId,
+      'adminNotes',
+      'review-operation-key-0001',
+    )
+    await assertFails(getDoc(notePath))
+    await assertSucceeds(getDoc(doc(
+      adminFirestore,
+      'serviceReports',
+      opened.report.reportId,
+      'adminNotes',
+      'review-operation-key-0001',
+    )))
+
+    await admin.resolveReport({
+      reportId: opened.report.reportId,
+      operationKey: 'resolve-operation-key-001',
+      expectedRevision: 2,
+      decision: 'NO_OPERATIONAL_CHANGE',
+      justification: 'O caso foi analisado e permanecerÃ¡ registrado sem alteraÃ§Ã£o automÃ¡tica do atendimento.',
+    })
+    const clientView = await client.listOwnReports('request-1')
+    expect(clientView[0]).toMatchObject({
+      status: 'RESOLVED',
+      resolutionDecision: 'NO_OPERATIONAL_CHANGE',
+    })
+    expect(clientView[0].resolutionJustification).toMatch(/permanecerÃ¡ registrado/i)
+  })
+
+  it('reabre atribuiÃ§Ã£o elegÃ­vel com pedido, reserva, rodada e histÃ³rico consistentes', async () => {
+    await seedScenario()
+    const professionalFirestore = testEnvironment.authenticatedContext(professionalA).firestore()
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const adminFirestore = testEnvironment.authenticatedContext(adminId).firestore()
+    await serviceFor(professionalFirestore, professionalA).acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+
+    const client = reportsFor(clientFirestore, clientId)
+    const opened = await client.openReport(reportInput)
+    expect(opened.report.assignmentIdAtOpen).toBe('round-1')
+
+    await reportsFor(adminFirestore, adminId).resolveReport({
+      reportId: opened.report.reportId,
+      operationKey: 'resolve-operation-key-002',
+      expectedRevision: 1,
+      decision: 'REOPEN_CURRENT_SCHEDULE',
+      justification: 'A atribuiÃ§Ã£o foi encerrada e o mesmo pedido voltou para uma nova rodada de aceitaÃ§Ã£o.',
+    })
+
+    await inspect(async (firestore) => {
+      const [request, assignment, reservation, round, report] = await Promise.all([
+        getDoc(doc(firestore, 'serviceRequests', 'request-1')),
+        getDoc(doc(firestore, 'serviceRequests', 'request-1', 'assignments', 'round-1')),
+        getDoc(doc(firestore, 'professionalReservations', professionalA, 'slots', slotId)),
+        getDoc(doc(firestore, 'serviceRequests', 'request-1', 'rounds', 'round-2')),
+        getDoc(doc(firestore, 'serviceReports', reportInput.operationKey)),
+      ])
+      expect(request.data()).toMatchObject({
+        status: 'OPEN',
+        round: 2,
+        currentRoundId: 'round-2',
+        assignedProfessionalId: null,
+        currentAssignmentId: null,
+        reopenReason: 'ADMIN_INTERVENTION',
+      })
+      expect(assignment.data()).toMatchObject({
+        status: 'CANCELLED',
+        endReason: 'ADMIN_INTERVENTION',
+      })
+      expect(reservation.exists()).toBe(false)
+      expect(round.data()).toMatchObject({
+        status: 'OPEN',
+        reason: 'ADMIN_INTERVENTION',
+        previousAssignmentId: 'round-1',
+      })
+      expect(report.data()).toMatchObject({
+        status: 'RESOLVED',
+        resolutionDecision: 'REOPEN_CURRENT_SCHEDULE',
+      })
+    })
+  })
+
+  it('exige proposta futura e ciÃªncia autenticada antes de reagendar e reabrir', async () => {
+    await seedScenario()
+    const professionalFirestore = testEnvironment.authenticatedContext(professionalA).firestore()
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const adminFirestore = testEnvironment.authenticatedContext(adminId).firestore()
+    await serviceFor(professionalFirestore, professionalA).acceptRequest({
+      requestId: 'request-1',
+      expectedRound: 1,
+    })
+    const client = reportsFor(clientFirestore, clientId)
+    const admin = reportsFor(adminFirestore, adminId)
+    const opened = await client.openReport(reportInput)
+    const proposedServiceDate = saoPauloDate(12)
+
+    await admin.reviewReport({
+      reportId: opened.report.reportId,
+      operationKey: 'review-operation-key-0002',
+      expectedRevision: 1,
+      internalNote: 'O horÃ¡rio original nÃ£o serÃ¡ reutilizado sem uma nova condiÃ§Ã£o aceita pelo cliente.',
+      proposedServiceDate,
+      proposedPeriod: 'AFTERNOON',
+    })
+
+    await expect(admin.resolveReport({
+      reportId: opened.report.reportId,
+      operationKey: 'resolve-operation-key-006',
+      expectedRevision: 2,
+      decision: 'RESCHEDULE_AND_REOPEN',
+      justification: 'O pedido serÃ¡ reaberto nas novas condiÃ§Ãµes apÃ³s a confirmaÃ§Ã£o expressa do cliente.',
+    })).rejects.toMatchObject({ code: 'acknowledgement-required' })
+
+    await client.acknowledgeProposal(opened.report.reportId)
+    await admin.resolveReport({
+      reportId: opened.report.reportId,
+      operationKey: 'resolve-operation-key-007',
+      expectedRevision: 3,
+      decision: 'RESCHEDULE_AND_REOPEN',
+      justification: 'O pedido foi reaberto nas novas condiÃ§Ãµes confirmadas expressamente pelo cliente.',
+    })
+
+    await inspect(async (firestore) => {
+      const request = await getDoc(doc(firestore, 'serviceRequests', 'request-1'))
+      const report = await getDoc(doc(firestore, 'serviceReports', opened.report.reportId))
+      expect(request.data()).toMatchObject({
+        status: 'OPEN',
+        serviceDate: proposedServiceDate,
+        period: 'AFTERNOON',
+        round: 2,
+      })
+      expect(report.data()).toMatchObject({
+        status: 'RESOLVED',
+        resolutionDecision: 'RESCHEDULE_AND_REOPEN',
+        proposalRevision: 1,
+        clientAcknowledgedProposalRevision: 1,
+        clientAcknowledgedBy: clientId,
+      })
+    })
+  })
+
+  it('rejeita decisÃµes administrativas concorrentes e retries antigos', async () => {
+    await seedScenario()
+    const clientFirestore = testEnvironment.authenticatedContext(clientId).firestore()
+    const adminFirestore = testEnvironment.authenticatedContext(adminId).firestore()
+    await reportsFor(clientFirestore, clientId).openReport(reportInput)
+    const first = reportsFor(adminFirestore, adminId).resolveReport({
+      reportId: reportInput.operationKey,
+      operationKey: 'resolve-operation-key-003',
+      expectedRevision: 1,
+      decision: 'NO_OPERATIONAL_CHANGE',
+      justification: 'Primeira decisÃ£o administrativa registrada para encerrar o relato sem alterar o pedido.',
+    })
+    const second = reportsFor(adminFirestore, adminId).resolveReport({
+      reportId: reportInput.operationKey,
+      operationKey: 'resolve-operation-key-004',
+      expectedRevision: 1,
+      decision: 'NO_OPERATIONAL_CHANGE',
+      justification: 'Segunda decisÃ£o concorrente que nÃ£o pode substituir a primeira resoluÃ§Ã£o.',
+    })
+    const results = await Promise.allSettled([first, second])
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+
+    await expect(reportsFor(adminFirestore, adminId).resolveReport({
+      reportId: reportInput.operationKey,
+      operationKey: 'resolve-operation-key-005',
+      expectedRevision: 1,
+      decision: 'NO_OPERATIONAL_CHANGE',
+      justification: 'Retry antigo nÃ£o deve alterar uma resoluÃ§Ã£o administrativa posterior jÃ¡ persistida.',
+    })).rejects.toMatchObject({ code: 'stale-report' })
   })
 })

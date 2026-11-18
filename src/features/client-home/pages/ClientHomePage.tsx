@@ -381,8 +381,11 @@ export function ClientHomePage() {
                 Como funciona
               </h2>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Em breve: acompanhe seus pedidos por aqui.
+                Acompanhe cada pedido e suas atualizações em tempo real.
               </p>
+              <Button asChild variant="outline" size="sm" className="mt-4">
+                <Link to="/cliente/pedidos">Ver meus pedidos</Link>
+              </Button>
             </div>
 
             {[

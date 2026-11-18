@@ -8,6 +8,7 @@ import { AdminServiceRequestsPage } from './AdminServiceRequestsPage'
 const mocks = vi.hoisted(() => ({
   listRequests: vi.fn(),
   getDetail: vi.fn(),
+  verifyEligibility: vi.fn(),
   useAuth: vi.fn(),
   useCatalog: vi.fn(),
 }))
@@ -21,6 +22,7 @@ vi.mock('../../../services/admin-service-request.service', () => ({
   adminServiceRequestService: {
     listRequests: mocks.listRequests,
     getDetail: mocks.getDetail,
+    verifyEligibility: mocks.verifyEligibility,
   },
 }))
 
@@ -50,6 +52,8 @@ function renderPage(path = '/admin/pedidos') {
       <Routes>
         <Route path="/admin/pedidos" element={<AdminServiceRequestsPage />} />
         <Route path="/admin/pedidos/:requestId" element={<AdminServiceRequestsPage />} />
+        <Route path="/admin/pendencias" element={<AdminServiceRequestsPage />} />
+        <Route path="/admin/pendencias/:requestId" element={<AdminServiceRequestsPage />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -73,6 +77,9 @@ describe('AdminServiceRequestsPage', () => {
         stateCode: 'SP',
         createdAt: new Date('2026-11-10T12:00:00Z'),
         responsibleName: null,
+        responsibleRestricted: false,
+        openReportCount: 0,
+        eligibilityVerification: 'NOT_CHECKED',
       }],
       nextCursor: { serviceDate: request.serviceDate, requestId: request.requestId },
     })
@@ -99,6 +106,8 @@ describe('AdminServiceRequestsPage', () => {
       createdAt: new Date('2026-11-10T12:00:00Z'),
       updatedAt: new Date('2026-11-10T12:00:00Z'),
       responsibleName: null,
+      responsibleRestricted: false,
+      relatedReports: [],
       rounds: [{
         roundId: 'round-1',
         round: 1,
@@ -112,6 +121,11 @@ describe('AdminServiceRequestsPage', () => {
       }],
       assignments: [],
       history: [],
+    })
+    mocks.verifyEligibility.mockResolvedValue({
+      verification: 'NONE_FOUND',
+      checkedProfessionals: 3,
+      eligibleProfessionalIds: [],
     })
   })
 
@@ -134,7 +148,7 @@ describe('AdminServiceRequestsPage', () => {
     await user.selectOptions(screen.getByLabelText('Estado'), 'OPEN')
     await user.click(screen.getByRole('button', { name: 'Consultar' }))
     await waitFor(() => expect(mocks.listRequests).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestId: 'request-admin-0001', status: 'OPEN', cursor: null }),
+      expect.objectContaining({ requestId: 'request-admin-0001', operationalState: 'OPEN', cursor: null }),
     ))
   })
 
@@ -193,5 +207,29 @@ describe('AdminServiceRequestsPage', () => {
     expect(await screen.findAllByText('Conclusão informada pelo profissional')).not.toHaveLength(0)
     expect(screen.getByText(/não representa confirmação do cliente/i)).toBeVisible()
     expect(screen.getByText('Concluído')).toBeVisible()
+  })
+
+  it('reutiliza a consulta para pendências e só afirma ausência após verificação', async () => {
+    const user = userEvent.setup()
+    renderPage(`/admin/pedidos/${request.requestId}`)
+
+    await user.click(await screen.findByRole('button', { name: 'Verificar elegibilidade agora' }))
+    expect(await screen.findByText('Sem profissionais elegíveis')).toBeInTheDocument()
+    expect(screen.getByText(/todos os 3 perfis operacionais/i)).toBeInTheDocument()
+    expect(mocks.verifyEligibility).toHaveBeenCalledWith(request.requestId)
+  })
+
+  it('organiza a fila de pendências sem duplicar a consulta de pedidos', async () => {
+    renderPage('/admin/pendencias')
+
+    expect(await screen.findByText('Pendências que exigem atenção')).toBeInTheDocument()
+    expect(screen.getByLabelText('Pendência')).toHaveValue('ALL')
+    await waitFor(() => expect(mocks.listRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ pending: 'ALL', pageSize: 12 }),
+    ))
+    expect(screen.getByRole('link', { name: 'Ver detalhes' })).toHaveAttribute(
+      'href',
+      `/admin/pendencias/${request.requestId}`,
+    )
   })
 })

@@ -1,10 +1,12 @@
 import {
   AlertTriangle,
+  Ban,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
   ClockAlert,
+  FileWarning,
   MapPin,
   RefreshCw,
   Search,
@@ -12,7 +14,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 
 import { AdminLayout } from '../../../components/layout/AdminLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
@@ -35,8 +37,11 @@ import { SERVICE_PERIOD_DEFINITIONS } from '../../../services/service-period-pol
 import type {
   AdminRequestCursor,
   AdminRequestDetail,
+  AdminEligibilityResult,
   AdminRequestFilters,
   AdminRequestListItem,
+  AdminOperationalState,
+  AdminPendingKind,
 } from '../../../types/admin-service-request'
 import {
   SERVICE_PERIODS,
@@ -57,6 +62,22 @@ const STATUS_LABELS: Record<ServiceRequestStatus, string> = {
   CANCELLED: 'Cancelado',
 }
 
+const OPERATIONAL_STATE_LABELS: Record<AdminOperationalState, string> = {
+  ...STATUS_LABELS,
+  OPEN: 'Procurando profissional',
+  REPLACEMENT: 'Procurando substituto',
+}
+
+const PENDING_LABELS: Record<AdminPendingKind, string> = {
+  ALL: 'Todas as pendências',
+  WITHOUT_ACCEPTANCE: 'Ainda sem aceite',
+  ACCEPTANCE_EXPIRED: 'Prazo de aceite encerrado',
+  PERIOD_OVERDUE: 'Período vencido',
+  OPEN_REPORT: 'Relato aberto ou em análise',
+  RESTRICTED_PROFESSIONAL: 'Responsável restrito',
+  NO_ELIGIBLE: 'Sem profissionais elegíveis (verificado)',
+}
+
 const EVENT_LABELS: Record<string, string> = {
   REQUEST_CREATED: 'Pedido criado',
   REQUEST_EDITED: 'Pedido editado',
@@ -66,17 +87,27 @@ const EVENT_LABELS: Record<string, string> = {
   PROFESSIONAL_CANCELLED_AND_REOPENED: 'Cancelamento e procura de substituto',
   SERVICE_STARTED: 'Atendimento iniciado',
   SERVICE_COMPLETED: 'Conclusão informada pelo profissional',
+  ADMIN_REOPENED_FROM_REPORT: 'Reabertura administrativa por relato',
 }
 
 const ROUND_REASON_LABELS: Record<string, string> = {
   INITIAL: 'Rodada inicial',
   CLIENT_EDIT: 'Edição do cliente',
   PROFESSIONAL_CANCELLATION: 'Substituição após cancelamento',
+  ADMIN_INTERVENTION: 'Intervenção administrativa por relato',
+}
+
+const ASSIGNMENT_END_LABELS: Record<string, string> = {
+  PROFESSIONAL_CANCELLATION: 'Cancelamento do profissional',
+  CLIENT_CANCELLATION: 'Cancelamento do cliente',
+  ADMIN_INTERVENTION: 'Intervenção administrativa por relato',
+  PROFESSIONAL_COMPLETION: 'Conclusão informada pelo profissional',
 }
 
 interface FilterForm {
   requestId: string
-  status: '' | ServiceRequestStatus
+  status: '' | AdminOperationalState
+  pending: '' | AdminPendingKind
   period: '' | ServicePeriod
   scheduledFrom: string
   scheduledTo: string
@@ -85,12 +116,16 @@ interface FilterForm {
 const EMPTY_FILTERS: FilterForm = {
   requestId: '',
   status: '',
+  pending: '',
   period: '',
   scheduledFrom: '',
   scheduledTo: '',
 }
 
 function errorMessage(error: unknown) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return 'Você está offline. Reconecte-se e tente carregar os pedidos novamente.'
+  }
   return error instanceof Error
     ? error.message
     : 'Não foi possível carregar os pedidos. Tente novamente.'
@@ -123,7 +158,7 @@ function formatPhone(value: string) {
 }
 
 function operationalLabel(request: ServiceRequestSummary) {
-  if (request.status === 'OPEN' && request.reopenReason === 'PROFESSIONAL_CANCELLATION') {
+  if (request.status === 'OPEN' && request.reopenReason !== null) {
     return 'Em procura de substituto'
   }
   return STATUS_LABELS[request.status]
@@ -144,7 +179,18 @@ function acceptanceExpired(request: ServiceRequestSummary) {
   return withoutAcceptance(request) && request.acceptUntil.getTime() <= Date.now()
 }
 
-function RequestBadges({ request }: { request: ServiceRequestSummary }) {
+function periodOverdue(request: ServiceRequestSummary) {
+  return !['COMPLETED', 'CANCELLED'].includes(request.status)
+    && request.periodStartAt.getTime() <= Date.now()
+}
+
+function RequestBadges({
+  request,
+  item,
+}: {
+  request: ServiceRequestSummary
+  item?: AdminRequestListItem
+}) {
   return (
     <div className="flex flex-wrap gap-2">
       <Badge variant={statusVariant(request.status)}>{operationalLabel(request)}</Badge>
@@ -152,6 +198,10 @@ function RequestBadges({ request }: { request: ServiceRequestSummary }) {
       {acceptanceExpired(request) ? (
         <Badge variant="destructive"><ClockAlert aria-hidden="true" /> Prazo de aceite encerrado</Badge>
       ) : null}
+      {periodOverdue(request) ? <Badge variant="destructive">Período vencido</Badge> : null}
+      {item?.openReportCount ? <Badge variant="warning"><FileWarning aria-hidden="true" /> {item.openReportCount} relato(s) pendente(s)</Badge> : null}
+      {item?.responsibleRestricted ? <Badge variant="destructive"><Ban aria-hidden="true" /> Responsável restrito</Badge> : null}
+      {item?.eligibilityVerification === 'NONE_FOUND' ? <Badge variant="destructive">Sem profissionais elegíveis</Badge> : null}
     </div>
   )
 }
@@ -159,7 +209,7 @@ function RequestBadges({ request }: { request: ServiceRequestSummary }) {
 function LoadingCards() {
   return (
     <div role="status" aria-live="polite" className="grid gap-4 lg:grid-cols-2">
-      <span className="sr-only">Carregando pedidosâ€¦</span>
+      <span className="sr-only">Carregando pedidos…</span>
       <Skeleton className="h-56" />
       <Skeleton className="h-56" />
     </div>
@@ -169,9 +219,11 @@ function LoadingCards() {
 function RequestCard({
   item,
   specialtyName,
+  detailBasePath,
 }: {
   item: AdminRequestListItem
   specialtyName: string
+  detailBasePath: string
 }) {
   const request = item.request
   return (
@@ -182,7 +234,7 @@ function RequestCard({
             <p className="break-all font-mono text-xs text-muted-foreground">{request.requestId}</p>
             <CardTitle className="mt-2">{specialtyName}</CardTitle>
           </div>
-          <RequestBadges request={request} />
+          <RequestBadges request={request} item={item} />
         </div>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -193,18 +245,22 @@ function RequestCard({
           <div><dt className="text-muted-foreground">Responsável atual</dt><dd className="font-medium">{item.responsibleName || 'Ainda não definido'}</dd></div>
         </dl>
         <Button asChild variant="outline" className="w-full sm:w-fit">
-          <Link to={`/admin/pedidos/${encodeURIComponent(request.requestId)}`}>Ver detalhes</Link>
+          <Link to={`${detailBasePath}/${encodeURIComponent(request.requestId)}`}>Ver detalhes</Link>
         </Button>
       </CardContent>
     </Card>
   )
 }
 
-function AdminRequestsList() {
+function AdminRequestsList({ pendingMode }: { pendingMode: boolean }) {
   const { user } = useAuth()
   const catalogState = useCatalog()
-  const [form, setForm] = useState<FilterForm>(EMPTY_FILTERS)
-  const [filters, setFilters] = useState<FilterForm>(EMPTY_FILTERS)
+  const initialFilters = useMemo<FilterForm>(() => ({
+    ...EMPTY_FILTERS,
+    pending: pendingMode ? 'ALL' : '',
+  }), [pendingMode])
+  const [form, setForm] = useState<FilterForm>(initialFilters)
+  const [filters, setFilters] = useState<FilterForm>(initialFilters)
   const [items, setItems] = useState<AdminRequestListItem[]>([])
   const [cursor, setCursor] = useState<AdminRequestCursor | null>(null)
   const [previousCursors, setPreviousCursors] = useState<Array<AdminRequestCursor | null>>([])
@@ -213,13 +269,14 @@ function AdminRequestsList() {
   const [error, setError] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
 
-  useDocumentTitle('Pedidos administrativos — ProFind')
+  useDocumentTitle(pendingMode ? 'Pendências administrativas — ProFind' : 'Pedidos administrativos — ProFind')
 
   useEffect(() => {
     let active = true
     const input: AdminRequestFilters = {
       ...(filters.requestId.trim() ? { requestId: filters.requestId.trim() } : {}),
-      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.status ? { operationalState: filters.status } : {}),
+      ...(filters.pending ? { pending: filters.pending } : {}),
       ...(filters.period ? { period: filters.period } : {}),
       ...(filters.scheduledFrom ? { scheduledFrom: filters.scheduledFrom } : {}),
       ...(filters.scheduledTo ? { scheduledTo: filters.scheduledTo } : {}),
@@ -249,7 +306,7 @@ function AdminRequestsList() {
     return () => {
       active = false
     }
-  }, [cursor, filters, reload])
+  }, [cursor, filters, reload, user?.uid])
 
   const specialtyNames = useMemo(() => new Map(
     catalogState.status === 'ready'
@@ -264,16 +321,18 @@ function AdminRequestsList() {
 
   return (
     <AdminLayout
-      pageTitle="Pedidos"
+      pageTitle={pendingMode ? 'Pendências' : 'Pedidos'}
       userName={user?.displayName || user?.email || 'Administrador ProFind'}
-      activeNavigationHref="/admin/pedidos"
+      activeNavigationHref={pendingMode ? '/admin/pendencias' : '/admin/pedidos'}
     >
       <div className="grid gap-6">
         <div>
-          <p className="text-sm font-semibold text-primary">Acompanhamento operacional</p>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight">Pedidos de todos os clientes</h2>
+          <p className="text-sm font-semibold text-primary">{pendingMode ? 'Fila calculada na consulta' : 'Acompanhamento operacional'}</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight">{pendingMode ? 'Pendências que exigem atenção' : 'Pedidos de todos os clientes'}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Consulte o ciclo dos pedidos e as pendências de aceite. Esta entrega não altera atendimentos.
+            {pendingMode
+              ? 'A fila é recalculada ao consultar: não depende de cron, push ou do site permanecer aberto.'
+              : 'Consulte o ciclo completo. Estados só mudam pelas operações transacionais do domínio.'}
           </p>
         </div>
 
@@ -284,7 +343,7 @@ function AdminRequestsList() {
           </CardHeader>
           <CardContent>
             <form
-              className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"
+              className="grid gap-4 md:grid-cols-2 xl:grid-cols-6"
               onSubmit={(event) => {
                 event.preventDefault()
                 resetPagination()
@@ -299,9 +358,17 @@ function AdminRequestsList() {
                 <Label htmlFor="admin-request-status">Estado</Label>
                 <select id="admin-request-status" className="min-h-11 rounded-md border border-input bg-background px-3 text-sm" value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as FilterForm['status'] }))}>
                   <option value="">Todos</option>
-                  {SERVICE_REQUEST_STATUSES.map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}
+                  {([...SERVICE_REQUEST_STATUSES, 'REPLACEMENT'] as AdminOperationalState[]).map((status) => <option key={status} value={status}>{OPERATIONAL_STATE_LABELS[status]}</option>)}
                 </select>
               </div>
+              {pendingMode ? (
+                <div className="grid gap-2">
+                  <Label htmlFor="admin-request-pending">Pendência</Label>
+                  <select id="admin-request-pending" className="min-h-11 rounded-md border border-input bg-background px-3 text-sm" value={form.pending} onChange={(event) => setForm((current) => ({ ...current, pending: event.target.value as FilterForm['pending'] }))}>
+                    {Object.entries(PENDING_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+              ) : null}
               <div className="grid gap-2">
                 <Label htmlFor="admin-request-period">Período</Label>
                 <select id="admin-request-period" className="min-h-11 rounded-md border border-input bg-background px-3 text-sm" value={form.period} onChange={(event) => setForm((current) => ({ ...current, period: event.target.value as FilterForm['period'] }))}>
@@ -311,9 +378,9 @@ function AdminRequestsList() {
               </div>
               <div className="grid gap-2"><Label htmlFor="admin-request-from">Agendado de</Label><Input id="admin-request-from" type="date" value={form.scheduledFrom} onChange={(event) => setForm((current) => ({ ...current, scheduledFrom: event.target.value }))} /></div>
               <div className="grid gap-2"><Label htmlFor="admin-request-to">Agendado até</Label><Input id="admin-request-to" type="date" min={form.scheduledFrom || undefined} value={form.scheduledTo} onChange={(event) => setForm((current) => ({ ...current, scheduledTo: event.target.value }))} /></div>
-              <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-5">
+              <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-6">
                 <Button type="submit"><Search aria-hidden="true" /> Consultar</Button>
-                <Button type="button" variant="outline" onClick={() => { setForm(EMPTY_FILTERS); resetPagination(); setFilters(EMPTY_FILTERS) }}>Limpar filtros</Button>
+                <Button type="button" variant="outline" onClick={() => { setForm(initialFilters); resetPagination(); setFilters(initialFilters) }}>Limpar filtros</Button>
               </div>
             </form>
           </CardContent>
@@ -328,34 +395,41 @@ function AdminRequestsList() {
           </Alert>
         ) : null}
         {!loading && !error && items.length === 0 ? (
-          <Card><EmptyState icon={<ClipboardList aria-hidden="true" />} title="Nenhum pedido nesta consulta" description="Revise os filtros ou informe outro identificador exato." /></Card>
+          <Card><EmptyState icon={<ClipboardList aria-hidden="true" />} title={pendingMode ? 'Nenhuma pendência nesta consulta' : 'Nenhum pedido nesta consulta'} description="Revise os filtros ou informe outro identificador exato." /></Card>
         ) : null}
         {!loading && !error && items.length > 0 ? (
-          <>
-            <section aria-label="Pedidos" className="grid gap-4 lg:grid-cols-2">
-              {items.map((item) => <RequestCard key={item.request.requestId} item={item} specialtyName={specialtyNames.get(item.request.specialtyId) ?? item.request.specialtyId} />)}
-            </section>
-            {!filters.requestId ? (
-              <nav aria-label="Paginação dos pedidos" className="flex items-center justify-between gap-3">
-                <Button variant="outline" disabled={previousCursors.length === 0} onClick={() => { const history = [...previousCursors]; const previous = history.pop() ?? null; setPreviousCursors(history); setCursor(previous) }}><ChevronLeft aria-hidden="true" /> Anterior</Button>
-                <span className="text-sm text-muted-foreground">Página {previousCursors.length + 1}</span>
-                <Button variant="outline" disabled={!nextCursor} onClick={() => { setPreviousCursors((history) => [...history, cursor]); setCursor(nextCursor) }}>Próxima <ChevronRight aria-hidden="true" /></Button>
-              </nav>
-            ) : null}
-          </>
+          <section aria-label="Pedidos" className="grid gap-4 lg:grid-cols-2">
+            {items.map((item) => <RequestCard key={item.request.requestId} item={item} specialtyName={specialtyNames.get(item.request.specialtyId) ?? item.request.specialtyId} detailBasePath={pendingMode ? '/admin/pendencias' : '/admin/pedidos'} />)}
+          </section>
+        ) : null}
+        {!loading && !error && !filters.requestId && (items.length > 0 || previousCursors.length > 0 || nextCursor) ? (
+          <nav aria-label="Paginação dos pedidos" className="flex items-center justify-between gap-3">
+            <Button variant="outline" disabled={previousCursors.length === 0} onClick={() => { const history = [...previousCursors]; const previous = history.pop() ?? null; setPreviousCursors(history); setCursor(previous) }}><ChevronLeft aria-hidden="true" /> Anterior</Button>
+            <span className="text-sm text-muted-foreground">Página {previousCursors.length + 1}</span>
+            <Button variant="outline" disabled={!nextCursor} onClick={() => { setPreviousCursors((history) => [...history, cursor]); setCursor(nextCursor) }}>Próxima <ChevronRight aria-hidden="true" /></Button>
+          </nav>
         ) : null}
       </div>
     </AdminLayout>
   )
 }
 
-function AdminRequestDetailPage({ requestId }: { requestId: string }) {
+function AdminRequestDetailPage({
+  requestId,
+  pendingMode,
+}: {
+  requestId: string
+  pendingMode: boolean
+}) {
   const { user } = useAuth()
   const catalogState = useCatalog()
   const [detail, setDetail] = useState<AdminRequestDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
+  const [eligibility, setEligibility] = useState<AdminEligibilityResult | null>(null)
+  const [eligibilityLoading, setEligibilityLoading] = useState(false)
+  const [eligibilityError, setEligibilityError] = useState('')
 
   useDocumentTitle('Detalhe do pedido — ProFind')
 
@@ -366,6 +440,8 @@ function AdminRequestDetailPage({ requestId }: { requestId: string }) {
       setLoading(true)
       setError(null)
       setDetail(null)
+      setEligibility(null)
+      setEligibilityError('')
       return adminServiceRequestService.getDetail(requestId).then(
         (value) => {
           if (!active) return
@@ -382,16 +458,31 @@ function AdminRequestDetailPage({ requestId }: { requestId: string }) {
     return () => {
       active = false
     }
-  }, [reload, requestId])
+  }, [reload, requestId, user?.uid])
 
   const specialtyName = catalogState.status === 'ready'
     ? catalogState.catalog.specialties.find((item) => item.id === detail?.request.specialtyId)?.name
     : undefined
 
+  async function verifyEligibility() {
+    if (eligibilityLoading) return
+    setEligibilityLoading(true)
+    setEligibilityError('')
+    try {
+      setEligibility(await adminServiceRequestService.verifyEligibility(requestId))
+    } catch (verificationError) {
+      setEligibilityError(errorMessage(verificationError))
+    } finally {
+      setEligibilityLoading(false)
+    }
+  }
+
+  const basePath = pendingMode ? '/admin/pendencias' : '/admin/pedidos'
+
   return (
-    <AdminLayout pageTitle="Detalhe do pedido" userName={user?.displayName || user?.email || 'Administrador ProFind'} activeNavigationHref="/admin/pedidos">
+    <AdminLayout pageTitle="Detalhe do pedido" userName={user?.displayName || user?.email || 'Administrador ProFind'} activeNavigationHref={basePath}>
       <div className="grid gap-6">
-        <div><Button asChild variant="link"><Link to="/admin/pedidos"><ChevronLeft aria-hidden="true" /> Voltar para pedidos</Link></Button></div>
+        <div><Button asChild variant="link"><Link to={basePath}><ChevronLeft aria-hidden="true" /> Voltar para {pendingMode ? 'pendências' : 'pedidos'}</Link></Button></div>
         {loading ? <LoadingCards /> : null}
         {!loading && error ? (
           <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>Não foi possível carregar o pedido</AlertTitle><AlertDescription><p>{error}</p><Button className="mt-4" variant="outline" onClick={() => setReload((value) => value + 1)}><RefreshCw aria-hidden="true" /> Tentar novamente</Button></AlertDescription></Alert>
@@ -415,6 +506,29 @@ function AdminRequestDetailPage({ requestId }: { requestId: string }) {
               <Alert><CalendarClock aria-hidden="true" /><AlertTitle>Pedido ainda sem aceite</AlertTitle><AlertDescription>A procura está aberta. A existência ou ausência de candidatos não foi verificada por esta consulta.</AlertDescription></Alert>
             ) : null}
 
+            {periodOverdue(detail.request) ? (
+              <Alert variant="destructive"><ClockAlert aria-hidden="true" /><AlertTitle>Período do atendimento vencido</AlertTitle><AlertDescription>O pedido ainda não foi concluído ou cancelado. A pendência foi calculada no momento desta consulta.</AlertDescription></Alert>
+            ) : null}
+
+            {detail.responsibleRestricted ? (
+              <Alert variant="warning"><Ban aria-hidden="true" /><AlertTitle>Responsável com acesso operacional restrito</AlertTitle><AlertDescription>O compromisso confirmado foi preservado. A restrição não cancela nem redistribui o atendimento silenciosamente.</AlertDescription></Alert>
+            ) : null}
+
+            {detail.request.status === 'OPEN' ? (
+              <Card>
+                <CardHeader><CardTitle>Elegibilidade neste momento</CardTitle><CardDescription>“Ainda sem aceite” não significa ausência de profissionais. A verificação usa aprovação atual, compatibilidade, disponibilidade, reserva, exclusão e recusa da rodada.</CardDescription></CardHeader>
+                <CardContent className="grid gap-3">
+                  {eligibility?.verification === 'ELIGIBLE_FOUND' ? <Alert variant="success"><ShieldCheck aria-hidden="true" /><AlertTitle>Há profissional elegível</AlertTitle><AlertDescription>{eligibility.eligibleProfessionalIds.length} profissional(is) elegível(is) entre {eligibility.checkedProfessionals} verificado(s). Isso não garante aceite.</AlertDescription></Alert> : null}
+                  {eligibility?.verification === 'NONE_FOUND' ? <Alert variant="destructive"><Ban aria-hidden="true" /><AlertTitle>Sem profissionais elegíveis</AlertTitle><AlertDescription>A ausência foi verificada entre todos os {eligibility.checkedProfessionals} perfis operacionais ativos aprovados encontrados.</AlertDescription></Alert> : null}
+                  {eligibility?.verification === 'INCONCLUSIVE' ? <Alert variant="warning"><AlertTriangle aria-hidden="true" /><AlertTitle>Verificação inconclusiva</AlertTitle><AlertDescription>O limite seguro de {eligibility.checkedProfessionals} profissionais foi atingido; não é possível afirmar ausência de elegíveis.</AlertDescription></Alert> : null}
+                  {eligibilityError ? <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertDescription>{eligibilityError}</AlertDescription></Alert> : null}
+                  <Button type="button" variant="outline" className="w-full sm:w-fit" loading={eligibilityLoading} loadingLabel="Verificando…" onClick={() => void verifyEligibility()}>
+                    <Search aria-hidden="true" /> Verificar elegibilidade agora
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : null}
+
             <div className="grid gap-6 xl:grid-cols-2">
               <Card>
                 <CardHeader><CardTitle><UserRound className="mr-2 inline size-5" aria-hidden="true" /> Cliente e responsável</CardTitle></CardHeader>
@@ -427,11 +541,29 @@ function AdminRequestDetailPage({ requestId }: { requestId: string }) {
             </div>
 
             <Card>
-              <CardHeader><CardTitle>Rodadas e atribuições</CardTitle><CardDescription>Histórico operacional do pedido, sem controles de intervenção.</CardDescription></CardHeader>
+              <CardHeader><CardTitle>Rodadas e atribuições</CardTitle><CardDescription>Responsáveis anteriores permanecem no histórico; somente a atribuição atual aparece como responsável.</CardDescription></CardHeader>
               <CardContent className="grid gap-4 lg:grid-cols-2">
                 {detail.rounds.map((round) => <div key={round.roundId} className="rounded-md border p-4"><div className="flex flex-wrap items-center justify-between gap-2"><strong>Rodada {round.round}</strong><Badge variant={round.status === 'OPEN' ? 'warning' : 'outline'}>{round.status === 'OPEN' ? 'Aberta' : 'Encerrada'}</Badge></div><p className="mt-2 text-sm text-muted-foreground">{ROUND_REASON_LABELS[round.reason] || round.reason}</p><p className="mt-2 text-xs text-muted-foreground">Aberta em {formatDateTime(round.openedAt)}{round.closedAt ? ` · encerrada em ${formatDateTime(round.closedAt)}` : ''}</p></div>)}
                 {detail.rounds.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma rodada registrada.</p> : null}
-                {detail.assignments.map((assignment) => <div key={assignment.assignmentId} className="rounded-md border p-4"><div className="flex flex-wrap items-center justify-between gap-2"><strong>{assignment.professionalName || assignment.professionalId}</strong><Badge variant={assignment.status === 'ACTIVE' ? 'success' : 'outline'}>{assignment.status}</Badge></div><p className="mt-2 text-sm text-muted-foreground">Rodada {assignment.round} · aceite em {formatDateTime(assignment.acceptedAt)}</p>{assignment.endedReason ? <p className="mt-2 text-sm">Encerramento: {assignment.endedReason}</p> : null}</div>)}
+                {detail.assignments.map((assignment) => <div key={assignment.assignmentId} className="rounded-md border p-4"><div className="flex flex-wrap items-center justify-between gap-2"><strong>{assignment.professionalName || assignment.professionalId}</strong><Badge variant={assignment.status === 'ACTIVE' ? 'success' : 'outline'}>{assignment.status}</Badge></div><p className="mt-2 text-sm text-muted-foreground">Rodada {assignment.round} · aceite em {formatDateTime(assignment.acceptedAt)}</p>{assignment.endedReason ? <p className="mt-2 text-sm">Encerramento: {ASSIGNMENT_END_LABELS[assignment.endedReason] || assignment.endedReason}</p> : null}</div>)}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader><CardTitle><FileWarning className="mr-2 inline size-5" aria-hidden="true" /> Relatos e intervenções</CardTitle><CardDescription>Resolução, justificativa, notas internas e reabertura usam as operações transacionais existentes de relatos.</CardDescription></CardHeader>
+              <CardContent className="grid gap-4">
+                {detail.relatedReports.length ? (
+                  <ol className="grid gap-3">
+                    {detail.relatedReports.map((report) => (
+                      <li key={report.reportId} className="flex flex-col justify-between gap-3 rounded-md border p-4 sm:flex-row sm:items-center">
+                        <div><strong>{report.reason}</strong><p className="mt-1 text-sm text-muted-foreground">{report.status} · {formatDateTime(report.createdAt)}</p></div>
+                        <Button asChild variant="outline" size="sm"><Link to={`/admin/relatos/${encodeURIComponent(report.reportId)}`}>{report.status === 'RESOLVED' ? 'Consultar resolução' : 'Analisar e resolver'}</Link></Button>
+                      </li>
+                    ))}
+                  </ol>
+                ) : <p className="text-sm text-muted-foreground">Nenhum relato vinculado a este pedido.</p>}
+                <Button asChild variant="outline" className="w-full sm:w-fit"><Link to={`/admin/relatos?pedido=${encodeURIComponent(detail.request.requestId)}`}>Consultar relatos deste pedido</Link></Button>
+                <p className="text-xs leading-5 text-muted-foreground">Não há edição livre de estado nem atribuição manual. Reabertura e reagendamento revalidam estado, rodada, atribuição, prazo, reserva, exclusões e ciência do cliente.</p>
               </CardContent>
             </Card>
 
@@ -445,7 +577,7 @@ function AdminRequestDetailPage({ requestId }: { requestId: string }) {
               </CardContent>
             </Card>
 
-            <Alert><ShieldCheck aria-hidden="true" /><AlertTitle>Consulta administrativa</AlertTitle><AlertDescription>Reabertura, reagendamento, resolução de ocorrências e outras intervenções permanecem fora desta entrega parcial da #34.</AlertDescription></Alert>
+            <Alert><ShieldCheck aria-hidden="true" /><AlertTitle>Operação protegida</AlertTitle><AlertDescription>Decisões desatualizadas falham e exigem releitura. Nenhuma ação desta tela cancela, atribui ou altera estado fora das invariantes do domínio.</AlertDescription></Alert>
           </>
         ) : null}
       </div>
@@ -455,7 +587,9 @@ function AdminRequestDetailPage({ requestId }: { requestId: string }) {
 
 export function AdminServiceRequestsPage() {
   const { requestId } = useParams<{ requestId: string }>()
+  const location = useLocation()
+  const pendingMode = location.pathname.startsWith('/admin/pendencias')
   return requestId
-    ? <AdminRequestDetailPage requestId={requestId} />
-    : <AdminRequestsList />
+    ? <AdminRequestDetailPage requestId={requestId} pendingMode={pendingMode} />
+    : <AdminRequestsList pendingMode={pendingMode} />
 }

@@ -39,7 +39,7 @@ export function ProfessionalOpportunityCard({
           <div className="flex min-w-0 items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="break-words text-xs font-semibold tracking-wide text-primary uppercase">
-                {opportunity.reopenReason === 'PROFESSIONAL_CANCELLATION'
+                {opportunity.reopenReason !== null
                   ? 'Substituição solicitada'
                   : category ?? 'Oportunidade compatível'}
               </p>

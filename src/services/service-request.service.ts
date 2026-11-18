@@ -14,6 +14,9 @@ import {
   type ProfessionalOpportunityDetailsSnapshot,
   type OpportunityQuery,
   type OwnRequestDetailsSnapshot,
+  type ClientRequestsPageInput,
+  type ClientRequestsPageSnapshot,
+  type ClientRequestTrackingSnapshot,
   type ProfessionalAppointmentDetailsSnapshot,
   type ProfessionalAppointmentsPageInput,
   type ProfessionalAppointmentsPageSnapshot,
@@ -97,6 +100,18 @@ export interface ProfessionalAppointmentDetailsSubscriptionInput {
 export interface OwnRequestDetailsSubscriptionInput {
   requestId: string
   onDetails(snapshot: OwnRequestDetailsSnapshot): void
+  onError(error: ServiceRequestError): void
+}
+
+export interface ClientRequestsSubscriptionInput extends ClientRequestsPageInput {
+  onPage(snapshot: ClientRequestsPageSnapshot): void
+  onError(error: ServiceRequestError): void
+}
+
+export interface ClientRequestTrackingSubscriptionInput {
+  requestId: string
+  onDetails(snapshot: ClientRequestTrackingSnapshot): void
+  onProfileError(error: ServiceRequestError): void
   onError(error: ServiceRequestError): void
 }
 
@@ -393,6 +408,23 @@ export function createServiceRequestService(
       })
     },
 
+    subscribeOwnRequests(input: ClientRequestsSubscriptionInput) {
+      const clientId = actorId()
+      return repository.subscribeOwnRequestsPage(input, clientId, {
+        onPage: input.onPage,
+        onError: (error) => input.onError(normalizeOperationError(error)),
+      })
+    },
+
+    subscribeOwnRequestTracking(input: ClientRequestTrackingSubscriptionInput) {
+      const clientId = actorId()
+      return repository.subscribeOwnRequestTracking(input.requestId, clientId, {
+        onDetails: input.onDetails,
+        onProfileError: (error) => input.onProfileError(normalizeOperationError(error)),
+        onError: (error) => input.onError(normalizeOperationError(error)),
+      })
+    },
+
     getCurrentProfessionalAssignment(
       requestId: string,
       expectedAssignmentId: string,
@@ -685,6 +717,12 @@ export const serviceRequestService = {
   },
   subscribeOwnRequestDetails(input: OwnRequestDetailsSubscriptionInput) {
     return getDefaultService().subscribeOwnRequestDetails(input)
+  },
+  subscribeOwnRequests(input: ClientRequestsSubscriptionInput) {
+    return getDefaultService().subscribeOwnRequests(input)
+  },
+  subscribeOwnRequestTracking(input: ClientRequestTrackingSubscriptionInput) {
+    return getDefaultService().subscribeOwnRequestTracking(input)
   },
   getCurrentProfessionalAssignment(
     requestId: string,
