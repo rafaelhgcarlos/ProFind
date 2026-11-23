@@ -8,6 +8,7 @@ coverage
 .DS_Store
 .idea
 .firebase
+.wrangler
 .dev.vars
 worker/.dev.vars
 worker/.wrangler

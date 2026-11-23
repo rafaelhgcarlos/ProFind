@@ -33,13 +33,18 @@ atual e lista exatamente quais variáveis precisam ser configuradas.
 Também estão disponíveis:
 
 - `npm run build`: valida o TypeScript e gera o build de produção.
+- `npm run build:release`: exige a configuração Production do Cloudflare Pages,
+  gera `dist` e audita projeto, endpoint de imagens, mocks e segredos no bundle.
 - `npm run typecheck`: valida somente os tipos.
 - `npm run lint`: executa o ESLint.
 - `npm test`: executa os testes uma vez.
 - `npm run test:rules`: inicia o emulador do Firestore e executa os testes de
   privacidade das regras.
+- `npm run test:concurrency:emulator`: executa a prova multiusuário da #39 com
+  contextos isolados e disputa real de transações.
 - `npm run test:watch`: executa os testes em modo interativo.
 - `npm run preview`: serve localmente o build de produção.
+- `npm run preview:pages`: serve `dist` com o runtime local do Cloudflare Pages.
 - `npm run seed:catalog -- --project=SEU_PROJECT_ID`: cria ou atualiza o
   catálogo inicial de categorias e especialidades.
 
@@ -90,11 +95,11 @@ monotônica quando existir um grant em
 backend confiável. O cliente não possui acesso a esses grants. A alternância de
 `activeMode` continua limitada aos papéis presentes em `roles`, enquanto
 `professionalProfileStatus` não pode ser alterado diretamente pelo cliente.
-Depois de criar o banco Cloud Firestore, publique as regras no mesmo projeto
-configurado no `.env`:
+Depois de criar o banco Cloud Firestore, publique regras e índices no mesmo
+projeto configurado no `.env`:
 
 ```bash
-npx firebase-tools deploy --only firestore:rules --project SEU_PROJECT_ID
+npx firebase-tools deploy --only firestore:rules,firestore:indexes --project profind-42bf7
 ```
 
 Sem esse deploy, projetos criados no modo bloqueado retornam
@@ -102,6 +107,20 @@ Sem esse deploy, projetos criados no modo bloqueado retornam
 identidade automaticamente, mas o cadastro não pode ser concluído. Ao atualizar
 as versões dos documentos jurídicos, atualize também as versões permitidas nas
 regras antes de publicar a nova interface.
+
+## Publicação
+
+O frontend permanece no Cloudflare Pages em `https://profind.pages.dev`.
+`wrangler.jsonc` fixa o projeto `profind` e a saída `dist`. O artefato mantém
+`index.html` na raiz e não cria `404.html`, ativando o fallback SPA nativo do
+Pages. `firebase.json` configura somente Firestore e emuladores: Firebase
+Hosting não faz parte da implantação.
+
+Não execute os comandos de publicação sem seguir a ordem, as verificações de
+índices, a matriz de compatibilidade e o rollback descritos em
+[`docs/issue-54-release-runbook.md`](docs/issue-54-release-runbook.md). O roteiro
+de evidências hospedadas está em
+[`docs/issue-54-evidence-template.md`](docs/issue-54-evidence-template.md).
 
 O catálogo público de serviços usa `categories/{categoryId}` e
 `specialties/{specialtyId}`. A aplicação consulta essas coleções por repository

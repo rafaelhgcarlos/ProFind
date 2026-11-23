@@ -19,16 +19,20 @@ confiável com o SDK de servidor do Firestore.
 
 ## Carga inicial
 
-Autentique o Application Default Credentials e execute, sempre informando o
-projeto explicitamente:
+Autentique o Application Default Credentials e faça primeiro a prévia, sempre
+informando o projeto explicitamente:
 
 ```bash
+npm run seed:catalog -- --project=SEU_PROJECT_ID --dry-run
 npm run seed:catalog -- --project=SEU_PROJECT_ID
 ```
 
 Para o Firestore Emulator, configure `FIRESTORE_EMULATOR_HOST` e use um ID de
-projeto local. O seed usa IDs determinísticos e `merge`, portanto pode ser
-executado novamente sem duplicar documentos. Ele cria os dados iniciais da
+projeto local. O seed usa IDs determinísticos, cria somente documentos ausentes
+e preserva integralmente os existentes, portanto pode ser executado novamente
+sem duplicar nem sobrescrever dados. `--merge-existing` existe apenas para uma
+atualização administrativa deliberada, depois de revisar a prévia; não faz
+parte da preparação demonstrativa. Ele cria os dados iniciais da
 issue #7 para Construção e manutenção e Serviços residenciais. A estrutura
 visual da #52 consome essas coleções diretamente; não mantém uma cópia do
 catálogo no frontend.

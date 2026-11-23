@@ -5,6 +5,7 @@ import {
   runTransaction,
   serverTimestamp,
   updateDoc,
+  type Firestore,
 } from 'firebase/firestore'
 
 import { getFirebaseFirestore } from '../lib/firebase'
@@ -286,9 +287,12 @@ function profileReviewAction(
   return 'PROFILE_UPDATED' as const
 }
 
-export const professionalProfileRepository = {
+function professionalProfileRepositoryWith(
+  getFirestore: () => Firestore,
+) {
+  return {
   async findByOwnerId(userId: string): Promise<ProfessionalProfile | null> {
-    const firestore = getFirebaseFirestore()
+    const firestore = getFirestore()
     const [snapshot, privateSnapshot] = await Promise.all([
       getDoc(doc(firestore, 'professionalProfiles', userId)),
       getDoc(doc(firestore, 'professionalPrivateProfiles', userId)).catch(
@@ -359,7 +363,7 @@ export const professionalProfileRepository = {
     profile,
     status,
   }: SaveProfessionalProfileInput): Promise<void> {
-    const firestore = getFirebaseFirestore()
+    const firestore = getFirestore()
     const profileReference = doc(firestore, 'professionalProfiles', userId)
     const privateProfileReference = doc(
       firestore,
@@ -540,11 +544,19 @@ export const professionalProfileRepository = {
     availability: ProfessionalAvailability,
   ): Promise<void> {
     await updateDoc(
-      doc(getFirebaseFirestore(), 'professionalProfiles', userId),
+      doc(getFirestore(), 'professionalProfiles', userId),
       {
         availability,
         updatedAt: serverTimestamp(),
       },
     )
   },
+  }
 }
+
+export function createProfessionalProfileRepository(firestore: Firestore) {
+  return professionalProfileRepositoryWith(() => firestore)
+}
+
+export const professionalProfileRepository =
+  professionalProfileRepositoryWith(getFirebaseFirestore)

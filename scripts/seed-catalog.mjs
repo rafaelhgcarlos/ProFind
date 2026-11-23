@@ -4,6 +4,8 @@ const projectArgument = process.argv.find((argument) =>
   argument.startsWith('--project='),
 )
 const projectId = projectArgument?.slice('--project='.length).trim()
+const dryRun = process.argv.includes('--dry-run')
+const mergeExisting = process.argv.includes('--merge-existing')
 
 if (!projectId) {
   throw new Error(
@@ -29,18 +31,39 @@ const specialties = [
 ]
 
 const firestore = new Firestore({ projectId })
-const batch = firestore.batch()
+const entries = [
+  ...categories.map(({ id, ...data }) => ({
+    ref: firestore.collection('categories').doc(id),
+    data,
+  })),
+  ...specialties.map(({ id, ...data }) => ({
+    ref: firestore.collection('specialties').doc(id),
+    data,
+  })),
+]
+const snapshots = await firestore.getAll(...entries.map(({ ref }) => ref))
+const missing = entries.filter((_, index) => !snapshots[index].exists)
+const existing = entries.filter((_, index) => snapshots[index].exists)
 
-for (const { id, ...category } of categories) {
-  batch.set(firestore.collection('categories').doc(id), category, { merge: true })
+if (dryRun) {
+  console.log(
+    `Prévia do catálogo em ${projectId}: ${missing.length} ausente(s), ` +
+      `${existing.length} preservado(s), nenhuma escrita executada.`,
+  )
+  process.exit(0)
 }
 
-for (const { id, ...specialty } of specialties) {
-  batch.set(firestore.collection('specialties').doc(id), specialty, { merge: true })
+const batch = firestore.batch()
+for (const { ref, data } of mergeExisting ? entries : missing) {
+  if (mergeExisting) batch.set(ref, data, { merge: true })
+  else batch.create(ref, data)
 }
 
 await batch.commit()
 
 console.log(
-  `Catálogo inicial gravado em ${projectId}: ${categories.length} categorias e ${specialties.length} especialidades.`,
+  mergeExisting
+    ? `Catálogo atualizado explicitamente em ${projectId}: ${entries.length} documento(s).`
+    : `Catálogo preparado em ${projectId}: ${missing.length} criado(s), ` +
+        `${existing.length} existente(s) preservado(s).`,
 )

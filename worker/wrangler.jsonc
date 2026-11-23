@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-22",
   "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
   "vars": {
     "FIREBASE_PROJECT_ID": "profind-42bf7",
     "ALLOWED_ORIGINS": "https://profind.pages.dev,http://localhost:5173,http://127.0.0.1:5173"

@@ -104,6 +104,13 @@ worker/wrangler.jsonc`, copie a URL HTTPS retornada para a variável do Pages e
 refaça seu deployment. Nenhum valor `IMAGEKIT_PRIVATE_KEY` deve ser cadastrado
 no Pages ou em variável `VITE_*`.
 
+`keep_vars: true` preserva as variáveis e secrets já cadastrados no Worker
+durante um deploy do código; isso não substitui a conferência prévia com
+`wrangler secret list`. O gate `npm run build:release` rejeita endpoint local,
+mock, projeto Firebase divergente e material de chave privada no bundle. A
+ordem de implantação e o rollback estão em
+[`issue-54-release-runbook.md`](issue-54-release-runbook.md).
+
 Para rotacionar a chave, crie uma nova private key no ImageKit, atualize o secret
 do Worker com o mesmo comando, valide upload e remoção e somente então revogue a
 chave anterior. Nunca registre a chave em logs, Firestore ou arquivos

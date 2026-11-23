@@ -3,7 +3,12 @@ import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const bundleRoot = fileURLToPath(new URL('../dist/', import.meta.url))
-const forbidden = ['IMAGEKIT_PRIVATE_KEY']
+const forbidden = [
+  'IMAGEKIT_PRIVATE_KEY',
+  '-----BEGIN PRIVATE KEY-----',
+  '-----BEGIN RSA PRIVATE KEY-----',
+  'service_account',
+]
 if (process.env.IMAGEKIT_PRIVATE_KEY) {
   forbidden.push(process.env.IMAGEKIT_PRIVATE_KEY)
 }

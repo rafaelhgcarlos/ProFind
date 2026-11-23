@@ -25,6 +25,14 @@ const mocks = vi.hoisted(() => ({
   listMunicipalitiesByState: vi.fn(),
 }))
 
+const DAY_IN_MS = 24 * 60 * 60 * 1_000
+const futureServiceDate = new Date(Date.now() + 10 * DAY_IN_MS)
+  .toISOString()
+  .slice(0, 10)
+const futurePeriodStartAt = new Date(Date.now() + 10 * DAY_IN_MS)
+const futureAcceptUntil = new Date(Date.now() + 5 * DAY_IN_MS)
+const expiredAcceptUntil = new Date(Date.now() - DAY_IN_MS)
+
 vi.mock('../../../components/layout/ClientLayout', () => ({
   ClientLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
 }))
@@ -101,10 +109,10 @@ const recoveredDetails: OwnServiceRequestDetails = {
     categoryId: 'maintenance',
     specialtyId: 'electrician',
     cityIbgeCode: '3509502',
-    serviceDate: '2026-11-10',
+    serviceDate: futureServiceDate,
     period: 'MORNING',
-    periodStartAt: new Date('2026-11-10T11:00:00Z'),
-    acceptUntil: new Date('2026-11-20T10:30:00Z'),
+    periodStartAt: futurePeriodStartAt,
+    acceptUntil: futureAcceptUntil,
     status: 'OPEN',
     round: 1,
     currentRoundId: 'round-1',
@@ -151,7 +159,7 @@ async function fillForm() {
   await user.type(screen.getByLabelText('Número *'), '100')
   await user.type(screen.getByLabelText('Bairro *'), 'Centro')
   await user.type(screen.getByLabelText('CEP *'), '13000000')
-  await user.type(screen.getByLabelText('Data *'), '2026-11-10')
+  await user.type(screen.getByLabelText('Data *'), futureServiceDate)
   await user.click(screen.getByLabelText(/Manhã/))
   return user
 }
@@ -184,10 +192,10 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
         categoryId: 'maintenance',
         specialtyId: 'electrician',
         cityIbgeCode: '3509502',
-        serviceDate: '2026-11-10',
+        serviceDate: futureServiceDate,
         period: 'MORNING',
-        periodStartAt: new Date(),
-        acceptUntil: new Date('2026-11-20T10:30:00Z'),
+        periodStartAt: futurePeriodStartAt,
+        acceptUntil: futureAcceptUntil,
         status: 'OPEN',
         round: 1,
         currentRoundId: 'round-1',
@@ -206,7 +214,7 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
       idempotent: false,
       request: {
         requestId: 'request-operation-key-000001',
-        serviceDate: '2026-11-10',
+        serviceDate: futureServiceDate,
         period: 'MORNING',
         status: 'CANCELLED',
       },
@@ -234,7 +242,7 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
       request: {
         requestId: 'request-operation-key-000001', operationKey: 'request-operation-key-000001',
         clientId: 'client-owner', categoryId: 'maintenance', specialtyId: 'electrician', cityIbgeCode: '3509502',
-        serviceDate: '2026-11-10', period: 'MORNING', periodStartAt: new Date(), acceptUntil: new Date('2026-11-20T10:30:00Z'), status: 'OPEN',
+        serviceDate: futureServiceDate, period: 'MORNING', periodStartAt: futurePeriodStartAt, acceptUntil: futureAcceptUntil, status: 'OPEN',
         round: 1, currentRoundId: 'round-1', assignedProfessionalId: null, currentAssignmentId: null,
         reopenReason: null, excludedProfessionalIds: [],
       },
@@ -400,7 +408,7 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
       ...recoveredDetails,
       request: {
         ...recoveredDetails.request,
-        acceptUntil: new Date('2026-11-01T10:30:00Z'),
+        acceptUntil: expiredAcceptUntil,
       },
     })
     renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
@@ -434,7 +442,7 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
         reopenReason: 'PROFESSIONAL_CANCELLATION',
         round: 2,
         currentRoundId: 'round-2',
-        acceptUntil: new Date('2026-11-01T10:30:00Z'),
+        acceptUntil: expiredAcceptUntil,
       },
     })
     renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
