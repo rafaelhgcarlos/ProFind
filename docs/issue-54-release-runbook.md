@@ -14,12 +14,12 @@ domínios ou fechamento da issue.
 | Firebase Auth | `profind-42bf7.firebaseapp.com` | e-mail/senha e sessão do cliente |
 | ImageKit | endpoint público configurado em `VITE_IMAGEKIT_URL_ENDPOINT` | mídia persistente |
 
-Firebase Hosting não faz parte desta publicação. `firebase.json` contém somente
-Firestore e emuladores. O Pages usa `wrangler.jsonc` e saída `dist`; `index.html`
-na raiz e a ausência de `404.html` ativam o fallback SPA nativo do Pages. O
-gate do bundle verifica essas duas condições. O Worker continua isolado em
-`worker/wrangler.jsonc` e preserva variáveis/segredos já cadastrados com
-`keep_vars: true`.
+O painel do Pages define o build do frontend, as variáveis `VITE_*` e a saída
+`dist`. Mantenha a raiz do repositório sem uma configuração Wrangler para o
+Pages. No deploy de 24/11/2026, o arquivo na raiz fez o build ignorar as
+variáveis cadastradas no painel. O gate do bundle exige `index.html` na raiz e
+a ausência de `404.html` para ativar o fallback SPA nativo. O Worker usa
+`worker/wrangler.jsonc`, com `keep_vars: true` para preservar sua configuração.
 
 ## Estado verificado em 23/11/2026
 
@@ -68,7 +68,7 @@ Configuração de build do Pages:
 
 - branch de produção: `main`;
 - versão Node: 22 ou superior;
-- comando: `npm ci && npm run build:release`;
+- comando: `if [ "$CF_PAGES_BRANCH" = "main" ]; then npm run build:release; else npm run build; fi`;
 - diretório de saída: `dist`;
 - diretório raiz: raiz do repositório.
 

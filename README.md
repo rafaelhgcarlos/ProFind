@@ -111,10 +111,9 @@ regras antes de publicar a nova interface.
 ## Publicação
 
 O frontend permanece no Cloudflare Pages em `https://profind.pages.dev`.
-`wrangler.jsonc` fixa o projeto `profind` e a saída `dist`. O artefato mantém
-`index.html` na raiz e não cria `404.html`, ativando o fallback SPA nativo do
-Pages. `firebase.json` configura somente Firestore e emuladores: Firebase
-Hosting não faz parte da implantação.
+Configure o build e as variáveis `VITE_*` no painel do projeto `profind`,
+com saída em `dist`. O artefato contém `index.html` na raiz e omite
+`404.html` para ativar o fallback SPA nativo do Pages.
 
 Não execute os comandos de publicação sem seguir a ordem, as verificações de
 índices, a matriz de compatibilidade e o rollback descritos em
