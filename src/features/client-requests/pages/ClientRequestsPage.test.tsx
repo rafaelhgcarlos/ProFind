@@ -38,7 +38,7 @@ vi.mock('../../../components/layout/ClientLayout', () => ({
 vi.mock('../../service-reports/components/ClientServiceReports', () => ({
   ClientServiceReports: () => <section>Relatos deste pedido</section>,
 }))
-vi.mock('../../admin/components/AdminImageViewer', () => ({ AdminImageViewer: () => null }))
+vi.mock('../../../components/ui/image-viewer', () => ({ ImageViewer: () => null }))
 
 function request(overrides: Partial<ServiceRequestSummary> = {}): ServiceRequestSummary {
   return {
@@ -148,7 +148,7 @@ describe('ClientRequestsPage', () => {
     await waitFor(() => expect(mocks.subscribeOwnRequests).toHaveBeenLastCalledWith(
       expect.objectContaining({ pageSize: 10, cursor }),
     ))
-    expect(await screen.findByText('Pedido #equest-2')).toBeInTheDocument()
+    expect(await screen.findByText('Código do pedido · equest-2')).toBeInTheDocument()
   })
 
   it('exibe somente o responsável atual, portfólio e ausência real de avaliações', async () => {

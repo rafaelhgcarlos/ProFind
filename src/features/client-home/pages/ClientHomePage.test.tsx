@@ -1,11 +1,13 @@
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
+import type { Swiper } from 'swiper'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCatalog } from '../../home/use-catalog'
 import { useProfile } from '../../onboarding/use-profile'
-import type { ServiceRequestSummary } from '../../../types/service-request'
+import type { ClientActiveRequestsSubscriptionInput } from '../../../services/service-request.service'
+import { CLIENT_ACTIVE_REQUESTS_LIMIT, type ServiceRequestSummary } from '../../../types/service-request'
 import { ClientHomePage } from './ClientHomePage'
 
 const requestMocks = vi.hoisted(() => ({
@@ -240,9 +242,79 @@ describe('ClientHomePage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('Estados salvos no dispositivo')).toBeInTheDocument()
+    expect(await screen.findByText('Dados salvos no dispositivo')).toBeInTheDocument()
     expect(screen.getByText('Estado salvo')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Controles dos pedidos ativos' })).not.toBeInTheDocument()
     expect(screen.getByText(/não confirmam a situação atual/i)).toBeInTheDocument()
+  })
+
+  it('mantém sete pedidos navegáveis e preserva a posição e o foco em atualizações', async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(320)
+    requestMocks.subscribeOwnActiveRequests.mockReturnValue(requestMocks.unsubscribe)
+    const items = Array.from({ length: 7 }, (_, index) => ({
+      request: request('carousel-' + index),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }))
+    renderPage()
+    const subscription: ClientActiveRequestsSubscriptionInput = requestMocks.subscribeOwnActiveRequests.mock.calls[0][0]
+    await act(async () => {
+      await Promise.resolve()
+      subscription.onRequests({ items, fromCache: false })
+    })
+
+    expect(screen.getByRole('heading', { name: '7 pedidos ativos' })).toBeInTheDocument()
+    const track = screen.getByRole('region', { name: 'Pedidos em acompanhamento' }) as HTMLElement & { swiper: Swiper }
+    const { swiper } = track
+    swiper.params.speed = 0
+    const previous = screen.getByRole('button', { name: 'Pedidos anteriores' })
+    const next = screen.getByRole('button', { name: 'Próximos pedidos' })
+    expect(previous).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(next)
+    expect(swiper.activeIndex).toBe(1)
+    fireEvent.keyDown(track, { key: 'ArrowRight' })
+    expect(swiper.activeIndex).toBe(2)
+    expect(screen.getByText('3 / 7')).toBeVisible()
+
+    const links = screen.getAllByRole('link', { name: 'Acompanhar pedido' })
+    expect(links).toHaveLength(7)
+    const inserted = { ...items[0], request: request('carousel-inserted') }
+    const reordered = [inserted, ...items]
+    await act(async () => subscription.onRequests({ items: reordered, fromCache: false }))
+    expect(swiper.slides[swiper.activeIndex].dataset.requestId).toBe('carousel-2')
+
+    const lastCard = swiper.slides.at(-1)!
+    vi.spyOn(lastCard, 'getBoundingClientRect').mockReturnValue(new DOMRect(600, 0, 290, 200))
+    act(() => links[6].focus())
+    expect(next).toHaveAttribute('aria-disabled', 'true')
+    const index = swiper.activeIndex
+    await act(async () => subscription.onRequests({
+      items: reordered.map((item) => item.request.requestId !== 'carousel-6' ? item : {
+        ...item,
+        request: { ...item.request, acceptUntil: new Date('2000-01-01') },
+      }),
+      fromCache: false,
+    }))
+    expect(links[6]).toHaveFocus()
+    expect(swiper.activeIndex).toBe(index)
+    expect(screen.getByText('Prazo encerrado')).toBeVisible()
+    width.mockRestore()
+  })
+
+  it('informa a contagem como limite inferior quando a consulta está cheia', async () => {
+    requestMocks.subscribeOwnActiveRequests.mockReturnValue(requestMocks.unsubscribe)
+    const items = Array.from({ length: CLIENT_ACTIVE_REQUESTS_LIMIT }, (_, index) => ({
+      request: request('limit-' + index),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }))
+    renderPage()
+    const subscription: ClientActiveRequestsSubscriptionInput = requestMocks.subscribeOwnActiveRequests.mock.calls[0][0]
+    await act(async () => {
+      await Promise.resolve()
+      subscription.onRequests({ items, fromCache: false })
+    })
+    expect(screen.getByRole('heading', { name: '50 ou mais pedidos ativos' })).toBeInTheDocument()
   })
 
   it('leva o foco à busca ao abrir a ação da navegação por hash', () => {

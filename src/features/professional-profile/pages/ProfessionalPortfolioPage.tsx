@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   CircleAlert,
   ImagePlus,
-  Images,
   RotateCcw,
   Save,
   Trash2,
@@ -27,6 +26,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../../components/ui/dialog'
+import { ImageViewer, type ViewerImage } from '../../../components/ui/image-viewer'
+import { ImageThumbnail } from '../../../components/ui/image-thumbnail'
 import { Input } from '../../../components/ui/input'
 import { Label } from '../../../components/ui/label'
 import { PrivacyNotice } from '../../../components/ui/privacy-notice'
@@ -186,6 +187,8 @@ function UploadTaskFeedback({
 }
 
 export function ProfessionalPortfolioPage() {
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
+  const [viewerReturnFocus, setViewerReturnFocus] = useState<HTMLButtonElement | null>(null)
   useDocumentTitle('Portfólio profissional — ProFind')
   const { user } = useAuth()
   const { profile: userProfile, syncProfessionalProfile } = useProfile()
@@ -248,6 +251,11 @@ export function ProfessionalPortfolioPage() {
     }
   }, [attempt, userId])
 
+  const viewerImages: ViewerImage[] = images.map((image, index) => ({
+    url: image.url,
+    alt: image.altText || 'Prévia do trabalho ' + (index + 1) + ' do portfólio',
+    label: 'Trabalho ' + (index + 1),
+  }))
   const persistedImages = profile?.portfolioImages ?? []
   const hasUnsavedChanges =
     JSON.stringify(images) !== JSON.stringify(persistedImages)
@@ -732,11 +740,18 @@ export function ProfessionalPortfolioPage() {
                   className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border bg-card shadow-soft [contain:inline-size]"
                 >
                   <div className="relative aspect-[4/3] w-full min-w-0 max-w-full overflow-hidden bg-muted">
-                    <img
-                      src={image.url}
-                      alt={image.altText || `Prévia do trabalho ${position} do portfólio`}
-                      className="block h-full w-full min-w-0 max-w-full object-cover"
-                    />
+                    <button
+                      type="button"
+                      className="block w-full focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                      aria-label={'Ampliar trabalho ' + position}
+                      onClick={(event) => {
+                        setViewerReturnFocus(event.currentTarget)
+                        setViewerIndex(order)
+                      }}
+                    >
+                      <ImageThumbnail src={image.url} alt={viewerImages[order].alt} className="rounded-none" />
+                      <span className="absolute right-3 bottom-3 rounded-sm bg-card px-2 py-1 text-xs font-semibold">Ampliar</span>
+                    </button>
                     <Badge className="absolute top-3 left-3 shadow-sm">
                       Trabalho {position}
                     </Badge>
@@ -825,17 +840,7 @@ export function ProfessionalPortfolioPage() {
                   className="flex w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border bg-card shadow-soft [contain:inline-size]"
                 >
                   <div className="relative aspect-[4/3] w-full min-w-0 max-w-full overflow-hidden bg-muted">
-                    {task.previewUrl ? (
-                      <img
-                        src={task.previewUrl}
-                        alt={`Prévia temporária do trabalho ${position}`}
-                        className="block h-full w-full min-w-0 max-w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex size-full items-center justify-center">
-                        <Images className="size-8 text-muted-foreground" aria-hidden="true" />
-                      </div>
-                    )}
+                    <ImageThumbnail src={task.previewUrl} alt={'Prévia temporária do trabalho ' + position} className="rounded-none" />
                     <Badge className="absolute top-3 left-3 shadow-sm">
                       Trabalho {position}
                     </Badge>
@@ -912,6 +917,8 @@ export function ProfessionalPortfolioPage() {
       >
         Enviamos o arquivo apenas ao provedor configurado e salvamos somente a URL HTTPS, o identificador, a ordem e o texto alternativo.
       </PrivacyNotice>
+      <ImageViewer images={viewerImages} index={viewerIndex} returnFocusTo={viewerReturnFocus} onIndexChange={setViewerIndex} />
+
 
       <Dialog
         open={Boolean(imagePendingRemoval)}

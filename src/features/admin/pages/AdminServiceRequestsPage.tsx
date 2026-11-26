@@ -2,23 +2,30 @@ import {
   AlertTriangle,
   Ban,
   CalendarClock,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Copy,
   ClockAlert,
   FileWarning,
   MapPin,
+  Pencil,
+  Play,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   ShieldCheck,
   UserRound,
+  XCircle,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ComponentPropsWithoutRef } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
+import { toast } from 'sonner'
 
 import { AdminLayout } from '../../../components/layout/AdminLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
+import { AppliedFilterList } from '../../../components/ui/applied-filters'
+import { ActivityTimeline, type ActivityItem } from '../../../components/ui/activity-timeline'
 import { Badge, type BadgeProps } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import {
@@ -31,8 +38,10 @@ import {
 import { EmptyState } from '../../../components/ui/empty-state'
 import { Input } from '../../../components/ui/input'
 import { Label } from '../../../components/ui/label'
+import { NativeSelect } from '../../../components/ui/native-select'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
+import { useServiceToday } from '../../../hooks/use-service-today'
 import { adminServiceRequestService } from '../../../services/admin-service-request.service'
 import { SERVICE_PERIOD_DEFINITIONS } from '../../../services/service-period-policy'
 import type {
@@ -48,11 +57,13 @@ import {
   SERVICE_PERIODS,
   SERVICE_REQUEST_STATUSES,
   type ServicePeriod,
+  type ServiceRequestEvent,
   type ServiceRequestStatus,
   type ServiceRequestSummary,
 } from '../../../types/service-request'
 import { formatPostalCode } from '../../../services/postal-code.service'
 import { cn } from '../../../utils/cn'
+import { formatCalendarDate, formatCompactServiceDate, formatServiceHours, formatServiceTimestamp as formatDateTime } from '../../../utils/service-date-display'
 import { useAuth } from '../../auth/use-auth'
 import { useCatalog } from '../../home/use-catalog'
 
@@ -92,6 +103,18 @@ const EVENT_LABELS: Record<string, string> = {
   ADMIN_REOPENED_FROM_REPORT: 'Reabertura administrativa por relato',
 }
 
+const EVENT_ICONS: Record<ServiceRequestEvent['type'], ActivityItem['icon']> = {
+  REQUEST_CREATED: ClipboardList,
+  REQUEST_EDITED: Pencil,
+  REQUEST_CANCELLED: XCircle,
+  REQUEST_ASSIGNED: ShieldCheck,
+  PROFESSIONAL_REFUSED: Ban,
+  PROFESSIONAL_CANCELLED_AND_REOPENED: RefreshCw,
+  SERVICE_STARTED: Play,
+  SERVICE_COMPLETED: ShieldCheck,
+  ADMIN_REOPENED_FROM_REPORT: FileWarning,
+}
+
 const ROUND_REASON_LABELS: Record<string, string> = {
   INITIAL: 'Rodada inicial',
   CLIENT_EDIT: 'Edição do cliente',
@@ -116,26 +139,6 @@ interface FilterForm {
 }
 
 const filterFieldClass = 'grid min-w-0 content-start gap-2'
-const filterControlClass =
-  'box-border h-11 w-full min-w-0 max-w-full forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid'
-
-function FilterSelect(props: ComponentPropsWithoutRef<'select'>) {
-  return (
-    <div className="relative min-w-0">
-      <select
-        {...props}
-        className={cn(
-          filterControlClass,
-          'block appearance-none rounded-md border border-input bg-background py-2 ps-3 pe-9 text-base text-foreground shadow-sm transition-colors focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:text-sm forced-colors:appearance-auto forced-colors:pe-3',
-        )}
-      />
-      <ChevronDown
-        aria-hidden="true"
-        className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground forced-colors:hidden"
-      />
-    </div>
-  )
-}
 
 const EMPTY_FILTERS: FilterForm = {
   requestId: '',
@@ -156,18 +159,7 @@ function errorMessage(error: unknown) {
 }
 
 function formatDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || 'Não informada'
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: 'UTC' })
-    .format(new Date(`${value}T12:00:00Z`))
-}
-
-function formatDateTime(value: Date | null | undefined) {
-  if (!value || Number.isNaN(value.getTime())) return 'Não informado'
-  return new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-    timeZone: 'America/Sao_Paulo',
-  }).format(value)
+  return formatCalendarDate(value, 'short')
 }
 
 function formatPhone(value: string) {
@@ -191,8 +183,8 @@ function operationalLabel(request: ServiceRequestSummary) {
 function statusVariant(status: ServiceRequestStatus): BadgeProps['variant'] {
   if (status === 'COMPLETED') return 'success'
   if (status === 'CANCELLED') return 'destructive'
-  if (status === 'OPEN') return 'warning'
-  return status === 'IN_PROGRESS' ? 'default' : 'secondary'
+  if (status === 'OPEN') return 'outline'
+  return 'secondary'
 }
 
 function withoutAcceptance(request: ServiceRequestSummary) {
@@ -208,71 +200,109 @@ function periodOverdue(request: ServiceRequestSummary) {
     && request.periodStartAt.getTime() <= Date.now()
 }
 
-function RequestBadges({
+function RequestStatus({
   request,
   item,
 }: {
   request: ServiceRequestSummary
   item?: AdminRequestListItem
 }) {
+  const expired = acceptanceExpired(request)
+  const alerts = [
+    expired ? 'Ainda sem aceite' : null,
+    periodOverdue(request) ? 'Período vencido' : null,
+    item?.openReportCount ? (item.openReportCount === 1 ? '1 relato pendente' : item.openReportCount + ' relatos pendentes') : null,
+    item?.responsibleRestricted ? 'Responsável restrito' : null,
+    item?.eligibilityVerification === 'NONE_FOUND' ? 'Sem profissionais elegíveis' : null,
+  ].filter(Boolean)
   return (
-    <div className="flex flex-wrap gap-2">
-      <Badge variant={statusVariant(request.status)}>{operationalLabel(request)}</Badge>
-      {withoutAcceptance(request) ? <Badge variant="outline">Ainda sem aceite</Badge> : null}
-      {acceptanceExpired(request) ? (
-        <Badge variant="destructive"><ClockAlert aria-hidden="true" /> Prazo de aceite encerrado</Badge>
+    <div className="grid min-w-0 justify-items-start gap-1.5">
+      <Badge variant={expired ? 'destructive' : statusVariant(request.status)} className="max-w-full whitespace-normal wrap-anywhere">
+        {expired ? 'Prazo de aceite encerrado' : operationalLabel(request)}
+      </Badge>
+      {alerts.length ? (
+        <ul className="grid gap-1 text-xs leading-5 text-muted-foreground">
+          {alerts.map((alert) => <li key={alert}>{alert}</li>)}
+        </ul>
       ) : null}
-      {periodOverdue(request) ? <Badge variant="destructive">Período vencido</Badge> : null}
-      {item?.openReportCount ? <Badge variant="warning"><FileWarning aria-hidden="true" /> {item.openReportCount} relato(s) pendente(s)</Badge> : null}
-      {item?.responsibleRestricted ? <Badge variant="destructive"><Ban aria-hidden="true" /> Responsável restrito</Badge> : null}
-      {item?.eligibilityVerification === 'NONE_FOUND' ? <Badge variant="destructive">Sem profissionais elegíveis</Badge> : null}
     </div>
   )
 }
 
-function LoadingCards() {
+function LoadingCards({ list = false }: { list?: boolean }) {
   return (
-    <div role="status" aria-live="polite" className="grid gap-4 lg:grid-cols-2">
+    <div role="status" className={cn('grid gap-4', !list && 'lg:grid-cols-2')}>
       <span className="sr-only">Carregando pedidos…</span>
-      <Skeleton className="h-56" />
-      <Skeleton className="h-56" />
+      <Skeleton className={list ? 'h-28' : 'h-56'} />
+      <Skeleton className={list ? 'h-28' : 'h-56'} />
     </div>
   )
 }
 
-function RequestCard({
-  item,
-  specialtyName,
-  detailBasePath,
-}: {
-  item: AdminRequestListItem
-  specialtyName: string
+function AppliedFilters({ filters, onRemove }: { filters: FilterForm; onRemove: (key: keyof FilterForm) => void }) {
+  const labels: [keyof FilterForm, string][] = [
+    ['requestId', filters.requestId && `Código: ${filters.requestId}`],
+    ['status', filters.status && `Estado: ${OPERATIONAL_STATE_LABELS[filters.status]}`],
+    ['pending', filters.pending && filters.pending !== 'ALL' ? PENDING_LABELS[filters.pending] : ''],
+    ['period', filters.period && `Período: ${SERVICE_PERIOD_DEFINITIONS[filters.period].label}`],
+    ['scheduledFrom', filters.scheduledFrom && `De: ${formatDate(filters.scheduledFrom)}`],
+    ['scheduledTo', filters.scheduledTo && `Até: ${formatDate(filters.scheduledTo)}`],
+  ]
+  return <AppliedFilterList items={labels} onRemove={onRemove} />
+}
+
+function RequestResults({ items, specialtyNames, detailBasePath }: {
+  items: AdminRequestListItem[]
+  specialtyNames: Map<string, string>
   detailBasePath: string
 }) {
-  const request = item.request
+  const columns = ['Serviço', 'Município', 'Agendamento', 'Profissional responsável', 'Situação']
+  const today = useServiceToday()
+
   return (
-    <Card className="h-full">
-      <CardHeader>
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <p className="break-all font-mono text-xs text-muted-foreground">{request.requestId}</p>
-            <CardTitle className="mt-2">{specialtyName}</CardTitle>
-          </div>
-          <RequestBadges request={request} item={item} />
-        </div>
-      </CardHeader>
-      <CardContent className="grid gap-4">
-        <dl className="grid gap-3 text-sm sm:grid-cols-2">
-          <div><dt className="text-muted-foreground">Município</dt><dd className="font-medium">{item.city} — {item.stateCode}</dd></div>
-          <div><dt className="text-muted-foreground">Data e período</dt><dd className="font-medium">{formatDate(request.serviceDate)} · {SERVICE_PERIOD_DEFINITIONS[request.period].label}</dd></div>
-          <div><dt className="text-muted-foreground">Criação</dt><dd className="font-medium">{formatDateTime(item.createdAt)}</dd></div>
-          <div><dt className="text-muted-foreground">Responsável atual</dt><dd className="font-medium">{item.responsibleName || 'Ainda não definido'}</dd></div>
-        </dl>
-        <Button asChild variant="outline" className="w-full sm:w-fit">
-          <Link to={`${detailBasePath}/${encodeURIComponent(request.requestId)}`}>Ver detalhes</Link>
-        </Button>
-      </CardContent>
-    </Card>
+    <section aria-label="Resultados dos pedidos" className="@container min-w-0">
+      <table role="table" aria-label="Pedidos" className="block w-full text-left text-sm lg:@min-[42rem]:table lg:@min-[42rem]:table-fixed lg:@min-[42rem]:border-separate lg:@min-[42rem]:border-spacing-0 lg:@min-[42rem]:rounded-lg lg:@min-[42rem]:border lg:@min-[42rem]:bg-card">
+        <thead role="rowgroup" className="hidden lg:@min-[42rem]:table-header-group">
+          <tr role="row" className="bg-muted text-xs text-muted-foreground">
+            {columns.map((column) => (
+              <th key={column} role="columnheader" scope="col" className="border-b px-4 py-3 font-semibold first:rounded-tl-lg last:w-[26%] last:rounded-tr-lg">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody role="rowgroup" className="grid gap-3 lg:@min-[42rem]:table-row-group">
+          {items.map((item) => {
+            const { request } = item
+            return (
+              <tr key={request.requestId} role="row" className="grid min-w-0 grid-cols-2 gap-3 rounded-lg border bg-card p-4 wrap-anywhere lg:@min-[42rem]:table-row lg:@min-[42rem]:rounded-none lg:@min-[42rem]:border-0 lg:@min-[42rem]:bg-transparent lg:@min-[42rem]:p-0 lg:@min-[42rem]:not-last:[&>td]:border-b">
+                <td role="cell" className="col-span-full min-w-0 lg:@min-[42rem]:px-4 lg:@min-[42rem]:py-4 lg:@min-[42rem]:align-top">
+                  <p className="font-semibold">{specialtyNames.get(request.specialtyId) ?? 'Serviço solicitado'}</p>
+                  <Link to={`${detailBasePath}/${encodeURIComponent(request.requestId)}`} className="mt-0.5 inline-flex min-h-9 items-center rounded-sm text-xs font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring">
+                    Ver detalhes <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+                  </Link>
+                </td>
+                <td role="cell" className="min-w-0 lg:@min-[42rem]:px-4 lg:@min-[42rem]:py-4 lg:@min-[42rem]:align-top">
+                  <span className="block text-xs text-muted-foreground lg:@min-[42rem]:hidden">Município</span>
+                  {item.city} — {item.stateCode}
+                </td>
+                <td role="cell" className="min-w-0 lg:@min-[42rem]:px-4 lg:@min-[42rem]:py-4 lg:@min-[42rem]:align-top">
+                  <span className="block text-xs text-muted-foreground lg:@min-[42rem]:hidden">Agendamento</span>
+                  <time dateTime={request.serviceDate}>{formatCompactServiceDate(request.serviceDate, today)}</time> · {SERVICE_PERIOD_DEFINITIONS[request.period].label}
+                </td>
+                <td role="cell" className="col-span-full min-w-0 lg:@min-[42rem]:px-4 lg:@min-[42rem]:py-4 lg:@min-[42rem]:align-top">
+                  <span className="block text-xs text-muted-foreground lg:@min-[42rem]:hidden">Profissional responsável</span>
+                  {item.responsibleName || 'Ainda não definido'}
+                </td>
+                <td role="cell" className="col-span-full min-w-0 border-t pt-3 lg:@min-[42rem]:border-t-0 lg:@min-[42rem]:px-4 lg:@min-[42rem]:py-4 lg:@min-[42rem]:align-top">
+                  <RequestStatus request={request} item={item} />
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </section>
   )
 }
 
@@ -343,85 +373,94 @@ function AdminRequestsList({ pendingMode }: { pendingMode: boolean }) {
     setPreviousCursors([])
   }
 
+  function removeFilter(key: keyof FilterForm) {
+    const cleared = initialFilters[key]
+    setForm((current) => current[key] === filters[key] ? { ...current, [key]: cleared } : current)
+    setFilters((current) => ({ ...current, [key]: cleared }))
+    resetPagination()
+    document.getElementById('admin-requests-search')?.focus()
+  }
+
   return (
     <AdminLayout
       pageTitle={pendingMode ? 'Pendências' : 'Pedidos'}
+      heading={{
+        title: pendingMode ? 'Pendências que exigem atenção' : 'Pedidos de todos os clientes',
+        description: pendingMode ? 'Consulte a fila para ver os pedidos que precisam de atenção.' : 'Consulte os pedidos e acompanhe cada atendimento.',
+      }}
       userName={user?.displayName || user?.email || 'Administrador ProFind'}
       activeNavigationHref={pendingMode ? '/admin/pendencias' : '/admin/pedidos'}
     >
       <div className="grid gap-6">
-        <div>
-          <p className="text-sm font-semibold text-primary">{pendingMode ? 'Fila calculada na consulta' : 'Acompanhamento operacional'}</p>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight">{pendingMode ? 'Pendências que exigem atenção' : 'Pedidos de todos os clientes'}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            {pendingMode
-              ? 'A fila é recalculada ao consultar: não depende de cron, push ou do site permanecer aberto.'
-              : 'Consulte o ciclo completo. Estados só mudam pelas operações transacionais do domínio.'}
-          </p>
-        </div>
-
         <Card>
           <CardHeader>
             <CardTitle>Filtros</CardTitle>
-            <CardDescription>As consultas são paginadas e limitadas a 12 pedidos por vez.</CardDescription>
+            <CardDescription>Busque pelo código ou combine filtros para encontrar pedidos.</CardDescription>
           </CardHeader>
           <CardContent className="@container">
             <form
-              className={cn(
-                'grid min-w-0 grid-cols-1 gap-4 @min-[30rem]:grid-cols-2',
-                pendingMode
-                  ? '@min-[45rem]:grid-cols-3'
-                  : '@min-[58rem]:grid-cols-[minmax(0,1.15fr)_minmax(0,1.5fr)_minmax(0,0.85fr)_repeat(2,minmax(0,1fr))]',
-              )}
+              className="grid min-w-0 gap-4"
               onSubmit={(event) => {
                 event.preventDefault()
                 resetPagination()
-                setFilters({ ...form })
+                const requestId = form.requestId.trim()
+                setForm({ ...form, requestId })
+                setFilters({ ...form, requestId })
               }}
             >
-              <div className={cn(filterFieldClass, !pendingMode && 'col-span-full @min-[58rem]:col-span-1')}>
-                <Label htmlFor="admin-request-id">Identificador exato</Label>
-                <Input id="admin-request-id" className={filterControlClass} value={form.requestId} onChange={(event) => setForm((current) => ({ ...current, requestId: event.target.value }))} />
-              </div>
-              <div className={filterFieldClass}>
-                <Label htmlFor="admin-request-status">Estado</Label>
-                <FilterSelect id="admin-request-status" value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as FilterForm['status'] }))}>
-                  <option value="">Todos</option>
-                  {([...SERVICE_REQUEST_STATUSES, 'REPLACEMENT'] as AdminOperationalState[]).map((status) => <option key={status} value={status}>{OPERATIONAL_STATE_LABELS[status]}</option>)}
-                </FilterSelect>
-              </div>
-              {pendingMode ? (
+              <div className={cn('grid gap-4 @min-[30rem]:grid-cols-2', pendingMode && '@min-[50rem]:grid-cols-3')}>
                 <div className={filterFieldClass}>
-                  <Label htmlFor="admin-request-pending">Pendência</Label>
-                  <FilterSelect id="admin-request-pending" value={form.pending} onChange={(event) => setForm((current) => ({ ...current, pending: event.target.value as FilterForm['pending'] }))}>
-                    {Object.entries(PENDING_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </FilterSelect>
+                  <Label htmlFor="admin-request-id">Código do pedido</Label>
+                  <Input id="admin-request-id" className="h-11" value={form.requestId} onChange={(event) => setForm((current) => ({ ...current, requestId: event.target.value }))} />
                 </div>
-              ) : null}
-              <div className={filterFieldClass}>
-                <Label htmlFor="admin-request-period">Período</Label>
-                <FilterSelect id="admin-request-period" value={form.period} onChange={(event) => setForm((current) => ({ ...current, period: event.target.value as FilterForm['period'] }))}>
-                  <option value="">Todos</option>
-                  {SERVICE_PERIODS.map((period) => <option key={period} value={period}>{SERVICE_PERIOD_DEFINITIONS[period].label}</option>)}
-                </FilterSelect>
+                <div className={filterFieldClass}>
+                  <Label htmlFor="admin-request-status">Estado</Label>
+                  <NativeSelect className="h-11" id="admin-request-status" value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as FilterForm['status'] }))}>
+                    <option value="">Todos</option>
+                    {([...SERVICE_REQUEST_STATUSES, 'REPLACEMENT'] as AdminOperationalState[]).map((status) => <option key={status} value={status}>{OPERATIONAL_STATE_LABELS[status]}</option>)}
+                  </NativeSelect>
+                </div>
+                {pendingMode ? (
+                  <div className={filterFieldClass}>
+                    <Label htmlFor="admin-request-pending">Pendência</Label>
+                    <NativeSelect id="admin-request-pending" value={form.pending} onChange={(event) => setForm((current) => ({ ...current, pending: event.target.value as FilterForm['pending'] }))}>
+                      {Object.entries(PENDING_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </NativeSelect>
+                  </div>
+                ) : null}
               </div>
-              <div className={filterFieldClass}>
-                <Label htmlFor="admin-request-from">Agendado de</Label>
-                <Input id="admin-request-from" className={filterControlClass} type="date" value={form.scheduledFrom} onChange={(event) => setForm((current) => ({ ...current, scheduledFrom: event.target.value }))} />
-              </div>
-              <div className={filterFieldClass}>
-                <Label htmlFor="admin-request-to">Agendado até</Label>
-                <Input id="admin-request-to" className={filterControlClass} type="date" min={form.scheduledFrom || undefined} value={form.scheduledTo} onChange={(event) => setForm((current) => ({ ...current, scheduledTo: event.target.value }))} />
-              </div>
-              <div className="col-span-full flex min-w-0 flex-wrap items-center gap-4">
-                <Button type="submit"><Search aria-hidden="true" /> Consultar</Button>
+              <details className="group min-w-0 rounded-md border bg-surface-raised">
+                <summary className="min-h-11 cursor-pointer rounded-md px-4 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring">
+                  <SlidersHorizontal className="ms-1 me-2 inline size-4 align-text-bottom text-muted-foreground" aria-hidden="true" />Mais filtros
+                </summary>
+                <div className="grid gap-4 px-4 pb-4 motion-safe:group-open:ui-enter @min-[36rem]:grid-cols-3">
+                  <div className={filterFieldClass}>
+                    <Label htmlFor="admin-request-period">Período</Label>
+                    <NativeSelect id="admin-request-period" value={form.period} onChange={(event) => setForm((current) => ({ ...current, period: event.target.value as FilterForm['period'] }))}>
+                      <option value="">Todos</option>
+                      {SERVICE_PERIODS.map((period) => <option key={period} value={period}>{SERVICE_PERIOD_DEFINITIONS[period].label}</option>)}
+                    </NativeSelect>
+                  </div>
+                  <div className={filterFieldClass}>
+                    <Label htmlFor="admin-request-from">Agendado de</Label>
+                    <Input id="admin-request-from" className="h-11" type="date" value={form.scheduledFrom} onChange={(event) => setForm((current) => ({ ...current, scheduledFrom: event.target.value }))} />
+                  </div>
+                  <div className={filterFieldClass}>
+                    <Label htmlFor="admin-request-to">Agendado até</Label>
+                    <Input id="admin-request-to" className="h-11" type="date" min={form.scheduledFrom || undefined} value={form.scheduledTo} onChange={(event) => setForm((current) => ({ ...current, scheduledTo: event.target.value }))} />
+                  </div>
+                </div>
+              </details>
+              <AppliedFilters filters={filters} onRemove={removeFilter} />
+              <div className="flex min-w-0 flex-wrap items-center gap-4">
+                <Button type="submit" id="admin-requests-search"><Search aria-hidden="true" /> Consultar</Button>
                 <Button type="button" variant="outline" onClick={() => { setForm(initialFilters); resetPagination(); setFilters(initialFilters) }}>Limpar filtros</Button>
               </div>
             </form>
           </CardContent>
         </Card>
 
-        {loading ? <LoadingCards /> : null}
+        {loading ? <LoadingCards list /> : null}
         {!loading && error ? (
           <Alert variant="destructive">
             <AlertTriangle aria-hidden="true" />
@@ -430,15 +469,13 @@ function AdminRequestsList({ pendingMode }: { pendingMode: boolean }) {
           </Alert>
         ) : null}
         {!loading && !error && items.length === 0 ? (
-          <Card><EmptyState icon={<ClipboardList aria-hidden="true" />} title={pendingMode ? 'Nenhuma pendência nesta consulta' : 'Nenhum pedido nesta consulta'} description="Revise os filtros ou informe outro identificador exato." /></Card>
+          <Card><EmptyState icon={<ClipboardList aria-hidden="true" />} title={pendingMode ? 'Nenhuma pendência nesta consulta' : 'Nenhum pedido nesta consulta'} description="Ajuste os filtros ou confira o código do pedido." /></Card>
         ) : null}
         {!loading && !error && items.length > 0 ? (
-          <section aria-label="Pedidos" className="grid gap-4 lg:grid-cols-2">
-            {items.map((item) => <RequestCard key={item.request.requestId} item={item} specialtyName={specialtyNames.get(item.request.specialtyId) ?? item.request.specialtyId} detailBasePath={pendingMode ? '/admin/pendencias' : '/admin/pedidos'} />)}
-          </section>
+          <RequestResults items={items} specialtyNames={specialtyNames} detailBasePath={pendingMode ? '/admin/pendencias' : '/admin/pedidos'} />
         ) : null}
         {!loading && !error && !filters.requestId && (items.length > 0 || previousCursors.length > 0 || nextCursor) ? (
-          <nav aria-label="Paginação dos pedidos" className="flex items-center justify-between gap-3">
+          <nav aria-label="Paginação dos pedidos" className="flex flex-wrap items-center justify-between gap-3">
             <Button variant="outline" disabled={previousCursors.length === 0} onClick={() => { const history = [...previousCursors]; const previous = history.pop() ?? null; setPreviousCursors(history); setCursor(previous) }}><ChevronLeft aria-hidden="true" /> Anterior</Button>
             <span className="text-sm text-muted-foreground">Página {previousCursors.length + 1}</span>
             <Button variant="outline" disabled={!nextCursor} onClick={() => { setPreviousCursors((history) => [...history, cursor]); setCursor(nextCursor) }}>Próxima <ChevronRight aria-hidden="true" /></Button>
@@ -515,7 +552,7 @@ function AdminRequestDetailPage({
   const basePath = pendingMode ? '/admin/pendencias' : '/admin/pedidos'
 
   return (
-    <AdminLayout pageTitle="Detalhe do pedido" userName={user?.displayName || user?.email || 'Administrador ProFind'} activeNavigationHref={basePath}>
+    <AdminLayout pageTitle="Detalhe do pedido" heading={{ description: 'Consulte o agendamento, o responsável e o histórico.' }} userName={user?.displayName || user?.email || 'Administrador ProFind'} activeNavigationHref={basePath}>
       <div className="grid gap-6">
         <div><Button asChild variant="link"><Link to={basePath}><ChevronLeft aria-hidden="true" /> Voltar para {pendingMode ? 'pendências' : 'pedidos'}</Link></Button></div>
         {loading ? <LoadingCards /> : null}
@@ -526,32 +563,31 @@ function AdminRequestDetailPage({
           <>
             <Card>
               <CardHeader>
-                <p className="break-all font-mono text-xs text-muted-foreground">{detail.request.requestId}</p>
                 <CardTitle>{specialtyName || detail.request.specialtyId}</CardTitle>
-                <RequestBadges request={detail.request} />
+                <RequestStatus request={detail.request} />
               </CardHeader>
-              <CardContent><dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><dt className="text-muted-foreground">Data e período</dt><dd className="font-medium">{formatDate(detail.request.serviceDate)} · {SERVICE_PERIOD_DEFINITIONS[detail.request.period].label}</dd></div><div><dt className="text-muted-foreground">Criação</dt><dd className="font-medium">{formatDateTime(detail.createdAt)}</dd></div><div><dt className="text-muted-foreground">Última atualização</dt><dd className="font-medium">{formatDateTime(detail.updatedAt)}</dd></div><div><dt className="text-muted-foreground">Rodada atual</dt><dd className="font-medium">{detail.request.round}</dd></div></dl></CardContent>
+              <CardContent><dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><dt className="text-muted-foreground">Data e período</dt><dd className="font-medium">{formatCalendarDate(detail.request.serviceDate)} · {SERVICE_PERIOD_DEFINITIONS[detail.request.period].label} ({formatServiceHours(detail.request.period)})</dd></div><div><dt className="text-muted-foreground">Criação</dt><dd className="font-medium">{formatDateTime(detail.createdAt)}</dd></div><div><dt className="text-muted-foreground">Última atualização</dt><dd className="font-medium">{formatDateTime(detail.updatedAt)}</dd></div><div><dt className="text-muted-foreground">Rodada atual</dt><dd className="font-medium">{detail.request.round}</dd></div></dl></CardContent>
             </Card>
 
             {detail.request.status === 'COMPLETED' ? (
-              <Alert variant="success"><ShieldCheck aria-hidden="true" /><AlertTitle>Conclusão informada pelo profissional</AlertTitle><AlertDescription>Registro operacional do responsável atual; não representa confirmação do cliente, avaliação ou garantia de qualidade.</AlertDescription></Alert>
+              <Alert variant="success"><ShieldCheck aria-hidden="true" /><AlertTitle>Conclusão informada pelo profissional</AlertTitle><AlertDescription>A conclusão foi registrada pelo profissional e ainda não foi confirmada pelo cliente.</AlertDescription></Alert>
             ) : acceptanceExpired(detail.request) ? (
               <Alert variant="destructive"><ClockAlert aria-hidden="true" /><AlertTitle>Prazo de aceite encerrado</AlertTitle><AlertDescription>O pedido continua aberto e sem aceite. Esta sinalização não afirma ausência de profissionais elegíveis.</AlertDescription></Alert>
             ) : withoutAcceptance(detail.request) ? (
-              <Alert><CalendarClock aria-hidden="true" /><AlertTitle>Pedido ainda sem aceite</AlertTitle><AlertDescription>A procura está aberta. A existência ou ausência de candidatos não foi verificada por esta consulta.</AlertDescription></Alert>
+              <Alert><CalendarClock aria-hidden="true" /><AlertTitle>Pedido ainda sem aceite</AlertTitle><AlertDescription>O pedido ainda pode receber aceite. Use a verificação abaixo para saber se há profissionais elegíveis.</AlertDescription></Alert>
             ) : null}
 
             {periodOverdue(detail.request) ? (
-              <Alert variant="destructive"><ClockAlert aria-hidden="true" /><AlertTitle>Período do atendimento vencido</AlertTitle><AlertDescription>O pedido ainda não foi concluído ou cancelado. A pendência foi calculada no momento desta consulta.</AlertDescription></Alert>
+              <Alert variant="destructive"><ClockAlert aria-hidden="true" /><AlertTitle>Período do atendimento vencido</AlertTitle><AlertDescription>O pedido ainda não foi concluído ou cancelado. Consulte o histórico para acompanhar o que aconteceu.</AlertDescription></Alert>
             ) : null}
 
             {detail.responsibleRestricted ? (
-              <Alert variant="warning"><Ban aria-hidden="true" /><AlertTitle>Responsável com acesso operacional restrito</AlertTitle><AlertDescription>O compromisso confirmado foi preservado. A restrição não cancela nem redistribui o atendimento silenciosamente.</AlertDescription></Alert>
+              <Alert variant="warning"><Ban aria-hidden="true" /><AlertTitle>Responsável com acesso operacional restrito</AlertTitle><AlertDescription>O atendimento continua vinculado ao profissional. Consulte os relatos antes de decidir como prosseguir.</AlertDescription></Alert>
             ) : null}
 
             {detail.request.status === 'OPEN' ? (
               <Card>
-                <CardHeader><CardTitle>Elegibilidade neste momento</CardTitle><CardDescription>“Ainda sem aceite” não significa ausência de profissionais. A verificação usa aprovação atual, compatibilidade, disponibilidade, reserva, exclusão e recusa da rodada.</CardDescription></CardHeader>
+                <CardHeader><CardTitle>Profissionais elegíveis</CardTitle><CardDescription>Verifique quem pode aceitar este pedido agora.</CardDescription></CardHeader>
                 <CardContent className="grid gap-3">
                   {eligibility?.verification === 'ELIGIBLE_FOUND' ? <Alert variant="success"><ShieldCheck aria-hidden="true" /><AlertTitle>Há profissional elegível</AlertTitle><AlertDescription>{eligibility.eligibleProfessionalIds.length} profissional(is) elegível(is) entre {eligibility.checkedProfessionals} verificado(s). Isso não garante aceite.</AlertDescription></Alert> : null}
                   {eligibility?.verification === 'NONE_FOUND' ? <Alert variant="destructive"><Ban aria-hidden="true" /><AlertTitle>Sem profissionais elegíveis</AlertTitle><AlertDescription>A ausência foi verificada entre todos os {eligibility.checkedProfessionals} perfis operacionais ativos aprovados encontrados.</AlertDescription></Alert> : null}
@@ -576,7 +612,7 @@ function AdminRequestDetailPage({
             </div>
 
             <Card>
-              <CardHeader><CardTitle>Rodadas e atribuições</CardTitle><CardDescription>Responsáveis anteriores permanecem no histórico; somente a atribuição atual aparece como responsável.</CardDescription></CardHeader>
+              <CardHeader><CardTitle>Rodadas e atribuições</CardTitle><CardDescription>Veja quem recebeu ou assumiu o pedido em cada rodada.</CardDescription></CardHeader>
               <CardContent className="grid gap-4 lg:grid-cols-2">
                 {detail.rounds.map((round) => <div key={round.roundId} className="rounded-md border p-4"><div className="flex flex-wrap items-center justify-between gap-2"><strong>Rodada {round.round}</strong><Badge variant={round.status === 'OPEN' ? 'warning' : 'outline'}>{round.status === 'OPEN' ? 'Aberta' : 'Encerrada'}</Badge></div><p className="mt-2 text-sm text-muted-foreground">{ROUND_REASON_LABELS[round.reason] || round.reason}</p><p className="mt-2 text-xs text-muted-foreground">Aberta em {formatDateTime(round.openedAt)}{round.closedAt ? ` · encerrada em ${formatDateTime(round.closedAt)}` : ''}</p></div>)}
                 {detail.rounds.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma rodada registrada.</p> : null}
@@ -585,7 +621,7 @@ function AdminRequestDetailPage({
             </Card>
 
             <Card>
-              <CardHeader><CardTitle><FileWarning className="mr-2 inline size-5" aria-hidden="true" /> Relatos e intervenções</CardTitle><CardDescription>Resolução, justificativa, notas internas e reabertura usam as operações transacionais existentes de relatos.</CardDescription></CardHeader>
+              <CardHeader><CardTitle><FileWarning className="mr-2 inline size-5" aria-hidden="true" /> Relatos e intervenções</CardTitle><CardDescription>Abra um relato para consultar a decisão ou registrar o próximo passo.</CardDescription></CardHeader>
               <CardContent className="grid gap-4">
                 {detail.relatedReports.length ? (
                   <ol className="grid gap-3">
@@ -598,21 +634,36 @@ function AdminRequestDetailPage({
                   </ol>
                 ) : <p className="text-sm text-muted-foreground">Nenhum relato vinculado a este pedido.</p>}
                 <Button asChild variant="outline" className="w-full sm:w-fit"><Link to={`/admin/relatos?pedido=${encodeURIComponent(detail.request.requestId)}`}>Consultar relatos deste pedido</Link></Button>
-                <p className="text-xs leading-5 text-muted-foreground">Não há edição livre de estado nem atribuição manual. Reabertura e reagendamento revalidam estado, rodada, atribuição, prazo, reserva, exclusões e ciência do cliente.</p>
+
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader><CardTitle>Histórico</CardTitle><CardDescription>Até 50 eventos imutáveis, do mais recente para o mais antigo.</CardDescription></CardHeader>
+              <CardHeader><CardTitle>Histórico</CardTitle><CardDescription>Últimas 50 movimentações, da mais recente para a mais antiga.</CardDescription></CardHeader>
               <CardContent>
-                <ol className="grid gap-3">
-                  {detail.history.map((event) => <li key={event.eventId} className="rounded-md border p-4"><div className="flex flex-wrap items-start justify-between gap-2"><strong>{EVENT_LABELS[event.type] || event.type}</strong><time className="text-xs text-muted-foreground">{formatDateTime(event.createdAt)}</time></div><p className="mt-1 text-sm text-muted-foreground">Rodada {event.round} · ator {event.actorId}</p>{event.reason ? <p className="mt-2 text-sm">{event.reason}</p> : null}</li>)}
-                  {detail.history.length === 0 ? <li className="text-sm text-muted-foreground">Nenhum evento registrado.</li> : null}
-                </ol>
+                <ActivityTimeline items={detail.history.map((event) => ({
+                  id: event.eventId,
+                  title: EVENT_LABELS[event.type] || event.type,
+                  icon: EVENT_ICONS[event.type] || ClipboardList,
+                  at: event.createdAt,
+                  detail: <><p>Rodada {event.round}</p>{event.reason ? <p className="mt-2">{event.reason}</p> : null}<details className="mt-2 text-xs"><summary className="cursor-pointer">Dados do evento</summary><p className="mt-1">Autor: {event.actorId}</p></details></>,
+                }))} />
               </CardContent>
             </Card>
 
-            <Alert><ShieldCheck aria-hidden="true" /><AlertTitle>Operação protegida</AlertTitle><AlertDescription>Decisões desatualizadas falham e exigem releitura. Nenhuma ação desta tela cancela, atribui ou altera estado fora das invariantes do domínio.</AlertDescription></Alert>
+            <details className="rounded-md border bg-card p-4 text-sm">
+              <summary className="cursor-pointer font-semibold">Dados do pedido</summary>
+              <p className="mt-3 text-muted-foreground">Código do pedido</p>
+              <p className="mt-1 font-mono wrap-anywhere">{detail.request.requestId}</p>
+              <Button type="button" variant="outline" size="sm" className="mt-3" onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(detail.request.requestId)
+                  toast.success('Código copiado.')
+                } catch {
+                  toast.error('Selecione o código acima para copiar.')
+                }
+              }}><Copy aria-hidden="true" /> Copiar código</Button>
+            </details>
           </>
         ) : null}
       </div>
@@ -626,5 +677,5 @@ export function AdminServiceRequestsPage() {
   const pendingMode = location.pathname.startsWith('/admin/pendencias')
   return requestId
     ? <AdminRequestDetailPage requestId={requestId} pendingMode={pendingMode} />
-    : <AdminRequestsList pendingMode={pendingMode} />
+    : <AdminRequestsList key={pendingMode ? 'pending' : 'requests'} pendingMode={pendingMode} />
 }

@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/aler
 import { Button } from '../../../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
 import { Skeleton } from '../../../components/ui/skeleton'
+import { formatServiceTimestamp } from '../../../utils/service-date-display'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { loadProfessionalProfile } from '../../../services/professional-profile.service'
 import { professionalReviewService } from '../../../services/professional-review.service'
@@ -158,7 +159,7 @@ export function ProfessionalReviewPage() {
                 <li key={event.eventId} className="border-l-2 border-primary/30 pl-4">
                   <p className="font-semibold">{actionLabels[event.action]}</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {event.createdAt.toLocaleString('pt-BR')}
+                    {formatServiceTimestamp(event.createdAt)}
                   </p>
                   {event.reason ? (
                     <p className="mt-2 text-sm">{event.reason}</p>

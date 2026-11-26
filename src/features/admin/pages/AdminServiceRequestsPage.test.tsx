@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AdminServiceRequestsPage } from './AdminServiceRequestsPage'
+import type { PageHeading } from '../../../components/layout/PageHeader'
 
 const mocks = vi.hoisted(() => ({
   listRequests: vi.fn(),
@@ -14,7 +15,8 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../components/layout/AdminLayout', () => ({
-  AdminLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  AdminLayout: ({ pageTitle, heading, children }: { pageTitle: string; heading?: PageHeading; children: React.ReactNode }) =>
+    <main><h1>{heading?.title ?? pageTitle}</h1>{children}</main>,
 }))
 vi.mock('../../auth/use-auth', () => ({ useAuth: mocks.useAuth }))
 vi.mock('../../home/use-catalog', () => ({ useCatalog: mocks.useCatalog }))
@@ -144,12 +146,25 @@ describe('AdminServiceRequestsPage', () => {
       }),
     ))
 
-    await user.type(screen.getByLabelText('Identificador exato'), 'request-admin-0001')
+    await user.type(screen.getByLabelText('Código do pedido'), 'request-admin-0001')
     await user.selectOptions(screen.getByLabelText('Estado'), 'OPEN')
+    await user.click(screen.getByText('Mais filtros'))
+    await user.selectOptions(screen.getByLabelText('Período'), 'MORNING')
+    await user.click(screen.getByText('Mais filtros'))
     await user.click(screen.getByRole('button', { name: 'Consultar' }))
     await waitFor(() => expect(mocks.listRequests).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestId: 'request-admin-0001', operationalState: 'OPEN', cursor: null }),
+      expect.objectContaining({ requestId: 'request-admin-0001', operationalState: 'OPEN', period: 'MORNING', cursor: null }),
     ))
+    expect(screen.getByText('Período: Manhã')).toBeVisible()
+
+    await user.selectOptions(screen.getByLabelText('Estado'), 'ASSIGNED')
+    mocks.listRequests.mockRejectedValueOnce(new Error('Conexão indisponível.'))
+    await user.click(screen.getByRole('button', { name: 'Remover filtro Período: Manhã' }))
+    expect(await screen.findByText('Conexão indisponível.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Estado')).toHaveValue('ASSIGNED')
+    expect(screen.getByRole('button', { name: 'Remover filtro Estado: Procurando profissional' })).toBeInTheDocument()
+    expect(mocks.listRequests).toHaveBeenLastCalledWith({ requestId: 'request-admin-0001', operationalState: 'OPEN', pageSize: 12, cursor: null })
+    expect(screen.getByRole('button', { name: 'Consultar' })).toHaveFocus()
   })
 
   it('mostra detalhe privado, rodadas e prazo encerrado sem afirmar ausência de candidatos', async () => {
@@ -205,7 +220,7 @@ describe('AdminServiceRequestsPage', () => {
     renderPage(`/admin/pedidos/${request.requestId}`)
 
     expect(await screen.findAllByText('Conclusão informada pelo profissional')).not.toHaveLength(0)
-    expect(screen.getByText(/não representa confirmação do cliente/i)).toBeVisible()
+    expect(screen.getByText(/ainda não foi confirmada pelo cliente/i)).toBeVisible()
     expect(screen.getByText('Concluído')).toBeVisible()
   })
 

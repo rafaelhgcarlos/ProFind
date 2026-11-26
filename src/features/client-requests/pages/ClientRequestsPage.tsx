@@ -6,11 +6,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  CalendarClock,
+  ClipboardList,
+  FileWarning,
   History,
-  Images,
   Pencil,
+  Play,
+  Plus,
   RefreshCw,
-  Star,
   UserRound,
   WifiOff,
   XCircle,
@@ -20,7 +23,7 @@ import { Link, useParams } from 'react-router-dom'
 
 import { ClientLayout } from '../../../components/layout/ClientLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
-import { Avatar, AvatarFallback, AvatarImage } from '../../../components/ui/avatar'
+import { ActivityTimeline, type ActivityItem } from '../../../components/ui/activity-timeline'
 import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
@@ -40,16 +43,15 @@ import { useAuth } from '../../auth/use-auth'
 import { useCatalog } from '../../home/use-catalog'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
-import { AdminImageViewer, type AdminReviewImage } from '../../admin/components/AdminImageViewer'
-import { imageKitDisplayUrl } from '../../admin/components/admin-image-viewer.utils'
+import { formatCalendarDate, formatServiceHours } from '../../../utils/service-date-display'
 import { ClientServiceReports } from '../../service-reports/components/ClientServiceReports'
 import {
   clientRequestStatus,
   clientRequestStatusVariant,
-  formatServiceDate,
   requestGuidance,
 } from '../client-request-display'
 import { ClientRequestCard } from '../components/ClientRequestCard'
+import { ConfirmedProfessionalCard } from '../components/ConfirmedProfessionalCard'
 
 const PAGE_SIZE = 10
 
@@ -66,49 +68,53 @@ function specialtyName(
     ?? 'Serviço solicitado'
 }
 
-function eventLabel(event: ServiceRequestEvent) {
-  const labels: Partial<Record<ServiceRequestEvent['type'], string>> = {
-    REQUEST_CREATED: 'Pedido criado',
-    REQUEST_EDITED: 'Pedido atualizado',
-    REQUEST_CANCELLED: 'Pedido cancelado',
-    REQUEST_ASSIGNED: 'Atendimento confirmado',
-    PROFESSIONAL_CANCELLED_AND_REOPENED: 'Substituição iniciada',
-    SERVICE_STARTED: 'Atendimento iniciado',
-    SERVICE_COMPLETED: 'Conclusão informada pelo profissional',
-    ADMIN_REOPENED_FROM_REPORT: 'Pedido reaberto pela administração',
-  }
-  return labels[event.type] ?? null
+const requestEvents: Partial<Record<ServiceRequestEvent['type'], Pick<ActivityItem, 'title' | 'icon'>>> = {
+  REQUEST_CREATED: { title: 'Pedido criado', icon: ClipboardList },
+  REQUEST_EDITED: { title: 'Pedido atualizado', icon: Pencil },
+  REQUEST_CANCELLED: { title: 'Pedido cancelado', icon: XCircle },
+  REQUEST_ASSIGNED: { title: 'Atendimento confirmado', icon: CheckCircle2 },
+  PROFESSIONAL_CANCELLED_AND_REOPENED: { title: 'Atendimento cancelado pelo profissional. Busca por substituto iniciada.', icon: RefreshCw },
+  SERVICE_STARTED: { title: 'Atendimento iniciado', icon: Play },
+  SERVICE_COMPLETED: { title: 'Conclusão informada pelo profissional', icon: CheckCircle2 },
+  ADMIN_REOPENED_FROM_REPORT: { title: 'Pedido reaberto pela administração', icon: RefreshCw },
 }
-
-function formatMoment(value: Date) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(value)
-}
-
-type TimelineItem = { id: string; title: string; detail?: string; at: Date }
 
 function timelineItems(history: ServiceRequestEvent[], reports: ServiceReport[]) {
-  const eventItems = history.flatMap<TimelineItem>((event) => {
-    const title = eventLabel(event)
-    return title ? [{ id: `event:${event.eventId}`, title, at: event.createdAt }] : []
+  const eventItems = history.flatMap<ActivityItem>((event) => {
+    const presentation = requestEvents[event.type]
+    return presentation ? [{ id: `event:${event.eventId}`, ...presentation, at: event.createdAt }] : []
   })
-  const reportItems = reports.flatMap<TimelineItem>((report) => {
-    const items: TimelineItem[] = [{
+  const reportItems = reports.flatMap<ActivityItem>((report) => {
+    const items: ActivityItem[] = [{
       id: `report:${report.reportId}:open`,
       title: 'Relato aberto',
+      icon: FileWarning,
       detail: report.description,
       at: report.createdAt,
     }]
     if (report.reviewedAt) items.push({
       id: `report:${report.reportId}:review`,
       title: 'Relato em análise',
+      icon: FileWarning,
       at: report.reviewedAt,
+    })
+    if (report.proposedAt && report.proposedServiceDate && report.proposedPeriod) items.push({
+      id: `report:${report.reportId}:proposed`,
+      title: 'Novo horário proposto',
+      icon: CalendarClock,
+      detail: `${formatCalendarDate(report.proposedServiceDate)} · ${SERVICE_PERIOD_DEFINITIONS[report.proposedPeriod].label}`,
+      at: report.proposedAt,
+    })
+    if (report.clientAcknowledgedAt) items.push({
+      id: `report:${report.reportId}:acknowledged`,
+      title: 'Novo horário reconhecido pelo cliente',
+      icon: CalendarClock,
+      at: report.clientAcknowledgedAt,
     })
     if (report.resolvedAt) items.push({
       id: `report:${report.reportId}:resolved`,
-      title: 'Relato resolvido',
+      title: report.resolutionDecision === 'RESCHEDULE_AND_REOPEN' ? 'Relato resolvido com reagendamento' : 'Relato resolvido',
+      icon: report.resolutionDecision === 'RESCHEDULE_AND_REOPEN' ? CalendarClock : CheckCircle2,
       detail: report.resolutionJustification ?? undefined,
       at: report.resolvedAt,
     })
@@ -127,6 +133,10 @@ export function ClientRequestsPage() {
   return (
     <ClientLayout
       pageTitle={requestId ? 'Detalhe do pedido' : 'Meus pedidos'}
+      heading={requestId ? { description: 'Acompanhe a situação e o histórico do atendimento.' } : {
+        description: 'Acompanhe o andamento dos seus pedidos.',
+        action: <Button asChild><Link to="/cliente/solicitar"><Plus aria-hidden="true" />Solicitar serviço</Link></Button>,
+      }}
       activeNavigationHref="/cliente/pedidos"
       userName={profile?.name}
       contextSwitcher={<ModeSwitcher />}
@@ -220,9 +230,6 @@ function RequestsList({
 
   return (
     <div className="grid gap-6">
-      <div>
-        <p className="text-sm text-muted-foreground">Acompanhe confirmações, substituições, conclusões e relatos em tempo real.</p>
-      </div>
       {fromCache ? (
         <Alert variant="warning"><WifiOff aria-hidden="true" /><AlertTitle>Mostrando dados salvos</AlertTitle><AlertDescription>Os estados abaixo podem estar desatualizados e não confirmam a situação atual. A lista será atualizada quando a conexão voltar.</AlertDescription></Alert>
       ) : null}
@@ -233,7 +240,7 @@ function RequestsList({
         <div role="status" aria-label="Carregando pedidos" className="grid gap-4 md:grid-cols-2"><Skeleton className="h-72" /><Skeleton className="h-72" /></div>
       ) : null}
       {!loading && !error && page?.items.length === 0 ? (
-        <EmptyState title="Você ainda não tem pedidos" description="Solicite um serviço para acompanhar o atendimento por aqui." action={<Button asChild><Link to="/cliente/solicitar">Solicitar serviço</Link></Button>} />
+        <EmptyState title="Você ainda não tem pedidos" description="Solicite um serviço para acompanhar o atendimento por aqui." />
       ) : null}
       {!loading && page?.items.length ? (
         <div className="grid gap-4 md:grid-cols-2">
@@ -267,9 +274,6 @@ function RequestDetails({
   const [profileWarning, setProfileWarning] = useState('')
   const [fromCache, setFromCache] = useState(false)
   const [attempt, setAttempt] = useState(0)
-  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
-  const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
-  const [viewerReturnFocus, setViewerReturnFocus] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
     let active = true
@@ -315,15 +319,6 @@ function RequestDetails({
     }
   }, [attempt, requestId, userId])
 
-  const portfolio = useMemo(
-    () => details?.currentProfessional?.portfolioImages ?? [],
-    [details?.currentProfessional?.portfolioImages],
-  )
-  const viewerImages = useMemo<AdminReviewImage[]>(() => portfolio.map((image, index) => ({
-    url: image.url,
-    alt: image.altText || `Trabalho ${index + 1} do profissional`,
-    label: `Portfólio — imagem ${index + 1}`,
-  })), [portfolio])
   const timeline = useMemo(() => timelineItems(details?.history ?? [], reports), [details?.history, reports])
 
   if (loading) return <div role="status" aria-label="Carregando detalhe do pedido" className="grid gap-4"><Skeleton className="h-44" /><Skeleton className="h-72" /></div>
@@ -334,17 +329,15 @@ function RequestDetails({
     </div>
   )
 
-  const { request, privateData, currentProfessional } = details
+  const { request, privateData } = details
+  const currentProfessional = request.currentAssignmentId && request.assignedProfessionalId
+    && details.currentProfessional?.professionalId === request.assignedProfessionalId
+    && (request.status === 'ASSIGNED' || request.status === 'IN_PROGRESS' || request.status === 'COMPLETED')
+    ? details.currentProfessional
+    : null
   const guidance = requestGuidance(request)
   const canEdit = request.status === 'OPEN'
   const canCancel = request.status === 'OPEN' || request.status === 'ASSIGNED'
-  const initials = currentProfessional?.publicName.split(/\s+/).slice(0, 2).map((value) => value[0]).join('').toUpperCase() || 'PF'
-  const hasRatings = Boolean(
-    currentProfessional
-    && currentProfessional.rating !== null
-    && currentProfessional.reviewCount !== null
-    && currentProfessional.reviewCount > 0,
-  )
 
   return (
     <div className="grid gap-6">
@@ -359,8 +352,8 @@ function RequestDetails({
         </CardHeader>
         <CardContent className="grid gap-5">
           <dl className="grid gap-4 text-sm sm:grid-cols-2">
-            <div className="flex gap-3"><CalendarDays aria-hidden="true" className="size-5 text-primary" /><div><dt className="font-semibold">Data</dt><dd className="mt-1 capitalize text-muted-foreground">{formatServiceDate(request.serviceDate)}</dd></div></div>
-            <div className="flex gap-3"><Clock3 aria-hidden="true" className="size-5 text-primary" /><div><dt className="font-semibold">Período</dt><dd className="mt-1 text-muted-foreground">{SERVICE_PERIOD_DEFINITIONS[request.period].label}</dd></div></div>
+            <div className="flex gap-3"><CalendarDays aria-hidden="true" className="size-5 shrink-0 text-primary" /><div><dt className="font-semibold">Data</dt><dd className="mt-1 text-muted-foreground">{formatCalendarDate(request.serviceDate)}</dd></div></div>
+            <div className="flex gap-3"><Clock3 aria-hidden="true" className="size-5 shrink-0 text-primary" /><div><dt className="font-semibold">Período</dt><dd className="mt-1 text-muted-foreground">{SERVICE_PERIOD_DEFINITIONS[request.period].label} · {formatServiceHours(request.period)}</dd></div></div>
           </dl>
           <div><h3 className="font-semibold">Descrição</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{privateData.notes}</p></div>
           {guidance ? <Alert variant="warning"><Clock3 aria-hidden="true" /><AlertTitle>Sobre a confirmação</AlertTitle><AlertDescription>{guidance}</AlertDescription></Alert> : null}
@@ -369,28 +362,17 @@ function RequestDetails({
       </Card>
 
       {currentProfessional ? (
-        <Card>
-          <CardHeader><CardTitle>Profissional responsável</CardTitle></CardHeader>
-          <CardContent className="grid gap-5">
-            <div className="flex min-w-0 items-center gap-4">
-              <Avatar className="size-16"><AvatarImage src={currentProfessional.profileImage?.url} alt="" /><AvatarFallback>{initials}</AvatarFallback></Avatar>
-              <div className="min-w-0"><h3 className="break-words text-lg font-bold">{currentProfessional.publicName || 'Profissional confirmado'}</h3><p className="text-sm text-muted-foreground">{specialtyName(request.specialtyId, catalogState)}</p>{currentProfessional.headline ? <p className="mt-1 text-sm">{currentProfessional.headline}</p> : null}<p className="mt-2 inline-flex items-center gap-1 text-sm text-muted-foreground"><Star aria-hidden="true" className="size-4" />{hasRatings ? `${currentProfessional.rating!.toFixed(1)} (${currentProfessional.reviewCount} avaliações)` : 'Sem avaliações'}</p></div>
-            </div>
-            {profileWarning ? <Alert variant="warning"><AlertCircle aria-hidden="true" /><AlertDescription>{profileWarning} O acompanhamento do pedido continua disponível.</AlertDescription></Alert> : null}
-            {portfolio.length ? <div><h3 className="flex items-center gap-2 font-semibold"><Images aria-hidden="true" className="size-4" />Portfólio</h3><div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{portfolio.map((image, index) => failedImages.has(image.providerId) ? <div key={image.providerId} className="flex aspect-square items-center justify-center rounded-lg border bg-muted p-3 text-center text-xs text-muted-foreground">Imagem indisponível</div> : <button key={image.providerId} type="button" className="aspect-square overflow-hidden rounded-lg border bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25" aria-label={`Ampliar imagem ${index + 1} do portfólio`} onClick={(event) => { setViewerReturnFocus(event.currentTarget); setViewerIndex(index) }}><img src={imageKitDisplayUrl(image.url, 640)} alt={image.altText || `Trabalho ${index + 1}`} className="size-full object-cover" onError={() => setFailedImages((current) => new Set(current).add(image.providerId))} /></button>)}</div></div> : <p className="text-sm text-muted-foreground">Nenhuma imagem de portfólio disponível.</p>}
-          </CardContent>
-        </Card>
+        <ConfirmedProfessionalCard key={currentProfessional.professionalId} professional={currentProfessional} specialty={specialtyName(request.specialtyId, catalogState)} warning={profileWarning} />
       ) : request.status === 'ASSIGNED' || request.status === 'IN_PROGRESS' || request.status === 'COMPLETED' ? (
         <Alert variant="warning"><UserRound aria-hidden="true" /><AlertTitle>Perfil indisponível</AlertTitle><AlertDescription>O pedido continua acompanhado normalmente. Os dados públicos do responsável não puderam ser exibidos.</AlertDescription></Alert>
       ) : null}
 
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><History aria-hidden="true" className="size-5" />Linha do tempo</CardTitle></CardHeader>
-        <CardContent>{timeline.length ? <ol className="grid gap-4">{timeline.map((item) => <li key={item.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3"><CheckCircle2 aria-hidden="true" className="mt-0.5 size-5 text-primary" /><div><h3 className="font-semibold">{item.title}</h3><time className="text-xs text-muted-foreground" dateTime={item.at.toISOString()}>{formatMoment(item.at)}</time>{item.detail ? <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{item.detail}</p> : null}</div></li>)}</ol> : <p className="text-sm text-muted-foreground">O histórico aparecerá aqui.</p>}</CardContent>
+        <CardContent><ActivityTimeline items={timeline} empty="O histórico aparecerá aqui." /></CardContent>
       </Card>
 
       <ClientServiceReports requestId={request.requestId} onReportsChange={setReports} />
-      <AdminImageViewer images={viewerImages} index={viewerIndex} returnFocusTo={viewerReturnFocus} onIndexChange={setViewerIndex} />
     </div>
   )
 }

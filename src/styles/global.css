@@ -3,9 +3,29 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  --ui-motion-duration: 140ms;
+}
+
+@utility ui-transition {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--ui-motion-duration);
+  transition-timing-function: ease-out;
+}
+
+@keyframes ui-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@utility ui-enter {
+  animation: ui-fade-in var(--ui-motion-duration) ease-out both;
+}
+
+:root {
   --background: #f8f8f4;
   --foreground: #18312d;
   --card: #ffffff;
+  --field: #fbfcfa;
   --card-foreground: #18312d;
   --popover: #ffffff;
   --popover-foreground: #18312d;
@@ -25,7 +45,7 @@
   --warning: #8a4b08;
   --warning-foreground: #ffffff;
   --border: #dce3dc;
-  --input: #bdccc4;
+  --input: #788b80;
   --ring: #075c50;
   --surface-raised: #ffffff;
   --surface-tint: #edf7f0;
@@ -36,6 +56,7 @@
   --overlay: rgb(9 22 19 / 58%);
   --shadow-color: rgb(19 53 44 / 9%);
   --app-header-height: 4rem;
+  --app-bottom-nav-height: calc(4rem + env(safe-area-inset-bottom));
   --anchor-scroll-offset: calc(var(--app-header-height) + 1rem);
   color-scheme: light;
 }
@@ -44,6 +65,7 @@
   --background: #0c1614;
   --foreground: #e9f2ef;
   --card: #121f1c;
+  --field: #0b1714;
   --card-foreground: #e9f2ef;
   --popover: #172622;
   --popover-foreground: #e9f2ef;
@@ -63,7 +85,7 @@
   --warning: #f5bb65;
   --warning-foreground: #3f2305;
   --border: #30423d;
-  --input: #40544e;
+  --input: #60796f;
   --ring: #5ee5c2;
   --overlay: rgb(0 0 0 / 72%);
   --shadow-color: rgb(0 0 0 / 28%);
@@ -83,6 +105,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
+  --color-field: var(--field);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
@@ -136,6 +159,12 @@
 
   main [id] {
     scroll-margin-block-start: var(--anchor-scroll-offset);
+  }
+
+  @media (width < 64rem) {
+    html:has([data-mobile-navigation]) {
+      scroll-padding-block-end: calc(var(--app-bottom-nav-height) + 0.5rem);
+    }
   }
 
   body {
@@ -235,6 +264,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --ui-motion-duration: 0ms;
+  }
+
   *,
   *::before,
   *::after {

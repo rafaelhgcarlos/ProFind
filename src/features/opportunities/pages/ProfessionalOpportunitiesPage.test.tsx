@@ -343,7 +343,7 @@ describe('ProfessionalOpportunitiesPage', () => {
     expect(await screen.findByText('Atendimento confirmado')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Cancelar atendimento' }))
     expect(mocks.cancelAssignment).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+    await user.click(screen.getByRole('button', { name: 'Cancelar este atendimento' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Informe o motivo do cancelamento em 10 a 500 caracteres.',
     )
@@ -352,7 +352,7 @@ describe('ProfessionalOpportunitiesPage', () => {
       screen.getByLabelText('Motivo do cancelamento *'),
       'Tive uma emergência e não conseguirei comparecer.',
     )
-    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+    await user.click(screen.getByRole('button', { name: 'Cancelar este atendimento' }))
 
     await waitFor(() => expect(mocks.cancelAssignment).toHaveBeenCalledWith({
       requestId: 'request-1',

@@ -8,7 +8,6 @@ import {
   Play,
   RefreshCw,
   WifiOff,
-  Wrench,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -17,6 +16,7 @@ import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayou
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
 import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
+import { ConfirmationDialog } from '../../../components/ui/confirmation-dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
 import { EmptyState } from '../../../components/ui/empty-state'
 import { Label } from '../../../components/ui/label'
@@ -34,6 +34,9 @@ import { useAuth } from '../../auth/use-auth'
 import { useCatalog } from '../../home/use-catalog'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
+import { formatCalendarDate, formatServiceHours } from '../../../utils/service-date-display'
+import { appointmentStatusLabel } from '../appointment-formatters'
+import { ProfessionalAppointmentCard } from '../components/ProfessionalAppointmentCard'
 
 const PAGE_SIZE = 12
 const CACHE_WARNING_DELAY_MS = 2_000
@@ -47,21 +50,6 @@ interface AppointmentPageState {
 
 function pageKey(cursor?: ProfessionalAppointmentsCursor | null) {
   return cursor ? `page-${cursor.requestId}` : 'first'
-}
-
-function formatServiceDate(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
-  return new Intl.DateTimeFormat('pt-BR', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date(year, month - 1, day, 12))
-}
-
-function statusLabel(status: ProfessionalAppointmentSummary['status']) {
-  if (status === 'COMPLETED') return 'Concluído'
-  return status === 'IN_PROGRESS' ? 'Em andamento' : 'Confirmado'
 }
 
 function normalizedError(error: unknown, fallback: string) {
@@ -136,6 +124,7 @@ export function ProfessionalAppointmentsPage() {
   return (
     <ProfessionalLayout
       pageTitle={requestId ? 'Detalhe do atendimento' : 'Atendimentos'}
+      heading={requestId ? {} : { title: 'Seus atendimentos', description: 'Acompanhe compromissos confirmados e serviços em andamento.' }}
       activeNavigationHref="/profissional/atendimentos"
       userName={profile?.name}
       contextSwitcher={<ModeSwitcher />}
@@ -300,19 +289,6 @@ function AppointmentsList({
 
   return (
     <div className="mx-auto grid max-w-6xl gap-6">
-      <header>
-        <Badge variant="secondary">
-          <CalendarClock aria-hidden="true" className="size-3.5" />
-          Agenda confirmada
-        </Badge>
-        <h2 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">
-          Seus atendimentos
-        </h2>
-        <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-          Acompanhe compromissos confirmados e serviços que já estão em andamento.
-        </p>
-      </header>
-
       {notice ? (
         <Alert variant="success" aria-live="polite">
           <CheckCircle2 aria-hidden="true" />
@@ -375,41 +351,12 @@ function AppointmentsList({
       {appointments.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2">
           {appointments.map((appointment) => (
-            <Card key={appointment.requestId} className="flex flex-col">
-              <CardHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <Badge
-                      variant={
-                        appointment.status === 'ASSIGNED' ? 'secondary' : 'success'
-                      }
-                    >
-                      {statusLabel(appointment.status)}
-                    </Badge>
-                    <CardTitle className="mt-3">
-                      {specialtyNames.get(appointment.specialtyId) ?? 'Serviço profissional'}
-                    </CardTitle>
-                  </div>
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                    <Wrench aria-hidden="true" className="size-5" />
-                  </span>
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-1 flex-col gap-4">
-                <p className="flex gap-2 text-sm text-muted-foreground">
-                  <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                  <span>
-                    {formatServiceDate(appointment.serviceDate)} ·{' '}
-                    {SERVICE_PERIOD_DEFINITIONS[appointment.period].label}
-                  </span>
-                </p>
-                <Button asChild className="mt-auto">
-                  <Link to={`/profissional/atendimentos/${appointment.requestId}`}>
-                    Ver atendimento
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
+            <ProfessionalAppointmentCard
+              key={appointment.requestId}
+              appointment={appointment}
+              specialtyName={specialtyNames.get(appointment.specialtyId) ?? 'Serviço profissional'}
+              stale={cacheBacked || disconnected || Boolean(error)}
+            />
           ))}
         </div>
       ) : null}
@@ -458,6 +405,7 @@ function AppointmentDetails({
   const [completing, setCompleting] = useState(false)
   const [completionNotice, setCompletionNotice] = useState('')
   const [confirmCancellation, setConfirmCancellation] = useState(false)
+  const cancelTrigger = useRef<HTMLButtonElement>(null)
   const [cancellationReason, setCancellationReason] = useState('')
   const [cancelling, setCancelling] = useState(false)
   const [currentTime, setCurrentTime] = useState(() => Date.now())
@@ -629,7 +577,7 @@ function AppointmentDetails({
         </div>
       ) : null}
 
-      {error ? (
+      {error && !confirmCancellation ? (
         <Alert variant="destructive" role="alert">
           <AlertTriangle aria-hidden="true" />
           <AlertTitle>Não foi possível atualizar o atendimento</AlertTitle>
@@ -677,7 +625,7 @@ function AppointmentDetails({
                 }
                 className="w-fit"
               >
-                {statusLabel(details.appointment.status)}
+                {appointmentStatusLabel(details.appointment.status)}
               </Badge>
               <CardTitle>{specialtyName ?? 'Serviço profissional'}</CardTitle>
             </CardHeader>
@@ -688,8 +636,8 @@ function AppointmentDetails({
                   <div>
                     <dt className="font-semibold">Data e período</dt>
                     <dd className="mt-1 text-muted-foreground">
-                      {formatServiceDate(details.appointment.serviceDate)} ·{' '}
-                      {SERVICE_PERIOD_DEFINITIONS[details.appointment.period].label}
+                      {formatCalendarDate(details.appointment.serviceDate)} ·{' '}
+                      {SERVICE_PERIOD_DEFINITIONS[details.appointment.period].label} ({formatServiceHours(details.appointment.period)})
                     </dd>
                   </div>
                 </div>
@@ -698,7 +646,7 @@ function AppointmentDetails({
                   <div>
                     <dt className="font-semibold">Status</dt>
                     <dd className="mt-1 text-muted-foreground">
-                      {statusLabel(details.appointment.status)}
+                      {appointmentStatusLabel(details.appointment.status)}
                     </dd>
                   </div>
                 </div>
@@ -771,53 +719,6 @@ function AppointmentDetails({
                       </div>
                     </AlertDescription>
                   </Alert>
-                ) : confirmCancellation ? (
-                  <Alert variant="warning">
-                    <AlertTriangle aria-hidden="true" />
-                    <AlertTitle>Cancelar este atendimento?</AlertTitle>
-                    <AlertDescription>
-                      <p>A atribuição e a reserva só serão alteradas após o commit.</p>
-                      <div className="mt-4 space-y-2">
-                        <Label htmlFor="appointment-cancellation-reason">
-                          Motivo do cancelamento *
-                        </Label>
-                        <Textarea
-                          id="appointment-cancellation-reason"
-                          required
-                          minLength={10}
-                          maxLength={500}
-                          value={cancellationReason}
-                          onChange={(event) => {
-                            setCancellationReason(event.target.value)
-                            setError('')
-                          }}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          {cancellationReason.length}/500 caracteres
-                        </p>
-                      </div>
-                      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          loading={cancelling}
-                          loadingLabel="Cancelando…"
-                          disabled={!online || fromCache}
-                          onClick={() => void handleCancel()}
-                        >
-                          Confirmar cancelamento
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={cancelling}
-                          onClick={() => setConfirmCancellation(false)}
-                        >
-                          Manter atendimento
-                        </Button>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
                 ) : (
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <Button
@@ -832,6 +733,7 @@ function AppointmentDetails({
                       Iniciar atendimento
                     </Button>
                     <Button
+                      ref={cancelTrigger}
                       type="button"
                       variant="outline"
                       disabled={!online || fromCache}
@@ -844,6 +746,26 @@ function AppointmentDetails({
                     </Button>
                   </div>
                 )}
+                <ConfirmationDialog
+                  open={confirmCancellation}
+                  title="Cancelar este atendimento?"
+                  description="Você deixará de ser o responsável. O pedido poderá voltar à procura por um profissional ou precisar de reagendamento."
+                  confirmLabel="Cancelar este atendimento"
+                  cancelLabel="Manter atendimento"
+                  destructive busy={cancelling} busyLabel="Cancelando…" disabled={!online || fromCache}
+                  error={error}
+                  returnFocusTo={cancelTrigger}
+                  onCancel={() => { setConfirmCancellation(false); setError('') }}
+                  onConfirm={() => void handleCancel()}
+                >
+                  <div className="grid gap-2">
+                    <Label htmlFor="appointment-cancellation-reason">Motivo do cancelamento *</Label>
+                    <Textarea id="appointment-cancellation-reason" required minLength={10} maxLength={500} value={cancellationReason}
+                      aria-describedby="appointment-cancellation-help"
+                      onChange={(event) => { setCancellationReason(event.target.value); setError('') }} />
+                    <p id="appointment-cancellation-help" className="text-xs text-muted-foreground">Informe de 10 a 500 caracteres. {cancellationReason.length}/500</p>
+                  </div>
+                </ConfirmationDialog>
               </CardContent>
             </Card>
           ) : details.appointment.status === 'IN_PROGRESS' ? (

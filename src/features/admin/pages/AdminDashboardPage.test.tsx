@@ -9,6 +9,19 @@ import {
 } from '../../auth/auth-context'
 import { ThemeProvider } from '../../../providers/theme-provider'
 import { AdminDashboardPage } from './AdminDashboardPage'
+import { adminServiceRequestService } from '../../../services/admin-service-request.service'
+
+vi.mock('../../../services/admin-service-request.service', () => ({
+  adminServiceRequestService: {
+    listRequests: vi.fn().mockResolvedValue({
+      items: [{ request: { requestId: 'request-priority', specialtyId: 'electrical' }, city: 'Campinas', stateCode: 'SP' }],
+      nextCursor: { requestId: 'request-priority', serviceDate: '2026-12-01' },
+    }),
+  },
+}))
+vi.mock('../../home/use-catalog', () => ({
+  useCatalog: () => ({ status: 'ready', catalog: { specialties: [{ id: 'electrical', name: 'Eletricista' }] } }),
+}))
 
 vi.mock('../../../components/ui/avatar', () => ({
   Avatar: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
@@ -23,7 +36,7 @@ vi.mock('../../../components/ui/avatar', () => ({
 }))
 
 describe('AdminDashboardPage', () => {
-  it('apresenta conteúdo orientado ao administrador sem links quebrados', () => {
+  it('prioriza pedidos da fila existente e mantém os acessos administrativos', async () => {
     const authentication: AuthenticationContextValue = {
       status: 'authenticated',
       user: { uid: 'admin-123', email: 'admin@example.com' } as User,
@@ -44,14 +57,13 @@ describe('AdminDashboardPage', () => {
       </ThemeProvider>,
     )
 
-    expect(screen.getByText('Bem-vindo à administração')).toBeInTheDocument()
-    expect(
-      screen.getByText(/acompanhe os cadastros de profissionais e a organização dos atendimentos/i),
-    ).toBeInTheDocument()
+    const pendingOrder = await screen.findByRole('link', { name: /Eletricista/i })
+    expect(pendingOrder).toHaveTextContent('Campinas')
+    expect(pendingOrder).toHaveAttribute('href', '/admin/pendencias/request-priority')
+    expect(adminServiceRequestService.listRequests).toHaveBeenCalledWith({ pending: 'ALL', pageSize: 3 })
     expect(screen.getByText('Central de administração')).toBeInTheDocument()
-    expect(
-      screen.getByText(/acesse as ferramentas disponíveis/i),
-    ).toBeInTheDocument()
+    const areas = screen.getByRole('heading', { name: 'Áreas do painel' })
+    expect(pendingOrder.compareDocumentPosition(areas) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByText('Análise de profissionais')).toBeInTheDocument()
     expect(screen.getByText('Catálogo de serviços')).toBeInTheDocument()
     expect(screen.getAllByText('Pedidos')).not.toHaveLength(0)

@@ -2,10 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 
-import { AdminImageViewer, type AdminReviewImage } from './AdminImageViewer'
-import { imageKitDisplayUrl } from './admin-image-viewer.utils'
+import { ImageViewer, type ViewerImage } from './image-viewer'
+import { imageKitDisplayUrl } from '../../utils/imagekit-display-url'
 
-const images: AdminReviewImage[] = [
+const images: ViewerImage[] = [
   {
     url: 'https://ik.imagekit.io/example/avatar.webp',
     alt: 'Foto profissional de Ana',
@@ -28,7 +28,7 @@ function ViewerHarness() {
         type="button"
         onClick={() => setIndex(0)}
       >Abrir foto</button>
-      <AdminImageViewer
+      <ImageViewer
         images={images}
         index={index}
         returnFocusTo={returnFocusTo}
@@ -38,7 +38,7 @@ function ViewerHarness() {
   )
 }
 
-describe('AdminImageViewer', () => {
+describe('ImageViewer', () => {
   it('aplica transformação de exibição somente em URLs ImageKit', () => {
     expect(imageKitDisplayUrl(images[0].url, 1920)).toContain('tr=w-1920%2Cq-85%2Cf-auto')
     expect(imageKitDisplayUrl(images[1].url, 1920)).toBe(images[1].url)

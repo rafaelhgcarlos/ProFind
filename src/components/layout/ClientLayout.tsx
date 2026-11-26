@@ -6,9 +6,11 @@ import { ProfileContext } from '../../features/onboarding/profile-context'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
 import { Button } from '../ui/button'
 import { AuthenticatedLayout } from './AuthenticatedLayout'
+import type { PageHeading } from './PageHeader'
 
 interface ClientLayoutProps extends PropsWithChildren {
   pageTitle: string
+  heading?: PageHeading
   userName?: string
   activeNavigationHref?: string
   contextSwitcher?: ReactNode

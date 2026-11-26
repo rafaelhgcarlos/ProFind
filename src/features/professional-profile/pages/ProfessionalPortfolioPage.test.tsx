@@ -390,7 +390,7 @@ describe('ProfessionalPortfolioPage', () => {
     expect(screen.queryByText('Adicionar trabalho')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Salvar portfólio' })).toHaveLength(1)
     for (const image of screen.getAllByRole('img')) {
-      expect(image).toHaveClass('block', 'w-full', 'max-w-full', 'object-cover')
+      expect(image).toHaveClass('absolute', 'inset-0', 'size-full', 'object-cover')
       expect(image.parentElement).toHaveClass('aspect-[4/3]')
     }
     const articles = screen.getAllByRole('article')

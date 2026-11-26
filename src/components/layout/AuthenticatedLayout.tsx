@@ -10,12 +10,14 @@ import {
   Home,
   Images,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   PlusCircle,
   ShieldCheck,
   UserRound,
   type LucideIcon,
 } from 'lucide-react'
-import { useContext, useState, type PropsWithChildren, type ReactNode } from 'react'
+import { useContext, useId, useState, type PropsWithChildren, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 
@@ -26,10 +28,23 @@ import { ThemeToggle } from '../theme/ThemeToggle'
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
 import { Button } from '../ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
+import { PageHeader, type PageHeading } from './PageHeader'
 import { MobileNavigationMore } from './MobileNavigationMore'
 
+const SIDEBAR_STORAGE_KEY = 'profind-sidebar-compact'
 const mobileLinkClass = 'relative flex min-h-16 min-w-0 max-w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
 const mobileActiveClass = 'bg-accent text-accent-foreground after:absolute after:top-0 after:h-0.5 after:w-8 after:rounded-full after:bg-primary'
+
+function CompactTooltip({ compact, label, children }: { compact: boolean; label: string; children: ReactElement }) {
+  if (!compact) return children
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  )
+}
 
 export interface LayoutNavigationItem {
   label: string
@@ -107,13 +122,14 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
     },
     {
       label: 'Catálogo',
+      mobileLabel: 'Catá\u00adlogo',
       href: '/admin/catalogo',
       icon: BookOpenText,
       disabled: true,
       disabledReason: 'Disponível em breve.',
     },
     { label: 'Pedidos', href: '/admin/pedidos', icon: ClipboardList },
-    { label: 'Pendências', href: '/admin/pendencias', icon: CalendarClock },
+    { label: 'Pendências', mobileLabel: 'Pendên\u00adcias', href: '/admin/pendencias', icon: CalendarClock },
     { label: 'Relatos', href: '/admin/relatos', icon: FileWarning },
   ],
 }
@@ -131,6 +147,7 @@ function isNavigationItemActive(pathname: string, href: string) {
 interface AuthenticatedLayoutProps extends PropsWithChildren {
   mode: AuthenticatedMode
   pageTitle: string
+  heading?: PageHeading
   userName?: string
   userAvatarUrl?: string
   navigation?: LayoutNavigationItem[]
@@ -142,6 +159,7 @@ interface AuthenticatedLayoutProps extends PropsWithChildren {
 export function AuthenticatedLayout({
   mode,
   pageTitle,
+  heading,
   userName = 'Usuário ProFind',
   userAvatarUrl,
   navigation = navigationByMode[mode],
@@ -155,14 +173,22 @@ export function AuthenticatedLayout({
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const [compact, setCompact] = useState(() => {
+    try {
+      return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const desktopNavigationId = useId()
+  const ToggleIcon = compact ? PanelLeftOpen : PanelLeftClose
+  const toggleLabel = compact ? 'Expandir menu lateral' : 'Recolher menu lateral'
   const activePathname = activeNavigationHref ?? location.pathname
   const mobileNavigationItems = navigation.filter((item) => item.mobilePlacement !== 'more')
   const moreItems = navigation.filter((item) => item.mobilePlacement === 'more')
   const activeMore = moreItems.find((item) => isNavigationItemActive(activePathname, item.href))
   const mobileColumns = mobileNavigationItems.length + Number(moreItems.length > 0)
-  const mobileItemClass = cn(mobileLinkClass, mode === 'professional'
-    ? 'px-0.5 min-[375px]:text-xs'
-    : 'overflow-hidden focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25')
+  const mobileItemClass = cn(mobileLinkClass, mode === 'professional' && 'px-0.5 min-[375px]:text-xs')
   const initials = userName
     .split(' ')
     .slice(0, 2)
@@ -188,8 +214,19 @@ export function AuthenticatedLayout({
     }
   }
 
+  function toggleSidebar() {
+    const next = !compact
+    setCompact(next)
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next))
+    } catch {
+      // The preference still applies during this visit.
+    }
+  }
+
   const mobileNavigation = (
     <nav
+      data-mobile-navigation=""
       aria-label={`${modeLabels[mode]} — navegação mobile`}
       className={cn('fixed right-auto bottom-0 left-0 z-40 grid min-h-16 w-full min-w-0 max-w-full overflow-hidden border-t bg-card/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden', mode === 'professional' && 'px-1')}
       style={{
@@ -207,10 +244,10 @@ export function AuthenticatedLayout({
               key={`${item.href}-${item.label}`}
               aria-disabled="true"
               title={item.disabledReason}
-              className="relative flex min-h-16 min-w-0 max-w-full cursor-not-allowed flex-col items-center justify-center gap-1 overflow-hidden rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground opacity-55"
+              className="relative flex min-h-16 min-w-0 max-w-full cursor-not-allowed flex-col items-center justify-center gap-1 rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground opacity-55"
             >
               <Icon className="size-5" aria-hidden="true" />
-              <span className="max-w-full truncate">{item.label}</span>
+              <span className="max-w-full text-center wrap-anywhere leading-tight">{item.mobileLabel ?? item.label}</span>
               <span className="sr-only">{item.disabledReason}</span>
             </span>
           )
@@ -224,7 +261,7 @@ export function AuthenticatedLayout({
             className={cn(mobileItemClass, active && mobileActiveClass)}
           >
             <Icon className="size-5" aria-hidden="true" />
-            <span className={cn('max-w-full', mode === 'professional' ? 'text-center wrap-anywhere leading-tight' : 'truncate')}>{item.mobileLabel ?? item.label}</span>
+            <span className="max-w-full text-center wrap-anywhere leading-tight">{item.mobileLabel ?? item.label}</span>
           </Link>
         )
       })}
@@ -236,7 +273,7 @@ export function AuthenticatedLayout({
 
   return (
     <>
-      <div className="min-h-dvh w-full min-w-0 max-w-full overflow-x-clip bg-background text-foreground lg:grid lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+      <div className={cn('min-h-dvh w-full min-w-0 max-w-full overflow-x-clip bg-background text-foreground lg:grid', compact ? 'lg:grid-cols-[4.5rem_minmax(0,1fr)]' : 'lg:grid-cols-[16rem_minmax(0,1fr)]')}>
       <a
         href="#conteudo-principal"
         className="sr-only z-[100] rounded-md bg-primary px-4 py-3 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -250,72 +287,88 @@ export function AuthenticatedLayout({
           mode === 'admin' && 'bg-muted/45',
         )}
       >
-        <div className="flex h-18 items-center border-b px-5">
-          <Brand />
-        </div>
-        <div className="px-5 pt-5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {modeLabels[mode]}
-        </div>
-        <nav aria-label={modeLabels[mode]} className="grid gap-1 p-3">
-          {navigation.map((item) => {
-            const active = isNavigationItemActive(activePathname, item.href)
-            const Icon = item.icon
-            if (item.disabled) {
-              return (
-                <span
-                  key={`${item.href}-${item.label}`}
-                  aria-disabled="true"
-                  title={item.disabledReason}
-                  className="flex min-h-11 cursor-not-allowed items-center gap-3 rounded-md border-l-[3px] border-transparent px-3 text-sm font-medium text-muted-foreground opacity-55"
-                >
-                  <Icon className="size-5" aria-hidden="true" />
-                  <span>{item.label}</span>
-                  <span className="ml-auto text-[0.65rem] font-semibold uppercase tracking-wide">
-                    {item.disabledLabel ?? 'Pendente'}
-                  </span>
-                  <span className="sr-only">{item.disabledReason}</span>
-                </span>
-              )
-            }
-            return (
-              <Link
-                key={`${item.href}-${item.label}`}
-                to={item.href}
-                aria-current={active ? 'page' : undefined}
-                className={cn(
-                  'flex min-h-11 cursor-pointer items-center gap-3 rounded-md border-l-[3px] border-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
-                  active && 'border-primary bg-accent text-accent-foreground',
-                )}
-              >
-                <Icon className="size-5" aria-hidden="true" />
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
-        {authentication?.status === 'authenticated' ? (
-          <div className="mt-auto border-t p-3">
-            <Button
-              type="button"
-              variant="ghost"
-              className="w-full justify-start"
-              loading={isLoggingOut}
-              loadingLabel="Saindo…"
-              disabled={isLoggingOut}
-              onClick={() => void handleLogout()}
-            >
-              <LogOut aria-hidden="true" /> Sair
-            </Button>
-            {logoutError ? (
-              <p role="alert" className="mt-2 break-words px-3 text-sm text-destructive">
-                {logoutError}
-              </p>
-            ) : null}
+        <TooltipProvider delayDuration={250}>
+          <div className={cn('flex h-18 shrink-0 items-center justify-between gap-2 border-b px-4', compact && 'h-auto flex-col px-2 py-3')}>
+            <Brand compact={compact} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" aria-label={toggleLabel} aria-expanded={!compact} aria-controls={desktopNavigationId} onClick={toggleSidebar}>
+                  <ToggleIcon aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side={compact ? 'right' : 'bottom'}>{toggleLabel}</TooltipContent>
+            </Tooltip>
           </div>
-        ) : null}
+          <div className={compact ? 'sr-only' : 'px-5 pt-5 text-xs font-semibold uppercase tracking-wider text-muted-foreground'}>
+            {modeLabels[mode]}
+          </div>
+          <nav id={desktopNavigationId} aria-label={modeLabels[mode]} className={cn('grid min-h-0 flex-1 content-start gap-1 overflow-y-auto p-3', compact && 'p-2')}>
+            {navigation.map((item) => {
+              const active = isNavigationItemActive(activePathname, item.href)
+              const Icon = item.icon
+              if (item.disabled) {
+                return (
+                  <CompactTooltip key={`${item.href}-${item.label}`} compact={compact} label={`${item.label}. ${item.disabledReason ?? ''}`}>
+                    <span
+                      aria-disabled="true"
+                      title={compact ? undefined : item.disabledReason}
+                      tabIndex={compact ? 0 : undefined}
+                      className={cn('flex min-h-11 cursor-not-allowed items-center gap-3 rounded-md border-l-[3px] border-transparent px-3 text-sm font-medium text-muted-foreground opacity-55 focus-visible:outline-2 focus-visible:outline-ring', compact && 'justify-center px-1')}
+                    >
+                      <Icon className="size-5" aria-hidden="true" />
+                      <span className={compact ? 'sr-only' : undefined}>{item.label}</span>
+                      <span className={cn('ml-auto text-[0.65rem] font-semibold uppercase tracking-wide', compact && 'sr-only')}>
+                        {item.disabledLabel ?? 'Pendente'}
+                      </span>
+                      <span className="sr-only">{item.disabledReason}</span>
+                    </span>
+                  </CompactTooltip>
+                )
+              }
+              return (
+                <CompactTooltip key={`${item.href}-${item.label}`} compact={compact} label={item.label}>
+                  <Link
+                    to={item.href}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'flex min-h-11 cursor-pointer items-center gap-3 rounded-md border-l-[3px] border-transparent px-3 text-sm font-medium text-muted-foreground ui-transition hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
+                      active && 'border-primary bg-accent text-accent-foreground',
+                      compact && 'justify-center px-1',
+                    )}
+                  >
+                    <Icon className="size-5 shrink-0" aria-hidden="true" />
+                    <span className={compact ? 'sr-only' : undefined}>{item.label}</span>
+                  </Link>
+                </CompactTooltip>
+              )
+            })}
+          </nav>
+          {authentication?.status === 'authenticated' ? (
+            <div className={cn('mt-auto border-t p-3', compact && 'p-2')}>
+              <CompactTooltip compact={compact} label="Sair">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className={cn('w-full justify-start', compact && 'justify-center px-1')}
+                  loading={isLoggingOut}
+                  loadingLabel="Saindo…"
+                  disabled={isLoggingOut}
+                  onClick={() => void handleLogout()}
+                >
+                  <LogOut aria-hidden="true" /> <span className={compact ? 'sr-only' : undefined}>Sair</span>
+                </Button>
+              </CompactTooltip>
+              {logoutError ? (
+                <p role="alert" className={cn('mt-2 break-words px-3 text-sm text-destructive', compact && 'px-0 text-xs wrap-anywhere')}>
+                  {logoutError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </TooltipProvider>
       </aside>
 
-      <div className="w-full min-w-0 max-w-full pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-0">
+      <div className="w-full min-w-0 max-w-full pb-[calc(var(--app-bottom-nav-height)+1rem)] lg:pb-0">
         <header className="sticky top-0 z-30 flex h-16 min-w-0 max-w-full items-center justify-between border-b bg-card/95 px-4 backdrop-blur-md sm:px-6 lg:h-18 lg:px-8">
           <div className="lg:hidden">
             <Brand compact />
@@ -325,7 +378,7 @@ export function AuthenticatedLayout({
               {modeLabels[mode]} <span aria-hidden="true">/</span>{' '}
               <span className="text-foreground/75">{pageTitle}</span>
             </p>
-            <h1 className="break-words font-bold">{pageTitle}</h1>
+            {heading ? <p className="break-words font-bold">{pageTitle}</p> : <h1 className="break-words font-bold">{pageTitle}</h1>}
           </div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {contextSwitcher}
@@ -341,14 +394,14 @@ export function AuthenticatedLayout({
             >
                 <DropdownMenuTrigger asChild>
                   <button type="button" aria-label={`Abrir menu da conta de ${userName}`} className="rounded-full focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30">
-                    <Avatar className="border border-primary/20">
+                    <Avatar>
                       {userAvatarUrl ? <AvatarImage src={userAvatarUrl} alt="" /> : null}
                       <AvatarFallback>{initials}</AvatarFallback>
                     </Avatar>
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" collisionPadding={8}>
-                  <DropdownMenuLabel className="max-w-48 truncate">{userName}</DropdownMenuLabel>
+                  <DropdownMenuLabel className="max-w-56 whitespace-normal wrap-anywhere">{userName}</DropdownMenuLabel>
                   {mode !== 'admin' ? (
                     <DropdownMenuItem asChild>
                       <Link
@@ -392,11 +445,10 @@ export function AuthenticatedLayout({
             contentClassName,
           )}
         >
-          <h1 className="mb-6 text-2xl font-bold tracking-tight lg:hidden">{pageTitle}</h1>
+          {heading ? <div className="mb-6"><PageHeader {...heading} title={heading.title ?? pageTitle} /></div> : <h1 className="mb-6 text-2xl font-bold tracking-tight lg:hidden">{pageTitle}</h1>}
           {children}
         </main>
       </div>
-
       </div>
 
       {typeof document === 'undefined'

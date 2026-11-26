@@ -311,9 +311,15 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
     const user = userEvent.setup()
     renderPage('/cliente/solicitar?pedido=request-operation-key-000001')
 
-    await user.click(await screen.findByRole('button', { name: 'Cancelar solicitação' }))
+    const trigger = await screen.findByRole('button', { name: 'Cancelar solicitação' })
+    await user.click(trigger)
+    expect(screen.getByRole('dialog', { name: 'Cancelar esta solicitação?' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Manter solicitação' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(trigger).toHaveFocus())
+    await user.click(trigger)
     expect(mocks.cancelOwnRequest).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+    await user.click(screen.getByRole('button', { name: 'Cancelar pedido' }))
 
     expect(await screen.findByRole('heading', { name: 'Solicitação cancelada' })).toBeInTheDocument()
     expect(mocks.cancelOwnRequest).toHaveBeenCalledWith(expect.objectContaining({
@@ -395,7 +401,7 @@ describe('ServiceRequestPage', { timeout: 10_000 }, () => {
     expect(await screen.findByRole('heading', { name: 'Profissional confirmado' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Editar solicitação' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Cancelar solicitação' }))
-    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+    await user.click(screen.getByRole('button', { name: 'Cancelar atendimento' }))
 
     expect(mocks.cancelOwnRequest).toHaveBeenCalledWith(expect.objectContaining({
       expectedRound: 1,

@@ -1,0 +1,9 @@
+.active-requests-swiper.swiper {
+  margin-inline: 0;
+  overflow: clip;
+}
+
+.active-requests-swiper .swiper-slide {
+  height: auto;
+  min-width: 0;
+}

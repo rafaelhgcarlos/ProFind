@@ -72,4 +72,18 @@ describe('ProfessionalAvailabilityPage', () => {
     )
     expect(await screen.findByText('Disponibilidade salva')).toBeInTheDocument()
   })
+
+  it('mantém a edição em caso de falha até o salvamento confirmado', async () => {
+    const user = userEvent.setup()
+    availabilityMock.saveDay.mockRejectedValueOnce(new Error('Conexão indisponível.'))
+    render(<MemoryRouter><ProfessionalAvailabilityPage /></MemoryRouter>)
+    const afternoon = await screen.findByRole('switch', { name: 'Tarde: disponível' })
+    await user.click(afternoon)
+    await user.click(screen.getByRole('button', { name: 'Salvar disponibilidade' }))
+    expect(await screen.findByText('Conexão indisponível.')).toBeInTheDocument()
+    expect(afternoon).toBeChecked()
+    expect(screen.queryByText('Disponibilidade salva')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Salvar disponibilidade' }))
+    expect(await screen.findByText('Disponibilidade salva')).toBeInTheDocument()
+  })
 })

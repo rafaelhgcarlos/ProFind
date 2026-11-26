@@ -4,10 +4,8 @@ import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
 import { SERVICE_PERIOD_DEFINITIONS } from '../../../services/service-period-policy'
 import type { ProfessionalOpportunitySummary } from '../../../types/service-request'
-import {
-  formatOpportunityDeadline,
-  formatServiceDate,
-} from '../opportunity-formatters'
+import { useServiceToday } from '../../../hooks/use-service-today'
+import { formatCompactServiceDate, formatServiceTimestamp } from '../../../utils/service-date-display'
 
 interface ProfessionalOpportunityCardProps {
   opportunity: ProfessionalOpportunitySummary
@@ -27,6 +25,7 @@ export function ProfessionalOpportunityCard({
   scrollY,
 }: ProfessionalOpportunityCardProps) {
   const period = SERVICE_PERIOD_DEFINITIONS[opportunity.period]
+  const today = useServiceToday()
 
   return (
     <Link
@@ -76,7 +75,7 @@ export function ProfessionalOpportunityCard({
               <div className="min-w-0">
                 <dt className="sr-only">Data e período</dt>
                 <dd className="break-words">
-                  {formatServiceDate(opportunity.serviceDate)} · {period.label}
+                  <time dateTime={opportunity.serviceDate}>{formatCompactServiceDate(opportunity.serviceDate, today)}</time> · {period.label}
                 </dd>
               </div>
             </div>
@@ -85,7 +84,7 @@ export function ProfessionalOpportunityCard({
               <div className="min-w-0">
                 <dt className="sr-only">Prazo para aceitar</dt>
                 <dd className="break-words">
-                  Aceite até {formatOpportunityDeadline(opportunity.acceptUntil)}
+                  Aceite até {formatServiceTimestamp(opportunity.acceptUntil)}
                 </dd>
               </div>
             </div>

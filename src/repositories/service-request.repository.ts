@@ -45,6 +45,7 @@ import {
 } from '../services/service-period-policy'
 import {
   ServiceRequestError,
+  CLIENT_ACTIVE_REQUESTS_LIMIT,
   SERVICE_EVENT_HISTORY_LIMIT,
   OPPORTUNITY_FEED_CURSOR_VERSION,
   OPPORTUNITY_QUERY_VERSION,
@@ -1098,7 +1099,7 @@ export function createServiceRequestRepository({
         collection(firestore, 'serviceRequests'),
         where('clientId', '==', clientId),
         where('status', 'in', ['OPEN', 'ASSIGNED', 'IN_PROGRESS']),
-        limit(50),
+        limit(CLIENT_ACTIVE_REQUESTS_LIMIT),
       ),
       { includeMetadataChanges: true },
       (snapshot) => {

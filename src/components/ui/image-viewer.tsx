@@ -7,24 +7,24 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 
-import { Button } from '../../../components/ui/button'
+import { imageKitDisplayUrl } from '../../utils/imagekit-display-url'
+import { Button } from './button'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '../../../components/ui/dialog'
-import { imageKitDisplayUrl } from './admin-image-viewer.utils'
+} from './dialog'
 
-export interface AdminReviewImage {
+export interface ViewerImage {
   url: string
   alt: string
   label: string
 }
 
-interface AdminImageViewerProps {
-  images: AdminReviewImage[]
+interface ImageViewerProps {
+  images: ViewerImage[]
   index: number | null
   returnFocusTo?: HTMLElement | null
   onIndexChange(index: number | null): void
@@ -34,12 +34,12 @@ const MIN_SCALE = 1
 const MAX_SCALE = 4
 const SCALE_STEP = 0.5
 
-export function AdminImageViewer({
+export function ImageViewer({
   images,
   index,
   returnFocusTo,
   onIndexChange,
-}: AdminImageViewerProps) {
+}: ImageViewerProps) {
   const open = index !== null && images.length > 0
   const safeIndex = index === null ? 0 : Math.min(Math.max(index, 0), images.length - 1)
   const image = images[safeIndex]
@@ -64,8 +64,10 @@ export function AdminImageViewer({
   }, [fitToScreen, images.length, onIndexChange])
 
   function close() {
+    fitToScreen()
+    setLoading(true)
+    setFailed(false)
     onIndexChange(null)
-    window.setTimeout(() => returnFocusTo?.focus(), 0)
   }
 
   const changeScale = useCallback((nextScale: number) => {
@@ -97,6 +99,7 @@ export function AdminImageViewer({
   useEffect(() => {
     if (!open) return
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return
       const target = event.target
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
       if (event.key === 'ArrowLeft') {
@@ -126,9 +129,17 @@ export function AdminImageViewer({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) close() }}>
-      <DialogContent className="h-[min(92dvh,60rem)] max-w-[min(96vw,90rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-3 sm:p-5">
+      <DialogContent
+        className="h-[min(92dvh,60rem)] max-w-[min(96vw,90rem)] grid-rows-[auto_minmax(5rem,1fr)_auto] overflow-y-auto p-3 sm:p-5"
+        onCloseAutoFocus={(event) => {
+          if (returnFocusTo?.isConnected) {
+            event.preventDefault()
+            returnFocusTo.focus()
+          }
+        }}
+      >
         <DialogHeader className="min-w-0 pr-10">
-          <DialogTitle className="truncate">{image?.label ?? 'Visualizador de imagens'}</DialogTitle>
+          <DialogTitle className="wrap-anywhere">{image?.label ?? 'Visualizador de imagens'}</DialogTitle>
           <DialogDescription className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span>{images.length ? `${safeIndex + 1} de ${images.length}` : 'Nenhuma imagem'}</span>
             <span>{Math.round(scale * 100)}%</span>

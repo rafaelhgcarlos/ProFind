@@ -2,9 +2,11 @@ import { useContext, type PropsWithChildren, type ReactNode } from 'react'
 
 import { ProfileContext } from '../../features/onboarding/profile-context'
 import { AuthenticatedLayout } from './AuthenticatedLayout'
+import type { PageHeading } from './PageHeader'
 
 interface ProfessionalLayoutProps extends PropsWithChildren {
   pageTitle: string
+  heading?: PageHeading
   userName?: string
   activeNavigationHref?: string
   contextSwitcher?: ReactNode

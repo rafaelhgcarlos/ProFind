@@ -1,9 +1,8 @@
-import { AlertCircle, CalendarClock, CheckCircle2, LockKeyhole } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, CircleMinus, LockKeyhole } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
-import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
 import { Input } from '../../../components/ui/input'
@@ -25,6 +24,20 @@ import type {
   ProfessionalAvailabilitySelection,
 } from '../../../types/professional-availability'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
+import { formatCalendarDate, formatCompactServiceDate, formatServiceHours, shiftCalendarDate } from '../../../utils/service-date-display'
+import { useServiceToday } from '../../../hooks/use-service-today'
+import { cn } from '../../../utils/cn'
+
+const availabilityStates = {
+  available: { label: 'Disponível', icon: CheckCircle2, style: 'border-success/35 bg-success/10 text-success' },
+  unavailable: { label: 'Indisponível', icon: CircleMinus, style: 'bg-muted text-muted-foreground' },
+  reserved: { label: 'Reservado', icon: LockKeyhole, style: 'border-warning/35 bg-warning/10 text-foreground' },
+}
+
+function AvailabilityStatus({ state }: { state: keyof typeof availabilityStates }) {
+  const { label, icon: Icon, style } = availabilityStates[state]
+  return <span className={cn('inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold', style)}><Icon className="size-3.5 shrink-0" aria-hidden="true" />{label}</span>
+}
 
 function selectionFromDay(
   day: ProfessionalAvailabilityDay,
@@ -41,6 +54,7 @@ function emptySelection(): ProfessionalAvailabilitySelection {
 export function ProfessionalAvailabilityPage() {
   useDocumentTitle('Disponibilidade — ProFind')
   const bounds = availabilityDateBounds()
+  const today = useServiceToday()
   const [serviceDate, setServiceDate] = useState(bounds.min)
   const [day, setDay] = useState<ProfessionalAvailabilityDay | null>(null)
   const [selection, setSelection] =
@@ -50,6 +64,9 @@ export function ProfessionalAvailabilityPage() {
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const savingRef = useRef(false)
+  const previousDate = shiftCalendarDate(serviceDate, -1)
+  const nextDate = shiftCalendarDate(serviceDate, 1)
 
   useEffect(() => {
     let active = true
@@ -81,6 +98,8 @@ export function ProfessionalAvailabilityPage() {
   }, [attempt, serviceDate])
 
   async function handleSave() {
+    if (savingRef.current || !day || loading) return
+    savingRef.current = true
     setSaving(true)
     setError(null)
     setSaved(false)
@@ -99,6 +118,7 @@ export function ProfessionalAvailabilityPage() {
           : 'Não foi possível salvar sua disponibilidade.',
       )
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
@@ -107,54 +127,32 @@ export function ProfessionalAvailabilityPage() {
     return day?.periods.find((item) => item.period === period)?.reserved === true
   }
 
+  function selectDate(value: string) {
+    if (!value || value === serviceDate || value < bounds.min || value > bounds.max || savingRef.current) return
+    setLoading(true)
+    setError(null)
+    setSaved(false)
+    setDay(null)
+    setServiceDate(value)
+  }
+
   return (
     <ProfessionalLayout
       pageTitle="Disponibilidade"
+      heading={{ title: 'Agenda de disponibilidade', description: 'Escolha um dia e marque os períodos em que você pode receber oportunidades.' }}
       activeNavigationHref="/profissional/disponibilidade"
       contextSwitcher={<ModeSwitcher />}
     >
-      <div className="mx-auto max-w-3xl space-y-6">
-        <header>
-          <Badge variant="secondary">
-            <CalendarClock className="size-3.5" aria-hidden="true" />
-            Agenda por data e período
-          </Badge>
-          <h2 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">
-            Quando você pode atender?
-          </h2>
-          <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-            Marque os períodos em que deseja receber oportunidades. Esta agenda
-            não altera a aprovação do cadastro e nunca remove reservas já
-            confirmadas.
-          </p>
-        </header>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Escolha uma data</CardTitle>
-          </CardHeader>
-          <CardContent>
+      <div className="max-w-4xl space-y-5">
+        <section aria-label="Escolha de data" className="grid gap-2">
             <Label htmlFor="availability-date">Data de atendimento</Label>
-            <Input
-              id="availability-date"
-              type="date"
-              min={bounds.min}
-              max={bounds.max}
-              value={serviceDate}
-              className="mt-2 max-w-xs"
-              onChange={(event) => {
-                setLoading(true)
-                setError(null)
-                setSaved(false)
-                setDay(null)
-                setServiceDate(event.target.value)
-              }}
-            />
-            <p className="mt-2 text-sm text-muted-foreground">
-              Você pode organizar os próximos 90 dias no fuso de São Paulo.
-            </p>
-          </CardContent>
-        </Card>
+            <div className="flex min-w-0 items-center gap-2">
+              <Button type="button" variant="outline" size="icon" aria-label="Dia anterior" disabled={saving || previousDate < bounds.min} onClick={() => selectDate(previousDate)}><ChevronLeft aria-hidden="true" /></Button>
+              <Input id="availability-date" type="date" min={bounds.min} max={bounds.max} value={serviceDate} disabled={saving} aria-describedby="availability-date-help" className="w-full min-w-0 max-w-xs" onChange={(event) => selectDate(event.target.value)} />
+              <Button type="button" variant="outline" size="icon" aria-label="Próximo dia" disabled={saving || nextDate > bounds.max} onClick={() => selectDate(nextDate)}><ChevronRight aria-hidden="true" /></Button>
+            </div>
+            <p id="availability-date-help" className="text-sm text-muted-foreground">A agenda usa o horário de São Paulo. Você pode organizar os próximos 90 dias.</p>
+        </section>
 
         {error ? (
           <Alert variant="destructive">
@@ -177,13 +175,13 @@ export function ProfessionalAvailabilityPage() {
                 >
                   Tentar novamente
                 </Button>
-              ) : null}
+              ) : <p className="mt-1">Sua seleção foi preservada. Use “Salvar disponibilidade” para tentar novamente.</p>}
             </AlertDescription>
           </Alert>
         ) : null}
 
         {saved ? (
-          <Alert>
+          <Alert variant="success" role="status">
             <CheckCircle2 aria-hidden="true" />
             <AlertTitle>Disponibilidade salva</AlertTitle>
             <AlertDescription>
@@ -194,7 +192,12 @@ export function ProfessionalAvailabilityPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Períodos do dia</CardTitle>
+            <CardTitle className="text-lg" aria-live="polite">
+              <time dateTime={serviceDate}>{formatCompactServiceDate(serviceDate, today)}{serviceDate === today ? ` · ${formatCalendarDate(serviceDate, 'short')}` : ''}</time>
+            </CardTitle>
+            <ul aria-label="Legenda da agenda" className="flex flex-wrap gap-2">
+              {(['available', 'unavailable', 'reserved'] as const).map((state) => <li key={state}><AvailabilityStatus state={state} /></li>)}
+            </ul>
           </CardHeader>
           <CardContent className="space-y-3">
             {loading ? (
@@ -204,26 +207,28 @@ export function ProfessionalAvailabilityPage() {
                   <Skeleton key={period} className="h-20" />
                 ))}
               </div>
-            ) : (
-              SERVICE_PERIODS.map((period) => {
+            ) : day ? (
+              <div className="@container">
+              <div className="grid gap-3 @min-[34rem]:grid-cols-3">
+              {SERVICE_PERIODS.map((period) => {
                 const definition = SERVICE_PERIOD_DEFINITIONS[period]
                 const isReserved = reserved(period)
+                const state = isReserved ? 'reserved' : selection[period] ? 'available' : 'unavailable'
                 return (
                   <div
                     key={period}
-                    className="flex min-w-0 items-center justify-between gap-4 rounded-lg border p-4"
+                    className={cn('flex min-w-0 items-start justify-between gap-2 rounded-lg border p-3 @min-[34rem]:grid', availabilityStates[state].style)}
                   >
                     <div className="min-w-0">
                       <Label htmlFor={`availability-${period}`} className="text-base">
                         {definition.label}
                       </Label>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {String(definition.startHour).padStart(2, '0')}:00–
-                        {String(definition.endHour).padStart(2, '0')}:00
+                        {formatServiceHours(period)}
                       </p>
+                      <div id={`availability-status-${period}`} className="mt-2"><AvailabilityStatus state={state} /></div>
                       {isReserved ? (
-                        <p className="mt-2 flex items-center gap-1.5 text-sm font-medium text-primary">
-                          <LockKeyhole className="size-4" aria-hidden="true" />
+                        <p className="mt-2 text-xs font-medium text-muted-foreground">
                           Atendimento confirmado preservado
                         </p>
                       ) : null}
@@ -233,6 +238,7 @@ export function ProfessionalAvailabilityPage() {
                       checked={selection[period]}
                       disabled={saving || isReserved}
                       aria-label={`${definition.label}: disponível`}
+                      aria-describedby={`availability-status-${period}`}
                       onCheckedChange={(checked) => {
                         setSaved(false)
                         setSelection((current) => ({
@@ -243,13 +249,17 @@ export function ProfessionalAvailabilityPage() {
                     />
                   </div>
                 )
-              })
-            )}
+              })}
+              </div>
+              </div>
+            ) : null}
 
             <div className="flex justify-end pt-2">
               <Button
                 type="button"
                 disabled={loading || saving || !day}
+                loading={saving}
+                loadingLabel="Salvando disponibilidade…"
                 onClick={() => void handleSave()}
               >
                 {saving ? 'Salvando…' : 'Salvar disponibilidade'}

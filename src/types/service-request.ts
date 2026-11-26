@@ -1,6 +1,8 @@
 import type { ProfessionalReviewStatus } from './professional-review'
 import type { ProfessionalImageMetadata } from './professional-profile'
 
+export const CLIENT_ACTIVE_REQUESTS_LIMIT = 50
+
 export const SERVICE_REQUEST_STATUSES = [
   'OPEN',
   'ASSIGNED',

@@ -12,7 +12,7 @@ import {
   RefreshCw,
   UserRound,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject, type MouseEvent as ReactMouseEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { AdminLayout } from '../../../components/layout/AdminLayout'
@@ -20,6 +20,9 @@ import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/aler
 import { Avatar, AvatarFallback, AvatarImage } from '../../../components/ui/avatar'
 import { Badge, type BadgeProps } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
+import { AppliedFilterList } from '../../../components/ui/applied-filters'
+import { ConfirmationDialog } from '../../../components/ui/confirmation-dialog'
+import { formatCalendarDate, formatServiceTimestamp as formatDate } from '../../../utils/service-date-display'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
 import { Checkbox } from '../../../components/ui/checkbox'
 import {
@@ -33,6 +36,7 @@ import {
 import { EmptyState } from '../../../components/ui/empty-state'
 import { Input } from '../../../components/ui/input'
 import { Label } from '../../../components/ui/label'
+import { NativeSelect } from '../../../components/ui/native-select'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { Textarea } from '../../../components/ui/textarea'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
@@ -50,11 +54,9 @@ import {
 } from '../../../types/professional-review'
 import type { ServiceCatalog } from '../../../types/catalog'
 import { useAuth } from '../../auth/use-auth'
-import {
-  AdminImageViewer,
-  type AdminReviewImage,
-} from '../components/AdminImageViewer'
-import { imageKitDisplayUrl } from '../components/admin-image-viewer.utils'
+import { ImageViewer, type ViewerImage } from '../../../components/ui/image-viewer'
+import { ImageThumbnail } from '../../../components/ui/image-thumbnail'
+import { imageKitDisplayUrl } from '../../../utils/imagekit-display-url'
 
 const STATUS_LABELS: Record<ProfessionalReviewStatus, string> = {
   DRAFT: 'Rascunho',
@@ -111,20 +113,6 @@ function statusVariant(status: ProfessionalReviewStatus): BadgeProps['variant'] 
   if (status === 'UNDER_REVIEW' || status === 'CHANGES_REQUESTED') return 'warning'
   if (status === 'REJECTED' || status === 'SUSPENDED') return 'destructive'
   return 'outline'
-}
-
-function formatDate(value: Date) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(value)
-}
-
-function formatServiceDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || 'Data não informada'
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeZone: 'UTC' }).format(
-    new Date(`${value}T12:00:00Z`),
-  )
 }
 
 function formatPhone(value: string | null) {
@@ -254,25 +242,17 @@ function AdminProfessionalQueue() {
   return (
     <AdminLayout
       pageTitle="Análise de profissionais"
+      heading={{ title: 'Fila de análise', description: 'Revise os cadastros e registre sua decisão.' }}
       userName={user?.displayName || user?.email || 'Administrador ProFind'}
       activeNavigationHref="/admin/profissionais"
     >
       <div className="grid gap-6">
-        <div>
-          <p className="text-sm font-semibold text-primary">Cadastros profissionais</p>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight">Fila de análise</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Confira a versão enviada, registre sua decisão e mantenha separado o retorno ao profissional das notas internas.
-          </p>
-        </div>
-
         <Card>
           <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="review-status-filter">Estado da análise</Label>
-              <select
+              <NativeSelect
                 id="review-status-filter"
-                className="min-h-11 rounded-md border border-input bg-background px-3 text-sm"
                 value={statusFilter}
                 onChange={(event) => {
                   setStatusFilter(event.target.value as typeof statusFilter)
@@ -283,13 +263,12 @@ function AdminProfessionalQueue() {
                 {PROFESSIONAL_REVIEW_STATUSES.map((status) => (
                   <option key={status} value={status}>{STATUS_LABELS[status]}</option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="review-active-filter">Ativação</Label>
-              <select
+              <NativeSelect
                 id="review-active-filter"
-                className="min-h-11 rounded-md border border-input bg-background px-3 text-sm"
                 value={activeFilter}
                 onChange={(event) => {
                   setActiveFilter(event.target.value as typeof activeFilter)
@@ -299,7 +278,26 @@ function AdminProfessionalQueue() {
                 <option value="ALL">Ativos e inativos</option>
                 <option value="ACTIVE">Ativos</option>
                 <option value="INACTIVE">Inativos</option>
-              </select>
+              </NativeSelect>
+            </div>
+            <div className="col-span-full flex flex-wrap items-center gap-3">
+              <AppliedFilterList items={[
+                ['status', statusFilter === 'ALL' ? '' : `Estado: ${STATUS_LABELS[statusFilter]}`],
+                ['active', activeFilter === 'ALL' ? '' : activeFilter === 'ACTIVE' ? 'Ativos' : 'Inativos'],
+              ]} onRemove={(key) => {
+                if (key === 'status') setStatusFilter('ALL')
+                else setActiveFilter('ALL')
+                resetPagination()
+                document.getElementById(key === 'status' ? 'review-status-filter' : 'review-active-filter')?.focus()
+              }} />
+              {statusFilter !== 'ALL' || activeFilter !== 'ALL' ? (
+                <Button type="button" variant="outline" onClick={() => {
+                  setStatusFilter('ALL')
+                  setActiveFilter('ALL')
+                  resetPagination()
+                  document.getElementById('review-status-filter')?.focus()
+                }}>Limpar filtros</Button>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -368,6 +366,7 @@ interface DecisionDialogProps {
   detail: AdminProfessionalReviewDetail
   busy: boolean
   error: string | null
+  returnFocusTo: RefObject<HTMLButtonElement | null>
   onClose(): void
   onSubmit(input: {
     feedback: string
@@ -376,7 +375,7 @@ interface DecisionDialogProps {
   }): void
 }
 
-function DecisionDialog({ action, detail, busy, error, onClose, onSubmit }: DecisionDialogProps) {
+function DecisionDialog({ action, detail, busy, error, returnFocusTo, onClose, onSubmit }: DecisionDialogProps) {
   const [feedback, setFeedback] = useState('')
   const [internalNote, setInternalNote] = useState('')
   const [activateOnApproval, setActivateOnApproval] = useState(true)
@@ -391,15 +390,33 @@ function DecisionDialog({ action, detail, busy, error, onClose, onSubmit }: Deci
     reactivate: 'Reativar profissional',
   }
 
+  const consequences: Partial<Record<AdminAction, string>> = {
+    approve: 'O cadastro passa a aprovado. A opção de ativação libera novas oportunidades na mesma operação.',
+    changes: 'O profissional receberá orientações para ajustar o cadastro e enviá-lo novamente.',
+    reject: 'O cadastro será rejeitado e não poderá receber novas oportunidades.',
+    suspend: 'O acesso a novas oportunidades será suspenso. Os atendimentos existentes continuam vinculados.',
+    deactivate: 'O profissional deixa de receber novas oportunidades. Os atendimentos existentes continuam vinculados.',
+    reactivate: 'O profissional volta a receber oportunidades conforme os critérios de elegibilidade.',
+  }
+  const title = action ? titles[action] ?? '' : ''
+
   return (
-    <Dialog open={action !== null && action !== 'assist'} onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{action ? titles[action] : ''}</DialogTitle>
-          <DialogDescription>
-            A decisão será aplicada somente à versão {detail.operational.submittedVersion ?? detail.operational.profileVersion}. Se o cadastro tiver mudado, os dados precisarão ser recarregados.
-          </DialogDescription>
-        </DialogHeader>
+    <ConfirmationDialog
+      open={action !== null && action !== 'assist'}
+      title={title}
+      description={action ? consequences[action] : ''}
+      confirmLabel={title}
+      cancelLabel="Voltar à análise"
+      destructive={action === 'reject' || action === 'suspend' || action === 'deactivate'}
+      busy={busy}
+      busyLabel="Salvando decisão…"
+      disabled={requiresFeedback && !feedback.trim()}
+      error={error ?? undefined}
+      returnFocusTo={returnFocusTo}
+      onCancel={onClose}
+      onConfirm={() => onSubmit({ feedback, internalNote, activateOnApproval })}
+    >
+        <p className="text-xs text-muted-foreground">Versão em análise {detail.operational.submittedVersion ?? detail.operational.profileVersion}</p>
         {restricting && detail.confirmedEngagements.length > 0 ? (
           <Alert variant="destructive">
             <AlertTriangle aria-hidden="true" />
@@ -440,24 +457,12 @@ function DecisionDialog({ action, detail, busy, error, onClose, onSubmit }: Deci
             placeholder="Visível somente para administradores."
           />
         </div>
-        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-        <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={onClose}>Cancelar</Button>
-          <Button
-            disabled={busy || (requiresFeedback && !feedback.trim())}
-            loading={busy}
-            loadingLabel="Salvando decisão…"
-            onClick={() => onSubmit({ feedback, internalNote, activateOnApproval })}
-          >
-            Confirmar decisão
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </ConfirmationDialog>
   )
 }
 
 interface AssistanceDialogProps {
+  returnFocusTo: RefObject<HTMLButtonElement | null>
   open: boolean
   detail: AdminProfessionalReviewDetail
   busy: boolean
@@ -472,7 +477,7 @@ interface AssistanceDialogProps {
   }): void
 }
 
-function AssistanceDialog({ open, detail, busy, error, onClose, onSubmit }: AssistanceDialogProps) {
+function AssistanceDialog({ open, detail, busy, error, returnFocusTo, onClose, onSubmit }: AssistanceDialogProps) {
   const [publicName, setPublicName] = useState(detail.profile.publicName)
   const [headline, setHeadline] = useState(detail.profile.headline)
   const [bio, setBio] = useState(detail.profile.bio)
@@ -482,7 +487,11 @@ function AssistanceDialog({ open, detail, busy, error, onClose, onSubmit }: Assi
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !busy) onClose() }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl" showClose={!busy} onCloseAutoFocus={(event) => {
+        if (!returnFocusTo.current?.isConnected) return
+        event.preventDefault()
+        returnFocusTo.current.focus()
+      }}>
         <DialogHeader>
           <DialogTitle>Auxiliar no preenchimento</DialogTitle>
           <DialogDescription>
@@ -541,7 +550,7 @@ function AssistanceDialog({ open, detail, busy, error, onClose, onSubmit }: Assi
 interface DecisionPanelProps {
   detail: AdminProfessionalReviewDetail
   versionBlocked: boolean
-  onAction(action: AdminAction): void
+  onAction(action: AdminAction, trigger: HTMLButtonElement): void
 }
 
 function DecisionPanel({ detail, versionBlocked, onAction }: DecisionPanelProps) {
@@ -566,7 +575,7 @@ function DecisionPanel({ detail, versionBlocked, onAction }: DecisionPanelProps)
 
           {operational.reviewStatus === 'UNDER_REVIEW' ? (
             <>
-              <Button className="w-full" disabled={versionBlocked} onClick={() => onAction('approve')}>
+              <Button className="w-full" disabled={versionBlocked} onClick={(event) => onAction('approve', event.currentTarget)}>
                 Aprovar cadastro
               </Button>
               <p className="-mt-1 text-xs leading-5 text-muted-foreground">
@@ -574,10 +583,10 @@ function DecisionPanel({ detail, versionBlocked, onAction }: DecisionPanelProps)
                   ? 'A aprovação mantém o profissional ativo.'
                   : 'Na confirmação, “Ativar ao aprovar” vem marcado e pode ser desmarcado.'}
               </p>
-              <Button className="w-full" variant="outline" disabled={versionBlocked} onClick={() => onAction('changes')}>
+              <Button className="w-full" variant="outline" disabled={versionBlocked} onClick={(event) => onAction('changes', event.currentTarget)}>
                 Solicitar ajustes
               </Button>
-              <Button className="w-full" variant="destructive" disabled={versionBlocked} onClick={() => onAction('reject')}>
+              <Button className="w-full" variant="destructive" disabled={versionBlocked} onClick={(event) => onAction('reject', event.currentTarget)}>
                 Rejeitar cadastro
               </Button>
             </>
@@ -585,17 +594,17 @@ function DecisionPanel({ detail, versionBlocked, onAction }: DecisionPanelProps)
 
           {operational.reviewStatus === 'APPROVED' ? (
             <>
-              <Button className="w-full" variant="outline" onClick={() => onAction(operational.active ? 'deactivate' : 'reactivate')}>
+              <Button className="w-full" variant="outline" onClick={(event) => onAction(operational.active ? 'deactivate' : 'reactivate', event.currentTarget)}>
                 {operational.active ? 'Desativar profissional' : 'Reativar profissional'}
               </Button>
-              <Button className="w-full" variant="destructive" onClick={() => onAction('suspend')}>
+              <Button className="w-full" variant="destructive" onClick={(event) => onAction('suspend', event.currentTarget)}>
                 Suspender profissional
               </Button>
             </>
           ) : null}
 
           {operational.reviewStatus === 'REJECTED' || operational.reviewStatus === 'SUSPENDED' ? (
-            <Button className="w-full" variant="outline" onClick={() => onAction('changes')}>
+            <Button className="w-full" variant="outline" onClick={(event) => onAction('changes', event.currentTarget)}>
               Permitir correções
             </Button>
           ) : null}
@@ -616,7 +625,7 @@ function DecisionPanel({ detail, versionBlocked, onAction }: DecisionPanelProps)
           <p className="text-sm leading-6 text-muted-foreground">
             Corrija dados confirmados com o profissional sem acessar a conta dele. A ação cria nova versão e nota privada.
           </p>
-          <Button className="mt-4 w-full" variant="secondary" onClick={() => onAction('assist')}>
+          <Button className="mt-4 w-full" variant="secondary" onClick={(event) => onAction('assist', event.currentTarget)}>
             Auxiliar no preenchimento
           </Button>
         </CardContent>
@@ -660,7 +669,7 @@ function ReviewTimeline({ detail, internalNotes }: ReviewTimelineProps) {
                           <div className="min-w-0">
                             <p className="font-semibold">{ACTION_LABELS[event.action]}</p>
                             <p className="text-xs text-muted-foreground">
-                              {event.actorRole === 'ADMIN' ? 'Equipe administrativa' : 'Profissional'} · versão {event.profileVersion}
+                              {event.actorRole === 'ADMIN' ? 'Equipe administrativa' : 'Profissional'}
                             </p>
                           </div>
                           <time className="shrink-0 text-xs text-muted-foreground">{formatDate(event.createdAt)}</time>
@@ -670,6 +679,9 @@ function ReviewTimeline({ detail, internalNotes }: ReviewTimelineProps) {
                         <p>
                           <span className="text-muted-foreground">Estado:</span>{' '}
                           {STATUS_LABELS[event.fromStatus]} → {STATUS_LABELS[event.toStatus]}
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Versão do cadastro:</span> {event.profileVersion}
                         </p>
                         <p>
                           <span className="text-muted-foreground">Versão analisada:</span>{' '}
@@ -707,6 +719,7 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [action, setAction] = useState<AdminAction | null>(null)
+  const decisionTrigger = useRef<HTMLButtonElement>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
@@ -747,7 +760,7 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
     () => new Map(detail?.internalHistory.map((event) => [event.eventId, event]) ?? []),
     [detail],
   )
-  const reviewImages = useMemo<AdminReviewImage[]>(() => {
+  const reviewImages = useMemo<ViewerImage[]>(() => {
     if (!detail) return []
     return [
       ...(detail.profile.profileImage
@@ -770,7 +783,8 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
       detail.operational.submittedVersion !== detail.operational.profileVersion,
   )
 
-  function openAction(nextAction: AdminAction) {
+  function openAction(nextAction: AdminAction, trigger: HTMLButtonElement) {
+    decisionTrigger.current = trigger
     setActionError(null)
     setAction(nextAction)
   }
@@ -781,7 +795,7 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
   }
 
   async function performDecision(input: { feedback: string; internalNote: string; activateOnApproval: boolean }) {
-    if (!detail || !action || action === 'assist') return
+    if (!detail || !action || action === 'assist' || busy) return
     setBusy(true)
     setActionError(null)
     const expected = {
@@ -869,6 +883,7 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
   return (
     <AdminLayout
       pageTitle="Detalhes da análise"
+      heading={{ description: 'Revise o perfil e o histórico antes de registrar uma decisão.' }}
       userName={user?.displayName || user?.email || 'Administrador ProFind'}
       activeNavigationHref="/admin/profissionais"
     >
@@ -929,16 +944,19 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
                     </Badge>
                   </div>
                 </div>
-                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3 text-xs text-muted-foreground">
-                  <span>Cadastro <strong className="text-foreground">v{detail.operational.profileVersion}</strong></span>
-                  <span>Enviado <strong className={versionBlocked ? 'text-destructive' : 'text-foreground'}>v{detail.operational.submittedVersion ?? '—'}</strong></span>
-                  <span>Aprovado <strong className="text-foreground">v{detail.operational.approvedVersion ?? '—'}</strong></span>
-                  {versionBlocked ? (
-                    <span className="inline-flex items-center gap-1 font-semibold text-destructive">
-                      <AlertTriangle className="size-3.5" aria-hidden="true" /> Divergência impede a decisão
-                    </span>
-                  ) : null}
-                </div>
+                {versionBlocked ? (
+                  <p className="mt-4 flex items-center gap-2 border-t pt-3 text-sm font-semibold text-destructive">
+                    <AlertTriangle className="size-4 shrink-0" aria-hidden="true" /> Divergência impede a decisão
+                  </p>
+                ) : null}
+                <details className="mt-3 border-t pt-3 text-xs text-muted-foreground">
+                  <summary className="w-fit cursor-pointer rounded-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">Versões do cadastro</summary>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+                    <span>Cadastro <strong className="text-foreground">v{detail.operational.profileVersion}</strong></span>
+                    <span>Enviado <strong className={versionBlocked ? 'text-destructive' : 'text-foreground'}>v{detail.operational.submittedVersion ?? '—'}</strong></span>
+                    <span>Aprovado <strong className="text-foreground">v{detail.operational.approvedVersion ?? '—'}</strong></span>
+                  </div>
+                </details>
               </CardContent>
             </Card>
 
@@ -951,7 +969,7 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
                   <ul className="mt-3 grid gap-1">
                     {detail.confirmedEngagements.map((engagement) => (
                       <li key={engagement.requestId}>
-                        {formatServiceDate(engagement.serviceDate)} · {PERIOD_LABELS[engagement.period] ?? engagement.period} · {engagement.status === 'IN_PROGRESS' ? 'Em andamento' : 'Confirmado'}
+                        {formatCalendarDate(engagement.serviceDate)} · {PERIOD_LABELS[engagement.period] ?? engagement.period} · {engagement.status === 'IN_PROGRESS' ? 'Em andamento' : 'Confirmado'}
                       </li>
                     ))}
                   </ul>
@@ -1045,7 +1063,7 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
                           aria-label="Ampliar foto de perfil"
                           onClick={(event) => openImage(event, 0)}
                         >
-                          <img src={imageKitDisplayUrl(detail.profile.profileImage.url, 640)} alt={detail.profile.profileImage.altText || `Foto de perfil de ${detail.profile.publicName}`} className="aspect-[4/3] w-full object-cover" />
+                          <ImageThumbnail src={imageKitDisplayUrl(detail.profile.profileImage.url, 640)} alt={detail.profile.profileImage.altText || `Foto de perfil de ${detail.profile.publicName}`} />
                           <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 bg-black/65 px-2 py-2 text-xs font-semibold text-white"><Maximize2 className="size-4" aria-hidden="true" /> Ampliar</span>
                         </button>
                       ) : (
@@ -1072,7 +1090,7 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
                                 aria-label={`Ampliar ${alt}`}
                                 onClick={(event) => openImage(event, viewerImageIndex)}
                               >
-                                <img src={imageKitDisplayUrl(image.url, 480)} alt={alt} className="aspect-square w-full object-cover transition-transform group-hover:scale-[1.03]" />
+                                <ImageThumbnail src={imageKitDisplayUrl(image.url, 480)} alt={alt} className="aspect-square" />
                                 <span className="absolute right-1.5 bottom-1.5 flex size-8 items-center justify-center rounded-full bg-black/70 text-white" aria-hidden="true"><Maximize2 className="size-4" /></span>
                               </button>
                             )
@@ -1093,9 +1111,9 @@ function AdminProfessionalDetail({ professionalId }: { professionalId: string })
               </div>
             </div>
 
-            <DecisionDialog key={action ?? 'closed'} action={action} detail={detail} busy={busy} error={actionError} onClose={() => setAction(null)} onSubmit={(input) => void performDecision(input)} />
-            <AssistanceDialog key={`assist-${action ?? 'closed'}-${detail.operational.revision}`} open={action === 'assist'} detail={detail} busy={busy} error={actionError} onClose={() => setAction(null)} onSubmit={(input) => void performAssistance(input)} />
-            <AdminImageViewer images={reviewImages} index={viewerIndex} returnFocusTo={viewerReturnFocus} onIndexChange={setViewerIndex} />
+            <DecisionDialog key={action ?? 'closed'} action={action} detail={detail} busy={busy} error={actionError} returnFocusTo={decisionTrigger} onClose={() => setAction(null)} onSubmit={(input) => void performDecision(input)} />
+            <AssistanceDialog key={`assist-${action ?? 'closed'}-${detail.operational.revision}`} open={action === 'assist'} returnFocusTo={decisionTrigger} detail={detail} busy={busy} error={actionError} onClose={() => setAction(null)} onSubmit={(input) => void performAssistance(input)} />
+            <ImageViewer images={reviewImages} index={viewerIndex} returnFocusTo={viewerReturnFocus} onIndexChange={setViewerIndex} />
           </>
         ) : null}
       </div>

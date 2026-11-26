@@ -220,7 +220,7 @@ describe('AdminProfessionalReviewPage', () => {
     fireEvent.change(within(dialog).getByLabelText('Mensagem ao profissional (opcional)'), {
       target: { value: 'Cadastro revisado.' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar decisão' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Aprovar cadastro' }))
 
     await waitFor(() => expect(reviewService.decide).toHaveBeenCalledWith({
       professionalId: 'professional-1',

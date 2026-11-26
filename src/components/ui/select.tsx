@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronUp } from 'lucide-react'
 import * as React from 'react'
 
 import { cn } from '../../utils/cn'
+import { fieldControlClass } from './field-styles'
 
 export const Select = SelectPrimitive.Root
 export const SelectGroup = SelectPrimitive.Group
@@ -15,14 +16,15 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex min-h-11 w-full min-w-0 max-w-full cursor-pointer items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:outline-none focus:ring-[3px] focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground [&>span]:min-w-0 [&>span]:line-clamp-1',
+      fieldControlClass,
+      'flex cursor-pointer items-center justify-between gap-2 text-start data-[placeholder]:text-muted-foreground [&>span]:min-w-0 [&>span]:wrap-anywhere',
       className,
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="size-4 opacity-60" aria-hidden="true" />
+      <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ))
@@ -83,7 +85,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex min-h-10 w-full min-w-0 cursor-pointer select-none items-center rounded-sm py-2 pr-8 pl-2 text-sm break-words outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:focus:bg-transparent data-[disabled]:focus:text-inherit',
+      'relative flex min-h-11 w-full min-w-0 cursor-pointer select-none items-center rounded-sm py-2 pr-8 pl-2 text-sm wrap-anywhere outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:focus:bg-transparent data-[disabled]:focus:text-inherit',
       className,
     )}
     {...props}

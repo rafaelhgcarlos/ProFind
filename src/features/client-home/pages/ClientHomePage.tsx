@@ -9,7 +9,6 @@ import {
   RefreshCw,
   Search,
   Sparkles,
-  WifiOff,
   Waves,
   Wrench,
   Zap,
@@ -30,10 +29,10 @@ import { serviceRequestService } from '../../../services/service-request.service
 import type { CatalogCategory, CatalogSpecialty } from '../../../types/catalog'
 import type { ClientRequestListItem } from '../../../types/service-request'
 import { cn } from '../../../utils/cn'
-import { ClientRequestCard } from '../../client-requests/components/ClientRequestCard'
 import { useCatalog } from '../../home/use-catalog'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
+import { ActiveRequestsCarousel } from '../components/ActiveRequestsCarousel'
 
 function normalizedSearch(value: string) {
   return value
@@ -234,6 +233,47 @@ export function ClientHomePage() {
       contentClassName="max-w-none lg:px-8 xl:px-10"
     >
       <div className="grid min-w-0 gap-8 xl:gap-10">
+        {activeRequestsLoading ? (
+          <section aria-labelledby="active-requests-loading-title" className="@container min-w-0">
+            <h2 id="active-requests-loading-title" className="text-2xl font-bold tracking-[-0.035em]">
+              Seus pedidos ativos
+            </h2>
+            <div role="status" aria-label="Carregando pedidos ativos" className="mt-3 grid gap-3 @min-[34rem]:grid-cols-2 @min-[57rem]:grid-cols-3">
+              <Skeleton className="h-52 rounded-lg" />
+              <Skeleton className="hidden h-52 rounded-lg @min-[34rem]:block" />
+              <Skeleton className="hidden h-52 rounded-lg @min-[57rem]:block" />
+            </div>
+          </section>
+        ) : null}
+
+        {activeRequestsError ? (
+          <Alert variant="destructive">
+            <CircleAlert aria-hidden="true" />
+            <AlertTitle>Pedidos ativos indisponíveis</AlertTitle>
+            <AlertDescription>
+              <p>{activeRequestsError}</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => setActiveRequestsAttempt((current) => current + 1)}
+              >
+                <RefreshCw aria-hidden="true" />
+                Tentar carregar pedidos
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {!activeRequestsLoading && activeRequests.length > 0 ? (
+          <ActiveRequestsCarousel
+            items={activeRequests}
+            specialties={catalog?.specialties}
+            stale={activeRequestsFromCache || Boolean(activeRequestsError)}
+          />
+        ) : null}
+
         <section className="relative isolate overflow-hidden rounded-[1.25rem] border border-white/10 bg-brand-panel px-5 py-7 text-brand-panel-foreground shadow-soft sm:px-7 sm:py-8 lg:px-8">
           <div
             aria-hidden="true"
@@ -292,89 +332,6 @@ export function ClientHomePage() {
             </div>
           </div>
         </section>
-
-        {activeRequestsLoading ? (
-          <section aria-labelledby="active-requests-loading-title">
-            <h2 id="active-requests-loading-title" className="text-2xl font-bold tracking-[-0.035em]">
-              Seus pedidos ativos
-            </h2>
-            <div role="status" aria-label="Carregando pedidos ativos" className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <Skeleton className="h-64 rounded-xl" />
-              <Skeleton className="hidden h-64 rounded-xl md:block" />
-            </div>
-          </section>
-        ) : null}
-
-        {activeRequestsError ? (
-          <Alert variant="destructive">
-            <CircleAlert aria-hidden="true" />
-            <AlertTitle>Pedidos ativos indisponíveis</AlertTitle>
-            <AlertDescription>
-              <p>{activeRequestsError}</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => setActiveRequestsAttempt((current) => current + 1)}
-              >
-                <RefreshCw aria-hidden="true" />
-                Tentar carregar pedidos
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        {!activeRequestsLoading && activeRequests.length > 0 ? (
-          <section aria-labelledby="active-requests-title">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-              <div>
-                <p className="text-xs font-bold tracking-[0.15em] text-primary uppercase">
-                  Acompanhamento
-                </p>
-                <h2 id="active-requests-title" className="mt-1 text-2xl font-bold tracking-[-0.035em] sm:text-[1.75rem]">
-                  {activeRequests.length === 1
-                    ? 'Seu pedido ativo'
-                    : activeRequests.length + ' pedidos ativos'}
-                </h2>
-                <p className="mt-1.5 text-sm text-muted-foreground sm:text-base">
-                  Ordenados por data, período, criação e identificador do pedido.
-                </p>
-              </div>
-              <Button asChild variant="outline">
-                <Link to="/cliente/pedidos">
-                  Meus pedidos
-                  <ArrowRight aria-hidden="true" />
-                </Link>
-              </Button>
-            </div>
-
-            {activeRequestsFromCache || activeRequestsError ? (
-              <Alert variant="warning" className="mt-5">
-                <WifiOff aria-hidden="true" />
-                <AlertTitle>Estados salvos no dispositivo</AlertTitle>
-                <AlertDescription>
-                  Os estados abaixo podem estar desatualizados e não confirmam a situação atual. Confira novamente quando a conexão voltar.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {activeRequests.map((item) => (
-                <ClientRequestCard
-                  key={item.request.requestId}
-                  item={item}
-                  specialtyName={
-                    catalog?.specialties.find(
-                      (specialty) => specialty.id === item.request.specialtyId,
-                    )?.name ?? 'Serviço solicitado'
-                  }
-                  stale={activeRequestsFromCache || Boolean(activeRequestsError)}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
 
         <section
           id="catalogo-servicos"

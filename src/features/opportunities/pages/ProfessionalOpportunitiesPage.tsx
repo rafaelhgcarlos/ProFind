@@ -9,10 +9,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
+import { PageHeader } from '../../../components/layout/PageHeader'
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
 import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
+import { ConfirmationDialog } from '../../../components/ui/confirmation-dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
 import { EmptyState } from '../../../components/ui/empty-state'
 import { Label } from '../../../components/ui/label'
@@ -27,6 +29,7 @@ import {
   type ProfessionalOpportunitySummary,
 } from '../../../types/service-request'
 import type { ProfessionalOperationalReview } from '../../../types/professional-review'
+import { ProfessionalAgendaPreview } from '../../appointments/components/ProfessionalAgendaPreview'
 import { useAuth } from '../../auth/use-auth'
 import { useCatalog } from '../../home/use-catalog'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
@@ -34,7 +37,7 @@ import { useProfile } from '../../onboarding/use-profile'
 import { ProfessionalRegistrationSupport } from '../../professional-profile/components/ProfessionalRegistrationSupport'
 import { ProfessionalReviewStatusCard } from '../../professional-profile/components/ProfessionalReviewStatusCard'
 import { ProfessionalOpportunityCard } from '../components/ProfessionalOpportunityCard'
-import { formatServiceDate } from '../opportunity-formatters'
+import { formatCalendarDate } from '../../../utils/service-date-display'
 
 const FEED_PAGE_SIZE = 12
 
@@ -57,8 +60,9 @@ function pageKey(cursor?: OpportunityFeedCursor | null) {
 }
 
 export function ProfessionalOpportunitiesPage() {
-  useDocumentTitle('Oportunidades — ProFind')
   const location = useLocation()
+  const isHome = location.pathname.replace(/\/$/, '') === '/profissional'
+  useDocumentTitle(isHome ? 'Início profissional — ProFind' : 'Oportunidades — ProFind')
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const recoveredRequestId = searchParams.get('atendimento') ?? ''
@@ -79,6 +83,7 @@ export function ProfessionalOpportunitiesPage() {
     Boolean(recoveredRequestId && recoveredAssignmentId),
   )
   const [confirmCancellation, setConfirmCancellation] = useState(false)
+  const cancelTrigger = useRef<HTMLButtonElement>(null)
   const [cancellationReason, setCancellationReason] = useState('')
   const [cancellingAssignment, setCancellingAssignment] = useState(false)
   const [assignmentError, setAssignmentError] = useState('')
@@ -338,9 +343,7 @@ export function ProfessionalOpportunitiesPage() {
     }
   }
 
-  const pageTitle = location.pathname.endsWith('/oportunidades')
-    ? 'Oportunidades'
-    : 'Início'
+  const pageTitle = isHome ? 'Início' : 'Oportunidades'
 
   return (
     <ProfessionalLayout
@@ -407,83 +410,36 @@ export function ProfessionalOpportunitiesPage() {
             <CardContent className="grid gap-4">
               <p className="text-sm leading-6 text-muted-foreground">
                 {specialtyNames.get(accepted.opportunity.specialtyId) ?? 'Serviço'} ·{' '}
-                {formatServiceDate(accepted.opportunity.serviceDate)} ·{' '}
+                {formatCalendarDate(accepted.opportunity.serviceDate)} ·{' '}
                 {SERVICE_PERIOD_DEFINITIONS[accepted.opportunity.period].label}
               </p>
-              {assignmentError ? (
+              {assignmentError && !confirmCancellation ? (
                 <Alert variant="destructive" role="alert">
                   <AlertTriangle aria-hidden="true" />
                   <AlertTitle>Não foi possível atualizar o atendimento</AlertTitle>
                   <AlertDescription>{assignmentError}</AlertDescription>
                 </Alert>
               ) : null}
-              {confirmCancellation ? (
-                <Alert variant="warning">
-                  <AlertTriangle aria-hidden="true" />
-                  <AlertTitle>Cancelar este atendimento?</AlertTitle>
-                  <AlertDescription>
-                    <p>
-                      A atribuição será encerrada e a reserva liberada somente após a confirmação do servidor.
-                    </p>
-                    <div className="mt-4 space-y-2">
-                      <Label htmlFor="professional-cancellation-reason">
-                        Motivo do cancelamento *
-                      </Label>
-                      <Textarea
-                        id="professional-cancellation-reason"
-                        required
-                        minLength={10}
-                        maxLength={500}
-                        value={cancellationReason}
-                        aria-invalid={
-                          cancellationReason.trim().length > 0 &&
-                          cancellationReason.trim().length < 10
-                        }
-                        placeholder="Explique por que não poderá realizar o atendimento."
-                        onChange={(event) => {
-                          setCancellationReason(event.target.value)
-                          setAssignmentError('')
-                        }}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        {cancellationReason.length}/500 caracteres
-                      </p>
-                    </div>
-                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        loading={cancellingAssignment}
-                        loadingLabel="Cancelando…"
-                        onClick={() => void handleCancelAssignment()}
-                      >
-                        Confirmar cancelamento
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={cancellingAssignment}
-                        onClick={() => {
-                          setConfirmCancellation(false)
-                          setAssignmentError('')
-                        }}
-                      >
-                        Manter atendimento
-                      </Button>
-                    </div>
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setConfirmCancellation(true)}
-                  >
-                    Cancelar atendimento
-                  </Button>
+              <div>
+                <Button ref={cancelTrigger} type="button" variant="outline" onClick={() => { setAssignmentError(''); setConfirmCancellation(true) }}>Cancelar atendimento</Button>
+              </div>
+              <ConfirmationDialog open={confirmCancellation} title="Cancelar este atendimento?"
+                description="Você deixará de ser o responsável. O pedido poderá voltar à procura por um profissional ou precisar de reagendamento."
+                confirmLabel="Cancelar este atendimento" cancelLabel="Manter atendimento"
+                destructive busy={cancellingAssignment} busyLabel="Cancelando…" error={assignmentError}
+                returnFocusTo={cancelTrigger}
+                onCancel={() => { setConfirmCancellation(false); setAssignmentError('') }}
+                onConfirm={() => void handleCancelAssignment()}
+              >
+                <div className="grid gap-2">
+                  <Label htmlFor="professional-cancellation-reason">Motivo do cancelamento *</Label>
+                  <Textarea id="professional-cancellation-reason" required minLength={10} maxLength={500} value={cancellationReason}
+                    aria-describedby="professional-cancellation-help"
+                    placeholder="Explique por que não poderá realizar o atendimento."
+                    onChange={(event) => { setCancellationReason(event.target.value); setAssignmentError('') }} />
+                  <p id="professional-cancellation-help" className="text-xs text-muted-foreground">Informe de 10 a 500 caracteres. {cancellationReason.length}/500</p>
                 </div>
-              )}
+              </ConfirmationDialog>
             </CardContent>
           </Card>
         ) : assignmentError && recoveredRequestId ? (
@@ -494,17 +450,13 @@ export function ProfessionalOpportunitiesPage() {
           </Alert>
         ) : null}
 
+        {isHome && userId && !accepted && !recoveringAssignment ? (
+          <ProfessionalAgendaPreview key={userId} specialtyNames={specialtyNames} online={online} now={currentTime} />
+        ) : null}
+
         {access === 'restricted' && !isInitialLoading ? (
           <>
-            <header>
-              <Badge variant="secondary">Área profissional</Badge>
-              <h2 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">
-                Acompanhe seu cadastro profissional
-              </h2>
-              <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-                O feed é liberado somente para a versão atual aprovada e ativa.
-              </p>
-            </header>
+            <PageHeader level={2} title="Acompanhe seu cadastro profissional" description="Você poderá receber novas oportunidades quando seu cadastro estiver aprovado e ativo." />
             {reviewLoading ? (
               <Skeleton className="h-56" />
             ) : (
@@ -514,41 +466,27 @@ export function ProfessionalOpportunitiesPage() {
                 detailsHref="/profissional/analise"
               />
             )}
+            <div className="flex flex-wrap gap-3">
+              <Button asChild variant="outline"><Link to="/profissional/atendimentos">Ver atendimentos</Link></Button>
+              <Button asChild variant="outline"><Link to="/profissional/disponibilidade">Editar disponibilidade</Link></Button>
+            </div>
             <ProfessionalRegistrationSupport />
           </>
         ) : null}
 
         {access === 'eligible' && !isInitialLoading ? (
           <>
-            <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-              <div>
-                <Badge variant="secondary">
-                  <Compass aria-hidden="true" className="size-3.5" />
-                  Distribuição em tempo real
-                </Badge>
-                <h2 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">
-                  Oportunidades para você
-                </h2>
-                <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-                  Exibimos somente serviços compatíveis com seu cadastro,
-                  municípios e disponibilidade atual.
-                </p>
-              </div>
-              <Button asChild variant="outline">
-                <Link to="/profissional/disponibilidade">
-                  <CalendarClock aria-hidden="true" />
-                  Editar disponibilidade
-                </Link>
-              </Button>
-            </header>
+            <PageHeader level={2} title="Oportunidades para você"
+              description="Veja serviços compatíveis com seu cadastro, municípios e disponibilidade atual."
+              action={<Button asChild variant="outline"><Link to="/profissional/disponibilidade"><CalendarClock aria-hidden="true" />Editar disponibilidade</Link></Button>}
+            />
 
             {isDisconnected ? (
               <Alert variant="warning">
                 <WifiOff aria-hidden="true" />
                 <AlertTitle>Conexão indisponível</AlertTitle>
                 <AlertDescription>
-                  Os dados podem estar desatualizados. Aceites e recusas só são
-                  confirmados depois da reconexão e do commit.
+                  Os dados podem estar desatualizados. Reconecte-se para confirmar aceites e recusas.
                 </AlertDescription>
               </Alert>
             ) : null}

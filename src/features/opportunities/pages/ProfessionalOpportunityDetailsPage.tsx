@@ -2,24 +2,21 @@ import {
   AlertTriangle,
   ArrowLeft,
   CalendarClock,
-  CheckCircle2,
   Clock3,
   LockKeyhole,
   MapPin,
   RefreshCw,
-  Wrench,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { ProfessionalLayout } from '../../../components/layout/ProfessionalLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
-import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
+import { ConfirmationDialog } from '../../../components/ui/confirmation-dialog'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '../../../components/ui/card'
@@ -27,6 +24,7 @@ import { Skeleton } from '../../../components/ui/skeleton'
 import { useDocumentTitle } from '../../../hooks/useDocumentTitle'
 import { serviceRequestService } from '../../../services/service-request.service'
 import { SERVICE_PERIOD_DEFINITIONS } from '../../../services/service-period-policy'
+import { formatCalendarDate, formatServiceHours, formatServiceTimestamp } from '../../../utils/service-date-display'
 import {
   ServiceRequestError,
   type ProfessionalOpportunityDetails,
@@ -37,25 +35,6 @@ import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { useProfile } from '../../onboarding/use-profile'
 
 type RouteState = { returnTo?: string; scrollY?: number }
-
-function formatDate(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
-  return new Intl.DateTimeFormat('pt-BR', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date(year, month - 1, day, 12))
-}
-
-function formatDeadline(value: Date) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(value)
-}
 
 function revisionKey(details: ProfessionalOpportunityDetails) {
   const item = details.opportunity
@@ -99,11 +78,11 @@ function OpportunityDetailsSkeleton() {
     <div
       role="status"
       aria-label="Carregando detalhes da oportunidade"
-      className="grid gap-5"
+      className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,22rem)]"
     >
       <span className="sr-only">Carregando detalhes da oportunidade…</span>
 
-      <Card role="group" aria-label="Carregando serviço solicitado">
+      <Card role="group" aria-label="Carregando serviço solicitado" className="lg:col-span-full">
         <CardHeader>
           <Skeleton className="h-6 w-40 max-w-full" />
           <Skeleton className="h-7 w-2/3 max-w-full" />
@@ -111,7 +90,7 @@ function OpportunityDetailsSkeleton() {
         </CardHeader>
       </Card>
 
-      <Card role="group" aria-label="Carregando descrição do trabalho">
+      <Card role="group" aria-label="Carregando descrição do trabalho" className="lg:row-span-2">
         <CardHeader>
           <Skeleton className="h-7 w-52 max-w-full" />
         </CardHeader>
@@ -174,6 +153,8 @@ export function ProfessionalOpportunityDetailsPage() {
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [confirming, setConfirming] = useState(false)
+  const offerAction = useRef<HTMLButtonElement>(null)
+
   const [accepting, setAccepting] = useState(false)
   const [declining, setDeclining] = useState(false)
   const [needsReview, setNeedsReview] = useState(false)
@@ -336,7 +317,7 @@ export function ProfessionalOpportunityDetailsPage() {
       userName={profile?.name}
       contextSwitcher={<ModeSwitcher />}
     >
-      <div className="mx-auto grid max-w-4xl gap-5">
+      <div className="mx-auto grid min-w-0 max-w-6xl gap-5">
         <div>
           <Button type="button" variant="ghost" onClick={goBack}>
             <ArrowLeft aria-hidden="true" />
@@ -405,7 +386,7 @@ export function ProfessionalOpportunityDetailsPage() {
             ) : null}
 
             {fromCache ? (
-              <Alert>
+              <Alert variant="warning">
                 <AlertTriangle aria-hidden="true" />
                 <AlertTitle>Dados sem confirmação da rede</AlertTitle>
                 <AlertDescription>
@@ -414,125 +395,94 @@ export function ProfessionalOpportunityDetailsPage() {
               </Alert>
             ) : null}
 
-            <Card>
-              <CardHeader>
-                <Badge variant="secondary" className="w-fit">
-                  <Wrench aria-hidden="true" /> Serviço solicitado
-                </Badge>
-                <CardTitle>{names.specialty || 'Serviço solicitado'}</CardTitle>
-                {names.category ? <CardDescription>{names.category}</CardDescription> : null}
-              </CardHeader>
-            </Card>
+            <header className="min-w-0 border-b pb-5">
+              {names.category ? <p className="mb-1 text-sm font-semibold text-muted-foreground">{names.category}</p> : null}
+              <h2 className="text-2xl font-bold tracking-tight wrap-anywhere sm:text-3xl">
+                {names.specialty || 'Serviço solicitado'}
+              </h2>
+            </header>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Descrição do trabalho</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="whitespace-pre-wrap break-words text-sm leading-7">
-                  {details.description}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <Badge variant="secondary" className="w-fit">
-                  <MapPin aria-hidden="true" /> Localização
-                </Badge>
-                <CardTitle>{details.city} — {details.stateCode}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Alert>
-                  <LockKeyhole aria-hidden="true" />
-                  <AlertTitle>Endereço protegido</AlertTitle>
-                  <AlertDescription>
-                    O endereço completo estará disponível após a confirmação do aceite.
-                  </AlertDescription>
-                </Alert>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <Badge variant="secondary" className="w-fit">
-                  <CalendarClock aria-hidden="true" /> Agendamento
-                </Badge>
-                <CardTitle>{formatDate(details.opportunity.serviceDate)}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="grid gap-4 text-sm sm:grid-cols-2">
-                  <div>
-                    <dt className="font-semibold">Período</dt>
-                    <dd className="mt-1 text-muted-foreground">
-                      {SERVICE_PERIOD_DEFINITIONS[details.opportunity.period].label}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-semibold">Horário correspondente</dt>
-                    <dd className="mt-1 text-muted-foreground">
-                      {SERVICE_PERIOD_DEFINITIONS[details.opportunity.period].startHour}:00 às{' '}
-                      {SERVICE_PERIOD_DEFINITIONS[details.opportunity.period].endHour}:00
-                    </dd>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <dt className="font-semibold">Prazo para aceitar</dt>
-                    <dd className="mt-1 text-muted-foreground">
-                      {formatDeadline(details.opportunity.acceptUntil)}
-                    </dd>
-                  </div>
-                </dl>
-              </CardContent>
-            </Card>
-
-            {confirming ? (
-              <Alert>
-                <CheckCircle2 aria-hidden="true" />
-                <AlertTitle>Confirmar este atendimento?</AlertTitle>
-                <AlertDescription>
-                  <p>
-                    O aceite reserva este período na sua agenda. A transação validará novamente a rodada e sua elegibilidade.
+            <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,22rem)]">
+              <Card>
+                <CardHeader><CardTitle>Descrição do trabalho</CardTitle></CardHeader>
+                <CardContent>
+                  <p className="text-sm wrap-anywhere whitespace-pre-wrap leading-7 sm:text-base">
+                    {details.description}
                   </p>
-                  <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                </CardContent>
+              </Card>
+
+              <aside aria-label="Resumo da oportunidade" className="min-w-0">
+                <Card>
+                  <CardHeader className="pb-4"><CardTitle>Resumo do atendimento</CardTitle></CardHeader>
+                  <CardContent className="grid gap-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <MapPin aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">Município</p>
+                        <h3 className="text-sm font-semibold wrap-anywhere">{details.city} — {details.stateCode}</h3>
+                      </div>
+                    </div>
+                    <dl className="grid gap-3 border-t pt-4 text-sm">
+                      <div className="flex items-start gap-3">
+                        <CalendarClock aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                        <div>
+                          <dt className="text-xs text-muted-foreground">Agendamento</dt>
+                          <dd className="font-medium">{formatCalendarDate(details.opportunity.serviceDate)} · {SERVICE_PERIOD_DEFINITIONS[details.opportunity.period].label} ({formatServiceHours(details.opportunity.period)})</dd>
+                          <dd>
+                            {`${SERVICE_PERIOD_DEFINITIONS[details.opportunity.period].startHour}:00 às ${SERVICE_PERIOD_DEFINITIONS[details.opportunity.period].endHour}:00`}
+                          </dd>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <Clock3 aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                        <div>
+                          <dt className="text-xs text-muted-foreground">Prazo para aceitar</dt>
+                          <dd className="font-medium">{formatServiceTimestamp(details.opportunity.acceptUntil)}</dd>
+                        </div>
+                      </div>
+                    </dl>
+                    <div className="flex min-w-0 items-start gap-2 rounded-md bg-muted p-3 text-xs leading-5 text-muted-foreground">
+                      <LockKeyhole aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                      <p><strong className="block text-foreground">Endereço protegido</strong> <span>O endereço completo estará disponível após a confirmação do aceite.</span></p>
+                    </div>
+                  <ConfirmationDialog
+                    open={confirming}
+                    title="Aceitar este atendimento?"
+                    description="Ao confirmar, você assume o atendimento e reserva esse horário na sua agenda."
+                    confirmLabel="Confirmar aceite"
+                    cancelLabel="Continuar revisando"
+                    busy={accepting}
+                    busyLabel="Confirmando aceite…"
+                    disabled={!canAccept}
+                    returnFocusTo={offerAction}
+                    onCancel={() => setConfirming(false)}
+                    onConfirm={() => void accept()}
+                  />
+
+                  <div className="grid gap-2 border-t pt-4">
+                    <Button
+                      ref={offerAction}
+                      type="button"
+                      disabled={!canAccept}
+                      onClick={() => setConfirming(true)}
+                    >
+                      Aceitar atendimento
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"
+                      loading={declining}
+                      loadingLabel="Recusando…"
                       disabled={accepting}
-                      onClick={() => setConfirming(false)}
+                      onClick={() => void decline()}
                     >
-                      Continuar revisando
-                    </Button>
-                    <Button
-                      type="button"
-                      loading={accepting}
-                      loadingLabel="Confirmando aceite…"
-                      onClick={() => void accept()}
-                    >
-                      Confirmar aceite
+                      Recusar oportunidade
                     </Button>
                   </div>
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                loading={declining}
-                loadingLabel="Recusando…"
-                disabled={accepting}
-                onClick={() => void decline()}
-              >
-                Recusar oportunidade
-              </Button>
-              <Button
-                type="button"
-                disabled={!canAccept || confirming}
-                onClick={() => setConfirming(true)}
-              >
-                Aceitar atendimento
-              </Button>
+                  </CardContent>
+                </Card>
+              </aside>
             </div>
           </>
         ) : null}

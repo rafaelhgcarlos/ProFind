@@ -60,6 +60,25 @@ function renderLayout(
 }
 
 describe('layouts autenticados', () => {
+  it('persiste o menu lateral compacto, mantendo links nomeados e navegação mobile', async () => {
+    const user = userEvent.setup()
+    const view = () => renderLayout('/cliente', <ClientLayout pageTitle="Início" />)
+    const first = view()
+    await user.click(screen.getByRole('button', { name: 'Recolher menu lateral' }))
+    expect(screen.getByRole('button', { name: 'Expandir menu lateral' })).toHaveAttribute('aria-expanded', 'false')
+    first.unmount()
+
+    const second = view()
+    const desktop = screen.getByRole('navigation', { name: 'Área do cliente' })
+    const mobile = screen.getByRole('navigation', { name: 'Área do cliente — navegação mobile' })
+    expect(within(desktop).getByRole('link', { name: 'Meus pedidos' })).toHaveAttribute('href', '/cliente/pedidos')
+    expect(within(mobile).getByRole('link', { name: 'Meus pedidos' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Expandir menu lateral' }))
+    expect(screen.getByRole('button', { name: 'Recolher menu lateral' })).toHaveAttribute('aria-expanded', 'true')
+    second.unmount()
+    window.localStorage.removeItem('profind-sidebar-compact')
+  })
+
   it('prioriza as tarefas do cliente em navegações mobile e desktop', () => {
     renderLayout(
       '/cliente',
@@ -187,10 +206,10 @@ describe('layouts autenticados', () => {
       'max-width: min(100dvw, 100%)',
     )
     expect(view.container.querySelector('#conteudo-principal')?.parentElement).toHaveClass(
-      'pb-[calc(5rem+env(safe-area-inset-bottom))]',
+      'pb-[calc(var(--app-bottom-nav-height)+1rem)]',
     )
     expect(view.container.firstElementChild?.className).toContain(
-      'lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]',
+      'lg:grid-cols-[16rem_minmax(0,1fr)]',
     )
   })
 

@@ -5,6 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/aler
 import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
 import { Label } from '../../../components/ui/label'
+import { NativeSelect } from '../../../components/ui/native-select'
 import { Textarea } from '../../../components/ui/textarea'
 import { serviceReportService } from '../../../services/service-report.service'
 import type {
@@ -12,6 +13,7 @@ import type {
   ServiceReportReason,
 } from '../../../types/service-report'
 import { SERVICE_PERIOD_DEFINITIONS } from '../../../services/service-period-policy'
+import { formatCalendarDate } from '../../../utils/service-date-display'
 
 const REASON_LABELS: Record<ServiceReportReason, string> = {
   NO_SHOW: 'Profissional não compareceu',
@@ -30,12 +32,6 @@ function operationKey() {
     return crypto.randomUUID()
   }
   return `report-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' }).format(
-    new Date(`${value}T12:00:00.000Z`),
-  )
 }
 
 export function ClientServiceReports({
@@ -177,16 +173,15 @@ export function ClientServiceReports({
         <div className="mt-4 grid gap-4 rounded-lg bg-surface-tint p-4">
           <div className="grid gap-2">
             <Label htmlFor="service-report-reason">Motivo</Label>
-            <select
+            <NativeSelect
               id="service-report-reason"
               value={reason}
-              className="min-h-10 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
               onChange={(event) => setReason(event.target.value as ServiceReportReason)}
             >
               {Object.entries(REASON_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
           <div className="grid gap-2">
             <div className="flex items-center justify-between gap-3">
@@ -262,7 +257,7 @@ export function ClientServiceReports({
                   <div className="mt-3 rounded-md bg-surface-tint p-3 text-sm">
                     <strong>Proposta de reagendamento</strong>
                     <p className="mt-1 text-muted-foreground">
-                      {formatDate(report.proposedServiceDate)} · {SERVICE_PERIOD_DEFINITIONS[report.proposedPeriod].label}
+                      {formatCalendarDate(report.proposedServiceDate, 'short')} · {SERVICE_PERIOD_DEFINITIONS[report.proposedPeriod].label}
                     </p>
                     {needsAcknowledgement ? (
                       <Button

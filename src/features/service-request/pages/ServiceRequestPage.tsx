@@ -18,6 +18,7 @@ import { ClientLayout } from '../../../components/layout/ClientLayout'
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert'
 import { Badge } from '../../../components/ui/badge'
 import { Button } from '../../../components/ui/button'
+import { ConfirmationDialog } from '../../../components/ui/confirmation-dialog'
 import {
   Card,
   CardContent,
@@ -27,6 +28,7 @@ import {
 } from '../../../components/ui/card'
 import { Input } from '../../../components/ui/input'
 import { Label } from '../../../components/ui/label'
+import { NativeSelect } from '../../../components/ui/native-select'
 import { RadioGroup, RadioGroupItem } from '../../../components/ui/radio-group'
 import { Skeleton } from '../../../components/ui/skeleton'
 import { Textarea } from '../../../components/ui/textarea'
@@ -43,8 +45,9 @@ import { serviceRequestService } from '../../../services/service-request.service
 import {
   MAX_SCHEDULING_HORIZON_DAYS,
   SERVICE_PERIOD_DEFINITIONS,
-  SERVICE_TIME_ZONE,
+  serviceDateInTimeZone,
 } from '../../../services/service-period-policy'
+import { formatCalendarDate, formatServiceHours } from '../../../utils/service-date-display'
 import {
   ServiceRequestError,
   type OwnServiceRequestDetails,
@@ -59,6 +62,10 @@ import { useCatalog } from '../../home/use-catalog'
 import { ModeSwitcher } from '../../onboarding/components/ModeSwitcher'
 import { ClientServiceReports } from '../../service-reports/components/ClientServiceReports'
 import { useProfile } from '../../onboarding/use-profile'
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  return message ? <p id={id} className="text-sm text-destructive">{message}</p> : null
+}
 
 interface RequestDraft {
   operationKey: string
@@ -131,24 +138,6 @@ function loadDraft(userId?: string) {
   }
 }
 
-function zonedDateValue(date: Date) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: SERVICE_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date)
-  const value = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value ?? ''
-  return `${value('year')}-${value('month')}-${value('day')}`
-}
-
-function formatDate(value: string) {
-  if (!value) return 'Não informada'
-  const [year, month, day] = value.split('-')
-  return `${day}/${month}/${year}`
-}
-
 function requestErrorMessage(error: unknown) {
   return error instanceof Error
     ? error.message
@@ -173,6 +162,8 @@ export function ServiceRequestPage() {
   const [editingRequest, setEditingRequest] = useState<ServiceRequestSummary | null>(null)
   const [recovering, setRecovering] = useState(Boolean(recoveredRequestId))
   const [confirmCancellation, setConfirmCancellation] = useState(false)
+  const cancelOrderTrigger = useRef<HTMLButtonElement>(null)
+  const backToHome = useRef<HTMLAnchorElement>(null)
   const [cancelling, setCancelling] = useState(false)
   const [cancellationError, setCancellationError] = useState('')
   const [cancellationOperationKey, setCancellationOperationKey] = useState(newOperationKey)
@@ -185,12 +176,13 @@ export function ServiceRequestPage() {
   const postalCodeCache = useRef(new Map<string, PostalCodeResult>())
   const autofilledAddress = useRef<AutofilledAddress | null>(null)
   const handledRequestedAction = useRef('')
+  const [validateFields, setValidateFields] = useState(false)
   const [loadedAt] = useState(() => new Date())
   const [schedulingBounds] = useState(() => {
     const now = new Date()
     return {
-      today: zonedDateValue(now),
-      maxDate: zonedDateValue(
+      today: serviceDateInTimeZone(now),
+      maxDate: serviceDateInTimeZone(
         new Date(now.getTime() + MAX_SCHEDULING_HORIZON_DAYS * 24 * 60 * 60_000),
       ),
     }
@@ -472,18 +464,39 @@ export function ServiceRequestPage() {
     setSubmitError('')
   }
 
-  async function submit(event: React.FormEvent) {
+  const fieldErrors: Record<string, string> = {}
+  if (validateFields) {
+    if (!selectedCategoryId) fieldErrors.category = 'Escolha uma categoria.'
+    if (!selectedSpecialtyId) fieldErrors.specialty = 'Escolha uma especialidade.'
+    if (draft.description.trim().length < 10) fieldErrors.description = 'Descreva o trabalho em pelo menos 10 caracteres.'
+    if (normalizePostalCode(draft.postalCode).length !== 8) fieldErrors.postal = 'Informe os oito dígitos do CEP.'
+    if (!draft.stateCode) fieldErrors.state = 'Selecione o estado.'
+    if (!draft.municipality) fieldErrors.city = 'Selecione o município na lista.'
+    if (!draft.street.trim()) fieldErrors.street = 'Informe o logradouro.'
+    if (!draft.number.trim()) fieldErrors.number = 'Informe o número do local.'
+    if (!draft.neighborhood.trim()) fieldErrors.neighborhood = 'Informe o bairro.'
+    if (!draft.serviceDate || draft.serviceDate < schedulingBounds.today || draft.serviceDate > schedulingBounds.maxDate) fieldErrors.date = 'Escolha uma data no intervalo disponível.'
+    if (!draft.period) fieldErrors.period = 'Selecione um período.'
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (submitting) return
     if (!clientProfileReadiness?.isComplete) {
       setSubmitError('Complete seu perfil de cliente antes de enviar a solicitação.')
       return
     }
-    if (!draft.period || !draft.municipality) {
-      setSubmitError('Revise os campos obrigatórios antes de enviar.')
-      requestAnimationFrame(() =>
-        document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
-      )
+    const form = event.currentTarget
+    setValidateFields(true)
+    const invalidField = form.querySelector<HTMLElement>(':is(input,select,textarea):invalid:not(:disabled)')
+    if (invalidField || !draft.period || !draft.municipality || draft.description.trim().length < 10 ||
+      normalizePostalCode(draft.postalCode).length !== 8 || !draft.street.trim() || !draft.number.trim() || !draft.neighborhood.trim()) {
+      setSubmitError('Revise os campos indicados antes de enviar.')
+      requestAnimationFrame(() => {
+        const firstError = form.querySelector<HTMLElement>('[aria-invalid="true"]:not(:disabled):not([role="radiogroup"])')
+        const target = firstError ?? invalidField ?? form.querySelector<HTMLElement>('[role="radio"]')
+        target?.focus()
+      })
       return
     }
 
@@ -666,7 +679,7 @@ export function ServiceRequestPage() {
             <div className="grid gap-4 rounded-lg border bg-surface-tint p-4 sm:grid-cols-2">
               <div>
                 <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Data</p>
-                <p className="mt-1 font-medium">{formatDate(confirmed.serviceDate)}</p>
+                <p className="mt-1 font-medium">{formatCalendarDate(confirmed.serviceDate)}</p>
               </div>
               <div>
                 <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Período</p>
@@ -677,45 +690,35 @@ export function ServiceRequestPage() {
               Código do pedido: <span className="font-mono text-foreground">{confirmed.requestId}</span>
             </p>
             <ClientServiceReports requestId={confirmed.requestId} />
-            {cancellationError ? (
+            {cancellationError && !confirmCancellation ? (
               <Alert variant="destructive" role="alert">
                 <CircleAlert aria-hidden="true" />
                 <AlertTitle>Não foi possível cancelar</AlertTitle>
                 <AlertDescription>{cancellationError}</AlertDescription>
               </Alert>
             ) : null}
-            {canCancel && confirmCancellation ? (
-              <Alert variant="warning">
-                <CircleAlert aria-hidden="true" />
-                <AlertTitle>Cancelar esta solicitação?</AlertTitle>
-                <AlertDescription>
-                  <p>
-                    {isAssigned
-                      ? 'A atribuição e a reserva serão encerradas. A procura não será reiniciada.'
-                      : 'A procura será encerrada e este pedido não poderá ser reaberto por esta tela.'}
-                  </p>
-                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                    <Button type="button" variant="destructive" loading={cancelling} loadingLabel="Cancelando…" onClick={() => void cancelRequest()}>
-                      Confirmar cancelamento
-                    </Button>
-                    <Button type="button" variant="outline" disabled={cancelling} onClick={() => setConfirmCancellation(false)}>
-                      Manter solicitação
-                    </Button>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            ) : null}
+            <ConfirmationDialog open={confirmCancellation}
+              title="Cancelar esta solicitação?"
+              description={isAssigned ? 'A atribuição e a reserva serão encerradas. A procura não será reiniciada.' : 'A procura pelo profissional será encerrada.'}
+              confirmLabel={isAssigned ? 'Cancelar atendimento' : 'Cancelar pedido'}
+              cancelLabel="Manter solicitação"
+              destructive busy={cancelling} busyLabel="Cancelando…" disabled={!canCancel}
+              error={cancellationError}
+              returnFocusTo={canCancel ? cancelOrderTrigger : backToHome}
+              onCancel={() => setConfirmCancellation(false)}
+              onConfirm={() => void cancelRequest()}
+            />
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button asChild variant="outline">
-                <Link to="/cliente">Voltar ao início</Link>
+                <Link ref={backToHome} to="/cliente">Voltar ao início</Link>
               </Button>
               {isOpen && requestDetails ? (
                 <Button type="button" variant="outline" onClick={beginEdit}>
                   Editar solicitação
                 </Button>
               ) : null}
-              {canCancel && !confirmCancellation ? (
-                <Button type="button" variant="ghost" onClick={() => setConfirmCancellation(true)}>
+              {canCancel ? (
+                <Button ref={cancelOrderTrigger} type="button" variant="ghost" onClick={() => { setCancellationError(''); setConfirmCancellation(true) }}>
                   Cancelar solicitação
                 </Button>
               ) : null}
@@ -729,6 +732,10 @@ export function ServiceRequestPage() {
   return (
     <ClientLayout
       pageTitle="Solicitar serviço"
+      heading={{
+        title: editingRequest ? 'Editar solicitação' : 'Solicitar serviço',
+        description: editingRequest ? 'Ao salvar, uma nova rodada de procura substituirá a rodada atual.' : 'Informe o serviço, o local e o período. Revise os dados antes de enviar.',
+      }}
       activeNavigationHref="/cliente/solicitar"
       contextSwitcher={<ModeSwitcher />}
     >
@@ -753,14 +760,6 @@ export function ServiceRequestPage() {
               <Link to="/cliente"><ArrowLeft aria-hidden="true" /> Voltar ao início</Link>
             </Button>
           )}
-          <h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
-            {editingRequest ? 'Editar solicitação' : 'Conte o que você precisa'}
-          </h2>
-          <p className="mt-2 max-w-2xl leading-7 text-muted-foreground">
-            {editingRequest
-              ? 'Revise os campos. Ao salvar, uma nova rodada de procura substituirá a rodada atual.'
-              : 'Informe uma especialidade, o local e um período. Você poderá revisar tudo antes de enviar.'}
-          </p>
         </div>
 
         {editingRequest && editingRequest.status !== 'OPEN' ? (
@@ -794,11 +793,12 @@ export function ServiceRequestPage() {
           </Alert>
         ) : null}
 
-        <form onSubmit={submit} noValidate className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+        <form onSubmit={submit} noValidate className="@container grid min-w-0 gap-6">
+          <div className="grid min-w-0 gap-6 @min-[55rem]:grid-cols-[minmax(0,1fr)_20rem] @min-[55rem]:items-start">
           <div className="grid min-w-0 gap-6">
             <Card>
               <CardHeader>
-                <Badge variant="secondary" className="w-fit"><Wrench aria-hidden="true" /> 1. Serviço</Badge>
+                <Badge variant="secondary" className="w-fit"><Wrench aria-hidden="true" /> Seção 1 de 4 · Serviço</Badge>
                 <CardTitle>Qual serviço você precisa?</CardTitle>
                 <CardDescription>Escolha uma única especialidade do catálogo ativo.</CardDescription>
               </CardHeader>
@@ -816,33 +816,33 @@ export function ServiceRequestPage() {
                 <div className="grid gap-5 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="request-category">Categoria *</Label>
-                    <select
+                    <NativeSelect
                       id="request-category"
                       required
                       value={selectedCategoryId}
-                      aria-invalid={!selectedCategoryId}
+                      aria-invalid={Boolean(fieldErrors.category)} aria-describedby={fieldErrors.category ? 'request-error-category' : undefined}
                       disabled={catalogState.status !== 'ready'}
-                      className="min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-[3px] focus:ring-ring/25"
                       onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value, specialtyId: '' }))}
                     >
                       <option value="">Selecione</option>
                       {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-                    </select>
+                    </NativeSelect>
+                    <FieldError id="request-error-category" message={fieldErrors.category} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="request-specialty">Especialidade *</Label>
-                    <select
+                    <NativeSelect
                       id="request-specialty"
                       required
                       value={selectedSpecialtyId}
-                      aria-invalid={!selectedSpecialtyId}
+                      aria-invalid={Boolean(fieldErrors.specialty)} aria-describedby={fieldErrors.specialty ? 'request-error-specialty' : undefined}
                       disabled={!selectedCategoryId}
-                      className="min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-[3px] focus:ring-ring/25"
                       onChange={(event) => update('specialtyId', event.target.value)}
                     >
                       <option value="">Selecione</option>
                       {specialties.map((specialty) => <option key={specialty.id} value={specialty.id}>{specialty.name}</option>)}
-                    </select>
+                    </NativeSelect>
+                    <FieldError id="request-error-specialty" message={fieldErrors.specialty} />
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -853,11 +853,13 @@ export function ServiceRequestPage() {
                     minLength={10}
                     maxLength={1000}
                     value={draft.description}
-                    aria-invalid={draft.description.trim().length < 10}
+                    aria-invalid={Boolean(fieldErrors.description)}
+                    aria-describedby={fieldErrors.description ? 'request-description-help request-error-description' : 'request-description-help'}
                     placeholder="Ex.: preciso verificar duas tomadas que pararam de funcionar."
                     onChange={(event) => update('description', event.target.value)}
                   />
-                  <p className="text-xs leading-5 text-muted-foreground">
+                  <FieldError id="request-error-description" message={fieldErrors.description} />
+                  <p id="request-description-help" className="text-xs leading-5 text-muted-foreground">
                     Descreva somente o trabalho. Não inclua telefone, e-mail,
                     link, CEP, endereço ou instruções de acesso.
                     {' '}{draft.description.length}/1000 caracteres
@@ -868,7 +870,7 @@ export function ServiceRequestPage() {
 
             <Card>
               <CardHeader>
-                <Badge variant="secondary" className="w-fit"><MapPin aria-hidden="true" /> 2. Local</Badge>
+                <Badge variant="secondary" className="w-fit"><MapPin aria-hidden="true" /> Seção 2 de 4 · Local do serviço</Badge>
                 <CardTitle>Onde será o atendimento?</CardTitle>
                 <CardDescription>O endereço fica privado e pertence somente a esta solicitação.</CardDescription>
               </CardHeader>
@@ -889,10 +891,10 @@ export function ServiceRequestPage() {
                       maxLength={9}
                       value={draft.postalCode}
                       aria-invalid={
-                        Boolean(postalCodeError) ||
+                        Boolean(postalCodeError || fieldErrors.postal) ||
                         (Boolean(draft.postalCode) && normalizePostalCode(draft.postalCode).length !== 8)
                       }
-                      aria-describedby="request-postal-code-help request-postal-code-feedback"
+                      aria-describedby={fieldErrors.postal ? 'request-postal-code-help request-postal-code-feedback request-error-postal' : 'request-postal-code-help request-postal-code-feedback'}
                       placeholder="00000-000"
                       onChange={(event) => updatePostalCode(event.target.value)}
                       onBlur={() => {
@@ -925,8 +927,9 @@ export function ServiceRequestPage() {
                         : 'Consultar CEP'}
                     </Button>
                   </div>
+                  <FieldError id="request-error-postal" message={fieldErrors.postal} />
                   <p id="request-postal-code-help" className="text-xs leading-5 text-muted-foreground">
-                    Preenchemos os dados disponíveis; número e complemento continuam manuais.
+                    Use o CEP para buscar o endereço. Informe o número e o complemento.
                   </p>
                   <div id="request-postal-code-feedback" aria-live="polite">
                     {postalCodeNotice ? (
@@ -940,12 +943,11 @@ export function ServiceRequestPage() {
                 <div className="grid gap-5 sm:grid-cols-[8rem_minmax(0,1fr)]">
                   <div className="space-y-2">
                     <Label htmlFor="request-state">UF *</Label>
-                    <select
+                    <NativeSelect
                       id="request-state"
                       required
                       value={draft.stateCode}
-                      aria-invalid={!draft.stateCode}
-                      className="min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-[3px] focus:ring-ring/25"
+                      aria-invalid={Boolean(fieldErrors.state)} aria-describedby={fieldErrors.state ? 'request-error-state' : undefined}
                       onChange={(event) => {
                         setDraft((current) => ({ ...current, stateCode: event.target.value, municipality: null }))
                         setSubmitError('')
@@ -953,57 +955,64 @@ export function ServiceRequestPage() {
                     >
                       <option value="">UF</option>
                       {BRAZILIAN_STATE_CODES.map((code) => <option key={code} value={code}>{code}</option>)}
-                    </select>
+                    </NativeSelect>
+                    <FieldError id="request-error-state" message={fieldErrors.state} />
                   </div>
+                  <div className="min-w-0">
                   <MunicipalityCombobox
                     id="request-city"
                     label="Município"
                     required
                     stateCode={draft.stateCode}
                     selectedMunicipality={draft.municipality}
-                    invalid={!draft.municipality}
+                    invalid={Boolean(fieldErrors.city)}
+                    describedBy={fieldErrors.city ? 'request-error-city' : undefined}
                     onSelect={(municipality) => update('municipality', municipality)}
                     onClear={() => update('municipality', null)}
                   />
+                  <FieldError id="request-error-city" message={fieldErrors.city} />
+                  </div>
                 </div>
                 <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_8rem]">
-                  <div className="space-y-2"><Label htmlFor="request-street">Logradouro *</Label><Input id="request-street" required maxLength={160} value={draft.street} aria-invalid={!draft.street.trim()} onChange={(event) => update('street', event.target.value)} /></div>
-                  <div className="space-y-2"><Label htmlFor="request-number">Número *</Label><Input id="request-number" required maxLength={30} value={draft.number} aria-invalid={!draft.number.trim()} onChange={(event) => update('number', event.target.value)} /></div>
+                  <div className="space-y-2"><Label htmlFor="request-street">Logradouro *</Label><Input id="request-street" required maxLength={160} value={draft.street} aria-invalid={Boolean(fieldErrors.street)} aria-describedby={fieldErrors.street ? 'request-error-street' : undefined} onChange={(event) => update('street', event.target.value)} /><FieldError id="request-error-street" message={fieldErrors.street} /></div>
+                  <div className="space-y-2"><Label htmlFor="request-number">Número *</Label><Input id="request-number" required maxLength={30} value={draft.number} aria-invalid={Boolean(fieldErrors.number)} aria-describedby={fieldErrors.number ? 'request-error-number' : undefined} onChange={(event) => update('number', event.target.value)} /><FieldError id="request-error-number" message={fieldErrors.number} /></div>
                 </div>
-                <div className="space-y-2"><Label htmlFor="request-neighborhood">Bairro *</Label><Input id="request-neighborhood" required maxLength={120} value={draft.neighborhood} aria-invalid={!draft.neighborhood.trim()} onChange={(event) => update('neighborhood', event.target.value)} /></div>
+                <div className="space-y-2"><Label htmlFor="request-neighborhood">Bairro *</Label><Input id="request-neighborhood" required maxLength={120} value={draft.neighborhood} aria-invalid={Boolean(fieldErrors.neighborhood)} aria-describedby={fieldErrors.neighborhood ? 'request-error-neighborhood' : undefined} onChange={(event) => update('neighborhood', event.target.value)} /><FieldError id="request-error-neighborhood" message={fieldErrors.neighborhood} /></div>
                 <div className="space-y-2"><Label htmlFor="request-complement">Complemento <span className="text-muted-foreground">(opcional)</span></Label><Input id="request-complement" maxLength={120} value={draft.complement} onChange={(event) => update('complement', event.target.value)} /></div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <Badge variant="secondary" className="w-fit"><CalendarDays aria-hidden="true" /> 3. Data e período</Badge>
+                <Badge variant="secondary" className="w-fit"><CalendarDays aria-hidden="true" /> Seção 3 de 4 · Data e período</Badge>
                 <CardTitle>Quando você precisa?</CardTitle>
                 <CardDescription>Escolha uma data em até 90 dias e um único período.</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-5">
                 <div className="max-w-sm space-y-2">
                   <Label htmlFor="request-date">Data *</Label>
-                  <Input id="request-date" type="date" required min={schedulingBounds.today} max={schedulingBounds.maxDate} value={draft.serviceDate} aria-invalid={!draft.serviceDate} onChange={(event) => update('serviceDate', event.target.value)} />
+                  <Input id="request-date" type="date" required min={schedulingBounds.today} max={schedulingBounds.maxDate} value={draft.serviceDate} aria-invalid={Boolean(fieldErrors.date)} aria-describedby={fieldErrors.date ? 'request-error-date' : undefined} onChange={(event) => update('serviceDate', event.target.value)} />
+                  <FieldError id="request-error-date" message={fieldErrors.date} />
                 </div>
                 <fieldset>
                   <legend className="text-sm font-medium">Período *</legend>
-                  <RadioGroup value={draft.period} onValueChange={(value) => update('period', value as ServicePeriod)} className="mt-3 grid sm:grid-cols-3" aria-invalid={!draft.period}>
+                  <RadioGroup value={draft.period} onValueChange={(value) => update('period', value as ServicePeriod)} className="mt-3 grid sm:grid-cols-3" aria-invalid={Boolean(fieldErrors.period)} aria-describedby={fieldErrors.period ? 'request-error-period' : undefined}>
                     {periods.map(([value, definition]) => (
                       <Label key={value} htmlFor={`period-${value}`} className="flex min-h-16 cursor-pointer items-center gap-3 rounded-md border bg-background p-3 hover:border-primary/50 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-accent/40">
                         <RadioGroupItem id={`period-${value}`} value={value} />
-                        <span><span className="block font-semibold">{definition.label}</span><span className="text-xs text-muted-foreground">{definition.startHour}h às {definition.endHour}h</span></span>
+                        <span><span className="block font-semibold">{definition.label}</span><span className="text-xs text-muted-foreground">{formatServiceHours(value)}</span></span>
                       </Label>
                     ))}
                   </RadioGroup>
+                  <FieldError id="request-error-period" message={fieldErrors.period} />
                   <p className="mt-2 text-xs text-muted-foreground">O envio encerra 30 minutos antes do início do período.</p>
                 </fieldset>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border-dashed bg-transparent shadow-none">
               <CardHeader>
-                <Badge variant="secondary" className="w-fit"><CheckCircle2 aria-hidden="true" /> 4. Revisão</Badge>
+                <Badge variant="secondary" className="w-fit"><CheckCircle2 aria-hidden="true" /> Seção 4 de 4 · Revisão</Badge>
                 <CardTitle>Revise sem perder seus dados</CardTitle>
                 <CardDescription>Os campos continuam disponíveis acima caso você queira corrigir algo.</CardDescription>
               </CardHeader>
@@ -1013,7 +1022,7 @@ export function ServiceRequestPage() {
             </Card>
           </div>
 
-          <aside className="min-w-0 lg:sticky lg:top-24">
+          <aside className="min-w-0 @min-[55rem]:sticky @min-[55rem]:top-24">
             <Card>
               <CardHeader>
                 <CardTitle>Resumo da solicitação</CardTitle>
@@ -1022,7 +1031,7 @@ export function ServiceRequestPage() {
               <CardContent className="space-y-5">
                 <div><p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Serviço</p><p className="mt-1 break-words font-medium">{selectedSpecialty?.name ?? 'Não informado'}</p><p className="text-sm text-muted-foreground">{selectedCategory?.name}</p></div>
                 <div className="border-t pt-4"><p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Local privado</p><p className="mt-1 break-words text-sm leading-6">{addressSummary}</p></div>
-                <div className="grid grid-cols-2 gap-3 border-t pt-4"><div><p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Data</p><p className="mt-1 text-sm font-medium">{formatDate(draft.serviceDate)}</p></div><div><p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Período</p><p className="mt-1 text-sm font-medium">{periodLabel}</p></div></div>
+                <div className="grid grid-cols-2 gap-3 border-t pt-4"><div><p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Data</p><p className="mt-1 text-sm font-medium">{formatCalendarDate(draft.serviceDate, 'short')}</p></div><div><p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Período</p><p className="mt-1 text-sm font-medium">{periodLabel}</p></div></div>
                 {submitError ? (
                   <Alert variant="destructive" role="alert">
                     <CircleAlert aria-hidden="true" />
@@ -1040,6 +1049,7 @@ export function ServiceRequestPage() {
               </CardContent>
             </Card>
           </aside>
+          </div>
         </form>
       </div>
     </ClientLayout>

@@ -378,12 +378,12 @@ describe('ProfessionalAppointmentsPage', () => {
     await publishDetails()
 
     await user.click(screen.getByRole('button', { name: 'Cancelar atendimento' }))
-    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+    await user.click(screen.getByRole('button', { name: 'Cancelar este atendimento' }))
     expect(mocks.cancelAssignment).not.toHaveBeenCalled()
 
     const reason = 'Tive uma emergência e não poderei comparecer ao atendimento.'
     await user.type(screen.getByLabelText('Motivo do cancelamento *'), reason)
-    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }))
+    await user.click(screen.getByRole('button', { name: 'Cancelar este atendimento' }))
     expect(await screen.findByText('A atribuição mudou. Recarregue o atendimento.')).toBeVisible()
     expect(screen.getByLabelText('Motivo do cancelamento *')).toHaveValue(reason)
   })

@@ -19,7 +19,7 @@ export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElemen
 }
 
 export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
-  return <h3 className={cn('min-w-0 break-words text-lg font-bold tracking-tight', className)} {...props} />
+  return <h3 className={cn('min-w-0 text-lg font-bold tracking-tight wrap-anywhere', className)} {...props} />
 }
 
 export function CardDescription({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
