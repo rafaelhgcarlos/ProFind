@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   Ban,
   CalendarClock,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -13,7 +14,7 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ComponentPropsWithoutRef } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 
 import { AdminLayout } from '../../../components/layout/AdminLayout'
@@ -51,6 +52,7 @@ import {
   type ServiceRequestSummary,
 } from '../../../types/service-request'
 import { formatPostalCode } from '../../../services/postal-code.service'
+import { cn } from '../../../utils/cn'
 import { useAuth } from '../../auth/use-auth'
 import { useCatalog } from '../../home/use-catalog'
 
@@ -111,6 +113,28 @@ interface FilterForm {
   period: '' | ServicePeriod
   scheduledFrom: string
   scheduledTo: string
+}
+
+const filterFieldClass = 'grid min-w-0 content-start gap-2'
+const filterControlClass =
+  'box-border h-11 w-full min-w-0 max-w-full forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid'
+
+function FilterSelect(props: ComponentPropsWithoutRef<'select'>) {
+  return (
+    <div className="relative min-w-0">
+      <select
+        {...props}
+        className={cn(
+          filterControlClass,
+          'block appearance-none rounded-md border border-input bg-background py-2 ps-3 pe-9 text-base text-foreground shadow-sm transition-colors focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20 sm:text-sm forced-colors:appearance-auto forced-colors:pe-3',
+        )}
+      />
+      <ChevronDown
+        aria-hidden="true"
+        className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground forced-colors:hidden"
+      />
+    </div>
+  )
 }
 
 const EMPTY_FILTERS: FilterForm = {
@@ -341,44 +365,55 @@ function AdminRequestsList({ pendingMode }: { pendingMode: boolean }) {
             <CardTitle>Filtros</CardTitle>
             <CardDescription>As consultas são paginadas e limitadas a 12 pedidos por vez.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="@container">
             <form
-              className="grid gap-4 md:grid-cols-2 xl:grid-cols-6"
+              className={cn(
+                'grid min-w-0 grid-cols-1 gap-4 @min-[30rem]:grid-cols-2',
+                pendingMode
+                  ? '@min-[45rem]:grid-cols-3'
+                  : '@min-[58rem]:grid-cols-[minmax(0,1.15fr)_minmax(0,1.5fr)_minmax(0,0.85fr)_repeat(2,minmax(0,1fr))]',
+              )}
               onSubmit={(event) => {
                 event.preventDefault()
                 resetPagination()
                 setFilters({ ...form })
               }}
             >
-              <div className="grid gap-2 md:col-span-2 xl:col-span-1">
+              <div className={cn(filterFieldClass, !pendingMode && 'col-span-full @min-[58rem]:col-span-1')}>
                 <Label htmlFor="admin-request-id">Identificador exato</Label>
-                <Input id="admin-request-id" value={form.requestId} onChange={(event) => setForm((current) => ({ ...current, requestId: event.target.value }))} />
+                <Input id="admin-request-id" className={filterControlClass} value={form.requestId} onChange={(event) => setForm((current) => ({ ...current, requestId: event.target.value }))} />
               </div>
-              <div className="grid gap-2">
+              <div className={filterFieldClass}>
                 <Label htmlFor="admin-request-status">Estado</Label>
-                <select id="admin-request-status" className="min-h-11 rounded-md border border-input bg-background px-3 text-sm" value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as FilterForm['status'] }))}>
+                <FilterSelect id="admin-request-status" value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as FilterForm['status'] }))}>
                   <option value="">Todos</option>
                   {([...SERVICE_REQUEST_STATUSES, 'REPLACEMENT'] as AdminOperationalState[]).map((status) => <option key={status} value={status}>{OPERATIONAL_STATE_LABELS[status]}</option>)}
-                </select>
+                </FilterSelect>
               </div>
               {pendingMode ? (
-                <div className="grid gap-2">
+                <div className={filterFieldClass}>
                   <Label htmlFor="admin-request-pending">Pendência</Label>
-                  <select id="admin-request-pending" className="min-h-11 rounded-md border border-input bg-background px-3 text-sm" value={form.pending} onChange={(event) => setForm((current) => ({ ...current, pending: event.target.value as FilterForm['pending'] }))}>
+                  <FilterSelect id="admin-request-pending" value={form.pending} onChange={(event) => setForm((current) => ({ ...current, pending: event.target.value as FilterForm['pending'] }))}>
                     {Object.entries(PENDING_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
+                  </FilterSelect>
                 </div>
               ) : null}
-              <div className="grid gap-2">
+              <div className={filterFieldClass}>
                 <Label htmlFor="admin-request-period">Período</Label>
-                <select id="admin-request-period" className="min-h-11 rounded-md border border-input bg-background px-3 text-sm" value={form.period} onChange={(event) => setForm((current) => ({ ...current, period: event.target.value as FilterForm['period'] }))}>
+                <FilterSelect id="admin-request-period" value={form.period} onChange={(event) => setForm((current) => ({ ...current, period: event.target.value as FilterForm['period'] }))}>
                   <option value="">Todos</option>
                   {SERVICE_PERIODS.map((period) => <option key={period} value={period}>{SERVICE_PERIOD_DEFINITIONS[period].label}</option>)}
-                </select>
+                </FilterSelect>
               </div>
-              <div className="grid gap-2"><Label htmlFor="admin-request-from">Agendado de</Label><Input id="admin-request-from" type="date" value={form.scheduledFrom} onChange={(event) => setForm((current) => ({ ...current, scheduledFrom: event.target.value }))} /></div>
-              <div className="grid gap-2"><Label htmlFor="admin-request-to">Agendado até</Label><Input id="admin-request-to" type="date" min={form.scheduledFrom || undefined} value={form.scheduledTo} onChange={(event) => setForm((current) => ({ ...current, scheduledTo: event.target.value }))} /></div>
-              <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-6">
+              <div className={filterFieldClass}>
+                <Label htmlFor="admin-request-from">Agendado de</Label>
+                <Input id="admin-request-from" className={filterControlClass} type="date" value={form.scheduledFrom} onChange={(event) => setForm((current) => ({ ...current, scheduledFrom: event.target.value }))} />
+              </div>
+              <div className={filterFieldClass}>
+                <Label htmlFor="admin-request-to">Agendado até</Label>
+                <Input id="admin-request-to" className={filterControlClass} type="date" min={form.scheduledFrom || undefined} value={form.scheduledTo} onChange={(event) => setForm((current) => ({ ...current, scheduledTo: event.target.value }))} />
+              </div>
+              <div className="col-span-full flex min-w-0 flex-wrap items-center gap-4">
                 <Button type="submit"><Search aria-hidden="true" /> Consultar</Button>
                 <Button type="button" variant="outline" onClick={() => { setForm(initialFilters); resetPagination(); setFilters(initialFilters) }}>Limpar filtros</Button>
               </div>
