@@ -26,12 +26,17 @@ import { ThemeToggle } from '../theme/ThemeToggle'
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
 import { Button } from '../ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu'
+import { MobileNavigationMore } from './MobileNavigationMore'
+
+const mobileLinkClass = 'relative flex min-h-16 min-w-0 max-w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
+const mobileActiveClass = 'bg-accent text-accent-foreground after:absolute after:top-0 after:h-0.5 after:w-8 after:rounded-full after:bg-primary'
 
 export interface LayoutNavigationItem {
   label: string
+  mobileLabel?: string
   href: string
   icon: LucideIcon
-  showOnMobile?: boolean
+  mobilePlacement?: 'more'
   disabled?: boolean
   disabledReason?: string
   disabledLabel?: string
@@ -56,20 +61,22 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
   ],
   professional: [
     { label: 'Início', href: '/profissional', icon: Home },
-    { label: 'Perfil', href: '/profissional/perfil', icon: UserRound },
+    { label: 'Perfil', href: '/profissional/perfil', icon: UserRound, mobilePlacement: 'more' },
     {
       label: 'Análise',
       href: '/profissional/analise',
       icon: ClipboardCheck,
+      mobilePlacement: 'more',
     },
     {
       label: 'Portfólio',
       href: '/profissional/portfolio',
       icon: Images,
-      showOnMobile: false,
+      mobilePlacement: 'more',
     },
     {
       label: 'Disponibilidade',
+      mobileLabel: 'Agenda',
       href: '/profissional/disponibilidade',
       icon: CalendarClock,
     },
@@ -77,7 +84,7 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
       label: 'Oportunidades',
       href: '/profissional/oportunidades',
       icon: Compass,
-      showOnMobile: false,
+      mobilePlacement: 'more',
     },
     {
       label: 'Atendimentos',
@@ -88,6 +95,7 @@ const navigationByMode: Record<AuthenticatedMode, LayoutNavigationItem[]> = {
       label: 'Ajuda',
       href: '/profissional/ajuda',
       icon: CircleHelp,
+      mobilePlacement: 'more',
     },
   ],
   admin: [
@@ -148,9 +156,13 @@ export function AuthenticatedLayout({
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const activePathname = activeNavigationHref ?? location.pathname
-  const mobileNavigationItems = navigation.filter(
-    (item) => item.showOnMobile !== false,
-  )
+  const mobileNavigationItems = navigation.filter((item) => item.mobilePlacement !== 'more')
+  const moreItems = navigation.filter((item) => item.mobilePlacement === 'more')
+  const activeMore = moreItems.find((item) => isNavigationItemActive(activePathname, item.href))
+  const mobileColumns = mobileNavigationItems.length + Number(moreItems.length > 0)
+  const mobileItemClass = cn(mobileLinkClass, mode === 'professional'
+    ? 'px-0.5 min-[375px]:text-xs'
+    : 'overflow-hidden focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25')
   const initials = userName
     .split(' ')
     .slice(0, 2)
@@ -179,9 +191,9 @@ export function AuthenticatedLayout({
   const mobileNavigation = (
     <nav
       aria-label={`${modeLabels[mode]} — navegação mobile`}
-      className="fixed right-auto bottom-0 left-0 z-40 grid min-h-16 w-full min-w-0 max-w-full overflow-hidden border-t bg-card/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
+      className={cn('fixed right-auto bottom-0 left-0 z-40 grid min-h-16 w-full min-w-0 max-w-full overflow-hidden border-t bg-card/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden', mode === 'professional' && 'px-1')}
       style={{
-        gridTemplateColumns: `repeat(${mobileNavigationItems.length}, minmax(0, 1fr))`,
+        gridTemplateColumns: `repeat(${mobileColumns}, minmax(0, 1fr))`,
         width: 'min(100dvw, 100%)',
         maxWidth: 'min(100dvw, 100%)',
       }}
@@ -207,17 +219,18 @@ export function AuthenticatedLayout({
           <Link
             key={`${item.href}-${item.label}`}
             to={item.href}
+            aria-label={item.mobileLabel?.replaceAll('\u00ad', '')}
             aria-current={active ? 'page' : undefined}
-            className={cn(
-              'relative flex min-h-16 min-w-0 max-w-full cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-sm px-1 text-[0.68rem] font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25',
-              active && 'bg-accent text-accent-foreground after:absolute after:top-0 after:h-0.5 after:w-8 after:rounded-full after:bg-primary',
-            )}
+            className={cn(mobileItemClass, active && mobileActiveClass)}
           >
             <Icon className="size-5" aria-hidden="true" />
-            <span className="max-w-full truncate">{item.label}</span>
+            <span className={cn('max-w-full', mode === 'professional' ? 'text-center wrap-anywhere leading-tight' : 'truncate')}>{item.mobileLabel ?? item.label}</span>
           </Link>
         )
       })}
+      {moreItems.length > 0 ? (
+        <MobileNavigationMore items={moreItems} activeHref={activeMore?.href} className={cn(mobileItemClass, activeMore && mobileActiveClass)} />
+      ) : null}
     </nav>
   )
 

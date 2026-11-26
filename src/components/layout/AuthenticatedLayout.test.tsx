@@ -75,7 +75,8 @@ describe('layouts autenticados', () => {
     expect(screen.getAllByText('Meus pedidos')).toHaveLength(2)
   })
 
-  it('mantém cadastro, análise e ajuda acessíveis e oportunidades condicionadas', () => {
+  it('prioriza três atalhos e mantém as outras seções no menu Mais', async () => {
+    const user = userEvent.setup()
     renderLayout(
       '/profissional',
       <ProfessionalLayout pageTitle="Início">
@@ -83,22 +84,33 @@ describe('layouts autenticados', () => {
       </ProfessionalLayout>,
     )
 
-    expect(screen.getAllByRole('link', { name: 'Perfil' })).toHaveLength(2)
-    expect(screen.getAllByRole('link', { name: 'Análise' })).toHaveLength(2)
-    expect(screen.getAllByRole('link', { name: 'Ajuda' })).toHaveLength(2)
-    expect(screen.getAllByRole('link', { name: 'Ajuda' })[0]).toHaveAttribute(
-      'href',
-      '/profissional/ajuda',
-    )
-    expect(screen.getByRole('link', { name: 'Oportunidades' })).toHaveAttribute(
-      'href',
-      '/profissional/oportunidades',
-    )
-    expect(screen.queryByText('Mensagens')).not.toBeInTheDocument()
-    expect(screen.getByText('Conteúdo profissional')).toBeInTheDocument()
+    const nav = within(screen.getByRole('navigation', { name: 'Área profissional — navegação mobile' }))
+    expect(nav.getAllByRole('link')).toHaveLength(3)
+    expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page')
+    expect(nav.getByRole('link', { name: 'Agenda' })).toHaveAttribute('href', '/profissional/disponibilidade')
+    expect(nav.getByRole('link', { name: 'Atendimentos' })).toBeInTheDocument()
+    const more = nav.getByRole('button', { name: 'Mais opções' })
+    more.focus()
+    await user.keyboard('{Enter}')
+
+    const panel = within(screen.getByRole('dialog', { name: 'Mais opções' }))
+    for (const [label, route] of Object.entries({
+      Perfil: 'perfil', Análise: 'analise', Portfólio: 'portfolio', Oportunidades: 'oportunidades', Ajuda: 'ajuda',
+    })) {
+      expect(panel.getByRole('link', { name: label })).toHaveAttribute('href', `/profissional/${route}`)
+    }
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(more).toHaveFocus())
+
+    await user.click(more)
+    await user.click(within(screen.getByRole('dialog')).getByRole('link', { name: 'Ajuda' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(more).toHaveAttribute('aria-current', 'true')
   })
 
-  it('destaca o portfólio somente na sidebar e não mantém Perfil ativo', () => {
+  it('destaca o portfólio na sidebar e no menu Mais', async () => {
+    const user = userEvent.setup()
     renderLayout(
       '/profissional/portfolio',
       <ProfessionalLayout
@@ -123,6 +135,13 @@ describe('layouts autenticados', () => {
         }),
       ).queryByRole('link', { name: 'Portfólio' }),
     ).not.toBeInTheDocument()
+
+    const more = screen.getByRole('button', { name: 'Mais opções' })
+    expect(more).toHaveAttribute('aria-current', 'true')
+    await user.click(more)
+    const menu = within(screen.getByRole('dialog', { name: 'Mais opções' }))
+    expect(menu.getByRole('link', { name: 'Portfólio' })).toHaveAttribute('aria-current', 'page')
+    expect(menu.getByRole('link', { name: 'Perfil' })).not.toHaveAttribute('aria-current')
   })
 
   it('mantém a navegação mobile presa à viewport com o portfólio aberto', () => {
